@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BBchannel Console</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">BB</span>
+          <span>BBchannel</span>
+        </div>
+        <div class="connection-strip">
+          <select id="backend-select" class="field compact" aria-label="Backend"></select>
+          <select id="device-list" class="field device-field" aria-label="Device"></select>
+          <button id="refresh-devices" class="icon-button" type="button" title="Refresh devices" aria-label="Refresh devices">↻</button>
+          <button id="connect-device" class="primary-button" type="button">Connect</button>
+          <button id="disconnect-device" class="ghost-button" type="button">Disconnect</button>
+        </div>
+        <div id="connection-state" class="status-pill">Disconnected</div>
+      </header>
+
+      <section class="workspace">
+        <aside class="tool-panel">
+          <section class="panel-section">
+            <div class="section-label">Screenshot</div>
+            <button id="snapshot-button" class="tool-button" type="button">Capture</button>
+            <button id="clear-screenshot" class="ghost-button wide" type="button">Clear</button>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-label">Recognition</div>
+            <select id="template-select" class="field" aria-label="Template"></select>
+            <label class="input-row">
+              <span>Threshold</span>
+              <input id="threshold-input" class="field number-field" type="number" min="0" max="1" step="0.01" value="0.80">
+            </label>
+            <button id="match-button" class="tool-button" type="button">Match</button>
+            <div id="match-result" class="result-box">No match</div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-label">Tap</div>
+            <div class="coordinate-grid">
+              <label>
+                <span>X</span>
+                <input id="tap-x" class="field" type="number" min="0" value="0">
+              </label>
+              <label>
+                <span>Y</span>
+                <input id="tap-y" class="field" type="number" min="0" value="0">
+              </label>
+            </div>
+            <button id="tap-button" class="tool-button" type="button">Tap</button>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-label">Swipe</div>
+            <div class="coordinate-grid">
+              <label><span>X1</span><input id="swipe-x1" class="field" type="number" min="0" value="0"></label>
+              <label><span>Y1</span><input id="swipe-y1" class="field" type="number" min="0" value="0"></label>
+              <label><span>X2</span><input id="swipe-x2" class="field" type="number" min="0" value="0"></label>
+              <label><span>Y2</span><input id="swipe-y2" class="field" type="number" min="0" value="0"></label>
+            </div>
+            <label class="input-row">
+              <span>Duration</span>
+              <input id="swipe-duration" class="field number-field" type="number" min="0" step="50" value="300">
+            </label>
+            <button id="swipe-button" class="tool-button" type="button">Swipe</button>
+          </section>
+        </aside>
+
+        <section class="screen-panel">
+          <div class="screen-toolbar">
+            <div>
+              <div class="section-label">Screen</div>
+              <div id="screen-meta" class="screen-meta">No capture</div>
+            </div>
+            <div class="screen-actions">
+              <button id="fit-screen" class="ghost-button" type="button">Fit</button>
+              <button id="actual-screen" class="ghost-button" type="button">100%</button>
+            </div>
+          </div>
+          <div id="screen-stage" class="screen-stage">
+            <img id="screenshot" alt="Device screenshot">
+            <div id="screen-empty" class="empty-state">No screenshot</div>
+            <div id="match-overlay" class="match-overlay" hidden></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="log-panel">
+        <div class="log-header">
+          <div>
+            <div class="section-label">Event Log</div>
+            <div id="log-count" class="log-count">0 events</div>
+          </div>
+          <button id="refresh-events" class="ghost-button" type="button">Refresh</button>
+        </div>
+        <div id="event-log" class="event-log" aria-live="polite"></div>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
