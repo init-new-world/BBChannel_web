@@ -59,6 +59,24 @@ class DeviceService:
         )
         return self.state()
 
+    def connect_adb_endpoint(self, endpoint: str) -> DeviceInfo:
+        backend = self._backend_for("adb")
+        connect_endpoint = getattr(backend, "connect_endpoint", None)
+        if not callable(connect_endpoint):
+            raise AppError(
+                ErrorCode.ADB_NOT_FOUND,
+                "ADB endpoint connection is not supported.",
+                {"backend": "adb"},
+            )
+
+        device = connect_endpoint(endpoint)
+        self._event_log.info(
+            "adb_connect_endpoint",
+            "ADB endpoint added.",
+            {"endpoint": endpoint, "device_id": device.device_id},
+        )
+        return device
+
     def disconnect(self) -> ConnectionState:
         previous_state = self.state()
         self._backend_name = None

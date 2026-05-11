@@ -1,11 +1,15 @@
 from pathlib import Path
 from subprocess import CompletedProcess
 
+import pytest
+
+from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import (
     AdbBackend,
     AdbDiscoveryConfig,
     candidate_adb_endpoints,
     detect_wsl_host_ip,
+    normalize_adb_endpoint,
     parse_adb_devices,
 )
 
@@ -102,6 +106,52 @@ def test_discovery_config_reads_environment_overrides():
     assert config.scan_hosts == ("auto", "192.168.1.5")
     assert config.scan_ports == (16384, 7555)
     assert config.probe_timeout_seconds == 0.45
+
+
+def test_normalize_adb_endpoint_accepts_host_port():
+    assert normalize_adb_endpoint(" 172.25.208.1:16384 ") == "172.25.208.1:16384"
+
+
+def test_normalize_adb_endpoint_rejects_missing_or_invalid_port():
+    with pytest.raises(AppError) as exc:
+        normalize_adb_endpoint("172.25.208.1")
+
+    assert exc.value.code == ErrorCode.ADB_CONNECT_FAILED
+
+
+def test_connect_endpoint_runs_adb_connect_and_returns_matching_device(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        calls.append(command[1:])
+        args = command[1:]
+        if args == ["connect", "172.25.208.1:16384"]:
+            return CompletedProcess(command, 0, stdout="connected to 172.25.208.1:16384\n", stderr="")
+        if args == ["devices", "-l"]:
+            return CompletedProcess(
+                command,
+                0,
+                stdout=(
+                    "List of devices attached\n"
+                    "172.25.208.1:16384 device product:aurora model:24031PN0DC device:aurora\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {args}")
+
+    backend = AdbBackend(
+        adb_candidates=[candidate],
+        discovery_config=AdbDiscoveryConfig(auto_connect=False, enrich_details=False),
+        run_command=run_command,
+    )
+
+    device = backend.connect_endpoint(" 172.25.208.1:16384 ")
+
+    assert device.device_id == "172.25.208.1:16384"
+    assert device.name == "24031PN0DC"
+    assert calls == [["connect", "172.25.208.1:16384"], ["devices", "-l"]]
 
 
 def test_list_devices_auto_connects_open_candidate_once(tmp_path: Path):

@@ -191,6 +191,35 @@ def parse_adb_devices(output: str) -> list[DeviceInfo]:
     return devices
 
 
+def normalize_adb_endpoint(value: str) -> str:
+    endpoint = value.strip()
+    host, separator, port_value = endpoint.rpartition(":")
+    if not separator:
+        raise _invalid_adb_endpoint(value)
+
+    host = host.strip()
+    port_value = port_value.strip()
+    if not host or not port_value:
+        raise _invalid_adb_endpoint(value)
+    try:
+        port = int(port_value, 10)
+    except ValueError as exc:
+        raise _invalid_adb_endpoint(value) from exc
+    if port <= 0 or port > 65535:
+        raise _invalid_adb_endpoint(value)
+    if any(character.isspace() for character in host):
+        raise _invalid_adb_endpoint(value)
+    return f"{host}:{port}"
+
+
+def _invalid_adb_endpoint(value: str) -> AppError:
+    return AppError(
+        ErrorCode.ADB_CONNECT_FAILED,
+        "ADB endpoint must use host:port.",
+        {"endpoint": value},
+    )
+
+
 def _parse_device_details(parts: list[str]) -> dict[str, str]:
     details: dict[str, str] = {}
     for part in parts:
@@ -237,6 +266,29 @@ class AdbBackend:
             devices = self._list_devices_once()
         enriched_devices = self._enrich_devices(_dedupe_devices(devices))
         return _dedupe_device_aliases(enriched_devices)
+
+    def connect_endpoint(self, endpoint: str) -> DeviceInfo:
+        serial = normalize_adb_endpoint(endpoint)
+        try:
+            self._run(["connect", serial], text=True)
+        except AppError as exc:
+            if exc.code == ErrorCode.ADB_NOT_FOUND and self.adb_path is None:
+                raise
+            raise AppError(
+                ErrorCode.ADB_CONNECT_FAILED,
+                "ADB endpoint could not be connected.",
+                {"endpoint": serial, "reason": exc.message},
+            ) from exc
+
+        devices = self._enrich_devices(_dedupe_devices(self._list_devices_once()))
+        device = next((candidate for candidate in devices if candidate.device_id == serial), None)
+        if device is None:
+            raise AppError(
+                ErrorCode.ADB_NO_DEVICES,
+                "ADB endpoint did not appear in adb devices.",
+                {"endpoint": serial},
+            )
+        return device
 
     def snapshot(self, device_id: str) -> bytes:
         return self._run(["-s", device_id, "exec-out", "screencap", "-p"]).stdout

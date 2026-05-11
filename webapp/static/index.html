@@ -16,6 +16,8 @@
         <div class="connection-strip">
           <select id="backend-select" class="field compact" aria-label="Backend"></select>
           <select id="device-list" class="field device-field" aria-label="Device"></select>
+          <input id="manual-adb-endpoint" class="field endpoint-field" type="text" inputmode="url" placeholder="host:port" aria-label="ADB endpoint">
+          <button id="add-adb-endpoint" class="ghost-button" type="button">Add ADB</button>
           <button id="refresh-devices" class="icon-button" type="button" title="Refresh devices" aria-label="Refresh devices">↻</button>
           <button id="connect-device" class="primary-button" type="button">Connect</button>
           <button id="disconnect-device" class="ghost-button" type="button">Disconnect</button>

@@ -11,7 +11,7 @@ if FASTAPI_AVAILABLE:
 else:
     TestClient = object
 
-from webapp.core.models import Capability
+from webapp.core.models import Capability, DeviceInfo
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 
@@ -26,7 +26,24 @@ class FakeBackend:
         return []
 
 
-def _client(tmp_path: Path) -> TestClient:
+class FakeAdbBackend(FakeBackend):
+    name = "adb"
+
+    def __init__(self) -> None:
+        self.requested_endpoint: str | None = None
+
+    def connect_endpoint(self, endpoint: str) -> DeviceInfo:
+        self.requested_endpoint = endpoint
+        return DeviceInfo(
+            backend="adb",
+            device_id="172.25.208.1:16384",
+            name="Xiaomi 24031PN0DC",
+            status="device",
+            source="adb-manual",
+        )
+
+
+def _client(tmp_path: Path, device_service: DeviceService | None = None) -> TestClient:
     from webapp.app import create_app
 
     assets = tmp_path / "assets"
@@ -34,7 +51,7 @@ def _client(tmp_path: Path) -> TestClient:
     assets.mkdir()
     data.mkdir()
     event_log = EventLog()
-    device_service = DeviceService([FakeBackend()], event_log)
+    device_service = device_service or DeviceService([FakeBackend()], event_log)
     app = create_app(
         assets_dir=assets,
         data_dir=data,
@@ -75,6 +92,18 @@ def test_tap_route_returns_structured_error_when_disconnected(tmp_path: Path):
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "device_not_connected"
+
+
+def test_adb_connect_endpoint_route_returns_connected_device(tmp_path: Path):
+    event_log = EventLog()
+    backend = FakeAdbBackend()
+    client = _client(tmp_path, DeviceService([backend], event_log))
+
+    response = client.post("/api/adb/connect-endpoint", json={"endpoint": "172.25.208.1:16384"})
+
+    assert response.status_code == 200
+    assert response.json()["device"]["device_id"] == "172.25.208.1:16384"
+    assert backend.requested_endpoint == "172.25.208.1:16384"
 
 
 def test_match_route_returns_missing_template_error(tmp_path: Path):

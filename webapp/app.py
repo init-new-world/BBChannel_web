@@ -26,6 +26,10 @@ class ConnectRequest(BaseModel):
     device_id: str
 
 
+class AdbEndpointRequest(BaseModel):
+    endpoint: str = Field(min_length=1)
+
+
 class TapRequest(BaseModel):
     x: int
     y: int
@@ -92,6 +96,10 @@ def create_app(
     @app.post("/api/connect")
     def connect(request: ConnectRequest) -> dict:
         return device_service.connect(request.backend, request.device_id).to_dict()
+
+    @app.post("/api/adb/connect-endpoint")
+    def connect_adb_endpoint(request: AdbEndpointRequest) -> dict:
+        return {"device": device_service.connect_adb_endpoint(request.endpoint).to_dict()}
 
     @app.post("/api/disconnect")
     def disconnect() -> dict:

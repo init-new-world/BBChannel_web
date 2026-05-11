@@ -118,6 +118,11 @@ select:disabled {
   max-width: 360px;
 }
 
+.endpoint-field {
+  min-width: 140px;
+  max-width: 210px;
+}
+
 .primary-button,
 .tool-button,
 .ghost-button,
@@ -407,7 +412,8 @@ select:disabled {
   }
 
   .compact,
-  .device-field {
+  .device-field,
+  .endpoint-field {
     min-width: 0;
     max-width: none;
     flex: 1 1 150px;

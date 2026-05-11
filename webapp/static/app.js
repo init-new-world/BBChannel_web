@@ -11,6 +11,8 @@ const state = {
 const els = {
   backendSelect: document.querySelector("#backend-select"),
   deviceList: document.querySelector("#device-list"),
+  manualAdbEndpoint: document.querySelector("#manual-adb-endpoint"),
+  addAdbEndpoint: document.querySelector("#add-adb-endpoint"),
   refreshDevices: document.querySelector("#refresh-devices"),
   connectDevice: document.querySelector("#connect-device"),
   disconnectDevice: document.querySelector("#disconnect-device"),
@@ -74,8 +76,16 @@ async function init() {
 }
 
 function bindEvents() {
-  els.backendSelect.addEventListener("change", renderDevices);
-  els.refreshDevices.addEventListener("click", loadDevices);
+  els.backendSelect.addEventListener("change", () => renderDevices());
+  els.refreshDevices.addEventListener("click", () => loadDevices());
+  els.addAdbEndpoint.addEventListener("click", addManualAdbEndpoint);
+  els.manualAdbEndpoint.addEventListener("input", updateControls);
+  els.manualAdbEndpoint.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addManualAdbEndpoint();
+    }
+  });
   els.connectDevice.addEventListener("click", connect);
   els.disconnectDevice.addEventListener("click", disconnect);
   els.snapshotButton.addEventListener("click", captureScreenshot);
@@ -102,16 +112,6 @@ async function loadCapabilities() {
       return option;
     }),
   );
-}
-
-async function loadDevices() {
-  try {
-    const payload = await api("/api/devices");
-    state.devices = payload.devices || [];
-    renderDevices();
-  } catch (error) {
-    showError(error);
-  }
 }
 
 async function loadConnectionState() {
@@ -142,8 +142,19 @@ async function loadTemplates() {
   }
 }
 
-function renderDevices() {
+async function loadDevices(preferredDeviceId = "") {
+  try {
+    const payload = await api("/api/devices");
+    state.devices = payload.devices || [];
+    renderDevices(preferredDeviceId);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function renderDevices(preferredDeviceId = "") {
   const backend = els.backendSelect.value;
+  const selectedDeviceId = preferredDeviceId || els.deviceList.value;
   const devices = state.devices.filter((device) => !backend || device.backend === backend);
   els.deviceList.replaceChildren(
     ...devices.map((device) => {
@@ -154,7 +165,37 @@ function renderDevices() {
       return option;
     }),
   );
+  if (selectedDeviceId) {
+    els.deviceList.value = selectedDeviceId;
+  }
   updateControls();
+}
+
+async function addManualAdbEndpoint() {
+  const endpoint = els.manualAdbEndpoint.value.trim();
+  if (!endpoint) {
+    return;
+  }
+
+  try {
+    const payload = await api("/api/adb/connect-endpoint", {
+      method: "POST",
+      body: JSON.stringify({ endpoint }),
+    });
+    const device = payload.device;
+    if (device) {
+      selectBackend(device.backend);
+      mergeDevice(device);
+      renderDevices(device.device_id);
+      els.manualAdbEndpoint.value = "";
+      await loadDevices(device.device_id);
+    }
+    await loadEvents();
+  } catch (error) {
+    showError(error);
+  } finally {
+    updateControls();
+  }
 }
 
 async function connect() {
@@ -324,6 +365,9 @@ function updateControls() {
   const hasDevice = Boolean(els.deviceList.value);
   const hasScreenshot = Boolean(state.screenshotBase64);
   const hasTemplate = Boolean(els.templateSelect.value);
+  const adbCapability = state.backends.find((backend) => backend.name === "adb");
+  const canAddAdbEndpoint = Boolean(adbCapability?.available && els.manualAdbEndpoint.value.trim());
+  els.addAdbEndpoint.disabled = !canAddAdbEndpoint;
   els.connectDevice.disabled = !hasDevice || state.connected;
   els.disconnectDevice.disabled = !state.connected;
   els.snapshotButton.disabled = !state.connected;
@@ -331,6 +375,24 @@ function updateControls() {
   els.matchButton.disabled = !hasScreenshot || !hasTemplate;
   els.tapButton.disabled = !state.connected;
   els.swipeButton.disabled = !state.connected;
+}
+
+function mergeDevice(device) {
+  const index = state.devices.findIndex(
+    (candidate) => candidate.backend === device.backend && candidate.device_id === device.device_id,
+  );
+  if (index === -1) {
+    state.devices.push(device);
+    return;
+  }
+  state.devices[index] = device;
+}
+
+function selectBackend(name) {
+  const hasBackend = Array.from(els.backendSelect.options).some((option) => option.value === name);
+  if (hasBackend) {
+    els.backendSelect.value = name;
+  }
 }
 
 function onScreenshotLoaded() {

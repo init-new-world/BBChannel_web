@@ -9,6 +9,7 @@ class ErrorCode(str, Enum):
     ADB_TIMEOUT = "adb_timeout"
     ADB_NO_DEVICES = "adb_no_devices"
     ADB_DEVICE_OFFLINE = "adb_device_offline"
+    ADB_CONNECT_FAILED = "adb_connect_failed"
     DEVICE_NOT_CONNECTED = "device_not_connected"
     SNAPSHOT_FAILED = "snapshot_failed"
     TAP_FAILED = "tap_failed"
