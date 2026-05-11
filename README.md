@@ -8,13 +8,36 @@ This project is a Web proof of concept for the BBchannel automation stack. It st
 python -m pip install -r requirements.txt
 ```
 
+FastAPI and Uvicorn are required to run the local web server. OpenCV and NumPy are required for template matching. ADB is discovered from the parent BBchannel `adb/` directory or from `PATH`.
+
 ## Run
 
 ```bash
 python -m webapp
 ```
 
-Open the printed local URL in a browser.
+Open `http://127.0.0.1:8000` in a browser.
+
+## Verify
+
+```bash
+python -m pytest -q
+node --check webapp/static/app.js
+```
+
+If optional runtime dependencies are missing, dependency-specific tests skip instead of failing. Install `requirements.txt` before running the server smoke test:
+
+```bash
+python -m webapp
+```
+
+Manual smoke steps:
+
+1. Open `http://127.0.0.1:8000`.
+2. Confirm `/api/health` returns `{"ok": true}`.
+3. Confirm capabilities load for ADB and MuMu.
+4. Connect an online ADB device or emulator.
+5. Capture a screenshot, select a template, run match, send a tap, send a swipe, and check the event log.
 
 ## Scope
 
