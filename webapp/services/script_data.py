@@ -12,6 +12,7 @@ from webapp.core.errors import AppError, ErrorCode
 VALID_SERVERS = {"CH", "CNTW", "JP"}
 TURN_FIELD_RE = re.compile(r"^round(?P<round>\d+)_turn(?P<turn>\d+)_(skill|np|strategy|condition|replace)$")
 SETTING_STRATEGY_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_strategy|extraStrategy)$")
+ROUND_NUMBER_RE = re.compile(r"^round(?P<round>\d+)_")
 
 
 class ScriptDataService:
@@ -40,6 +41,33 @@ class ScriptDataService:
             "config": config,
             "summary": self._setting_summary(config),
             "validation": validation,
+        }
+
+    def get_setting_plan(self, name: str) -> dict[str, Any]:
+        detail = self.get_setting(name)
+        config = detail["config"]
+        rounds = self._build_rounds(config)
+        action_count = sum(
+            len(turn["actions"])
+            for round_plan in rounds
+            for turn in round_plan["turns"]
+        )
+        return {
+            "name": detail["name"],
+            "path": detail["path"],
+            "server": config.get("server"),
+            "servants": self._plan_servants(config),
+            "master": {
+                "equip": config.get("master_equip"),
+                "sex": config.get("master_sex"),
+            },
+            "rounds": rounds,
+            "summary": {
+                **detail["summary"],
+                "round_count": len(rounds),
+                "action_count": action_count,
+            },
+            "validation": detail["validation"],
         }
 
     def list_strategies(self) -> list[dict[str, str]]:
@@ -192,6 +220,98 @@ class ScriptDataService:
                 continue
             count += len(value) if isinstance(value, list) else 1
         return count
+
+    def _plan_servants(self, config: dict[str, Any]) -> list[dict[str, Any]]:
+        active_slots = {
+            slot
+            for slot in config.get("usedServant", [])
+            if isinstance(slot, int)
+        }
+        return [
+            {
+                "slot": slot,
+                "name": config.get(f"servant_{slot}_name"),
+                "active": slot in active_slots,
+            }
+            for slot in range(6)
+        ]
+
+    def _build_rounds(self, config: dict[str, Any]) -> list[dict[str, Any]]:
+        rounds: list[dict[str, Any]] = []
+        for round_number in self._round_numbers(config):
+            turns = [
+                self._build_turn(config, round_number, turn_number)
+                for turn_number in range(self._turn_count(config, round_number))
+            ]
+            if not turns:
+                continue
+            rounds.append(
+                {
+                    "round": round_number,
+                    "extra_skill": config.get(f"round{round_number}_extraSkill", []),
+                    "extra_strategy": config.get(f"round{round_number}_extraStrategy"),
+                    "turns": turns,
+                }
+            )
+        return rounds
+
+    def _round_numbers(self, config: dict[str, Any]) -> list[int]:
+        rounds = {
+            int(match.group("round"))
+            for key in config
+            if (match := ROUND_NUMBER_RE.match(key))
+        }
+        return sorted(rounds)
+
+    def _turn_count(self, config: dict[str, Any], round_number: int) -> int:
+        declared = config.get(f"round{round_number}_turns")
+        field_turns = [
+            int(match.group("turn")) + 1
+            for key in config
+            if (match := TURN_FIELD_RE.match(key)) and int(match.group("round")) == round_number
+        ]
+        counts = field_turns
+        if isinstance(declared, int):
+            counts.append(declared)
+        return max(counts, default=0)
+
+    def _build_turn(self, config: dict[str, Any], round_number: int, turn_number: int) -> dict[str, Any]:
+        prefix = f"round{round_number}_turn{turn_number}"
+        skills = self._list_value(config.get(f"{prefix}_skill"))
+        nps = self._list_value(config.get(f"{prefix}_np"))
+        strategy = config.get(f"{prefix}_strategy")
+        condition = config.get(f"{prefix}_condition")
+        replace = config.get(f"{prefix}_replace")
+        return {
+            "round": round_number,
+            "turn": turn_number,
+            "skills": skills,
+            "nps": nps,
+            "strategy": strategy,
+            "condition": condition,
+            "replace": replace,
+            "actions": self._turn_actions(skills, nps, strategy, replace),
+        }
+
+    def _turn_actions(
+        self,
+        skills: list[Any],
+        nps: list[Any],
+        strategy: Any,
+        replace: Any,
+    ) -> list[dict[str, Any]]:
+        actions: list[dict[str, Any]] = []
+        if replace:
+            actions.append({"type": "replace", "replacements": replace})
+        actions.extend({"type": "skill", "command": skill} for skill in skills)
+        actions.extend({"type": "np", "servant": np} for np in nps)
+        if strategy:
+            actions.append({"type": "strategy", "strategies": strategy})
+        return actions
+
+    @staticmethod
+    def _list_value(value: Any) -> list[Any]:
+        return value if isinstance(value, list) else []
 
     def _validate_strategy_file(self, entries: Any) -> dict[str, Any]:
         errors: list[dict[str, str]] = []

@@ -2,10 +2,14 @@ const state = {
   connected: false,
   backends: [],
   devices: [],
+  settings: [],
+  strategies: [],
   screenshotUrl: null,
   screenshotBase64: "",
   screenshotNaturalSize: null,
   latestMatch: null,
+  selectedSettingPlan: null,
+  selectedStrategy: null,
 };
 
 const els = {
@@ -17,6 +21,11 @@ const els = {
   connectDevice: document.querySelector("#connect-device"),
   disconnectDevice: document.querySelector("#disconnect-device"),
   connectionState: document.querySelector("#connection-state"),
+  settingSelect: document.querySelector("#setting-select"),
+  settingValidation: document.querySelector("#setting-validation"),
+  settingPlan: document.querySelector("#setting-plan"),
+  strategySelect: document.querySelector("#strategy-select"),
+  strategySummary: document.querySelector("#strategy-summary"),
   snapshotButton: document.querySelector("#snapshot-button"),
   clearScreenshot: document.querySelector("#clear-screenshot"),
   templateSelect: document.querySelector("#template-select"),
@@ -70,7 +79,14 @@ async function api(path, options = {}) {
 
 async function init() {
   bindEvents();
-  await Promise.allSettled([loadCapabilities(), loadDevices(), loadTemplates(), loadEvents()]);
+  await Promise.allSettled([
+    loadCapabilities(),
+    loadDevices(),
+    loadSettings(),
+    loadStrategies(),
+    loadTemplates(),
+    loadEvents(),
+  ]);
   await loadConnectionState();
   updateControls();
 }
@@ -88,6 +104,8 @@ function bindEvents() {
   });
   els.connectDevice.addEventListener("click", connect);
   els.disconnectDevice.addEventListener("click", disconnect);
+  els.settingSelect.addEventListener("change", loadSelectedSettingPlan);
+  els.strategySelect.addEventListener("change", loadSelectedStrategy);
   els.snapshotButton.addEventListener("click", captureScreenshot);
   els.clearScreenshot.addEventListener("click", clearScreenshot);
   els.matchButton.addEventListener("click", matchTemplate);
@@ -138,6 +156,81 @@ async function loadTemplates() {
       }),
     );
   } catch (error) {
+    showError(error);
+  }
+}
+
+async function loadSettings() {
+  try {
+    const payload = await api("/api/settings");
+    state.settings = payload.settings || [];
+    els.settingSelect.replaceChildren(
+      ...state.settings.map((setting) => {
+        const option = document.createElement("option");
+        option.value = setting.name;
+        option.textContent = setting.name;
+        return option;
+      }),
+    );
+    await loadSelectedSettingPlan();
+  } catch (error) {
+    els.settingValidation.textContent = "Settings unavailable";
+    els.settingValidation.classList.add("error");
+    showError(error);
+  }
+}
+
+async function loadSelectedSettingPlan() {
+  const name = els.settingSelect.value;
+  if (!name) {
+    state.selectedSettingPlan = null;
+    renderSettingPlan(null);
+    return;
+  }
+
+  try {
+    state.selectedSettingPlan = await api(`/api/settings/${encodeURIComponent(name)}/plan`);
+    renderSettingPlan(state.selectedSettingPlan);
+  } catch (error) {
+    state.selectedSettingPlan = null;
+    renderSettingPlan(null);
+    showError(error);
+  }
+}
+
+async function loadStrategies() {
+  try {
+    const payload = await api("/api/strategies");
+    state.strategies = payload.strategies || [];
+    els.strategySelect.replaceChildren(
+      ...state.strategies.map((strategy) => {
+        const option = document.createElement("option");
+        option.value = strategy.name;
+        option.textContent = strategy.name;
+        return option;
+      }),
+    );
+    await loadSelectedStrategy();
+  } catch (error) {
+    els.strategySummary.textContent = "Strategies unavailable";
+    showError(error);
+  }
+}
+
+async function loadSelectedStrategy() {
+  const name = els.strategySelect.value;
+  if (!name) {
+    state.selectedStrategy = null;
+    renderStrategyDetail(null);
+    return;
+  }
+
+  try {
+    state.selectedStrategy = await api(`/api/strategies/${encodeURIComponent(name)}`);
+    renderStrategyDetail(state.selectedStrategy);
+  } catch (error) {
+    state.selectedStrategy = null;
+    renderStrategyDetail(null);
     showError(error);
   }
 }
@@ -351,6 +444,54 @@ function renderEvent(event) {
   return row;
 }
 
+function renderSettingPlan(plan) {
+  els.settingValidation.classList.remove("ok", "error");
+  if (!plan) {
+    els.settingValidation.textContent = "No setting";
+    els.settingPlan.textContent = "No script selected";
+    return;
+  }
+
+  const errorCount = plan.validation?.errors?.length || 0;
+  const warningCount = plan.validation?.warnings?.length || 0;
+  const isValid = Boolean(plan.validation?.ok);
+  els.settingValidation.textContent = isValid
+    ? `Valid · ${plan.summary.round_count} rounds · ${plan.summary.action_count} actions`
+    : `${errorCount} errors · ${warningCount} warnings`;
+  els.settingValidation.classList.add(isValid ? "ok" : "error");
+
+  const servantText = plan.servants
+    .filter((servant) => servant.name)
+    .map((servant) => `${servant.slot + 1}:${servant.name}${servant.active ? "*" : ""}`)
+    .join(" / ");
+  const lines = [
+    `${plan.server || "Unknown"} · ${plan.name}`,
+    `Servants: ${servantText || "None"}`,
+    `Master: ${plan.master.equip ?? "-"} · sex ${plan.master.sex ?? "-"}`,
+  ];
+  for (const round of plan.rounds) {
+    lines.push(`R${round.round}: ${round.turns.length} turns`);
+    for (const turn of round.turns) {
+      const actions = turn.actions.map(formatPlanAction).join(", ") || "No actions";
+      lines.push(`  T${turn.turn}: ${actions}`);
+    }
+  }
+  els.settingPlan.textContent = lines.join("\n");
+}
+
+function renderStrategyDetail(strategy) {
+  if (!strategy) {
+    els.strategySummary.textContent = "No strategy selected";
+    return;
+  }
+  const status = strategy.validation?.ok ? "Valid" : `${strategy.validation?.errors?.length || 0} errors`;
+  const tags = (strategy.entries || []).map((entry) => entry.tag).filter(Boolean);
+  els.strategySummary.textContent = [
+    `${status} · ${strategy.summary.entry_count} entries`,
+    tags.slice(0, 4).join("\n") || strategy.name,
+  ].join("\n");
+}
+
 function setConnectionLabel(payload) {
   if (payload.connected) {
     els.connectionState.textContent = `${payload.backend} · ${payload.device_id}`;
@@ -359,6 +500,26 @@ function setConnectionLabel(payload) {
   }
   els.connectionState.textContent = "Disconnected";
   els.connectionState.classList.remove("connected");
+}
+
+function formatPlanAction(action) {
+  if (action.type === "replace") {
+    return "replace";
+  }
+  if (action.type === "skill") {
+    return `skill ${formatCommand(action.command)}`;
+  }
+  if (action.type === "np") {
+    return `np ${formatCommand(action.servant)}`;
+  }
+  if (action.type === "strategy") {
+    return `strategy ${action.strategies?.length || 0}`;
+  }
+  return action.type || "action";
+}
+
+function formatCommand(value) {
+  return Array.isArray(value) ? value.join(":") : String(value);
 }
 
 function updateControls() {

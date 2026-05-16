@@ -17,10 +17,16 @@ def test_operator_console_references_api_controls():
     assert 'id="screenshot"' in index
     assert 'id="device-list"' in index
     assert 'id="manual-adb-endpoint"' in index
+    assert 'id="setting-select"' in index
+    assert 'id="setting-plan"' in index
+    assert 'id="strategy-select"' in index
     assert 'id="template-select"' in index
     assert 'id="event-log"' in index
     assert "/api/capabilities" in script
     assert "/api/adb/connect-endpoint" in script
+    assert "/api/settings" in script
+    assert "/api/strategies" in script
+    assert "/plan" in script
     assert "/api/snapshot" in script
     assert "/api/match" in script
     assert "/api/tap" in script

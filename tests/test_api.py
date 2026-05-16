@@ -128,6 +128,33 @@ def test_settings_routes_expose_data_dir_configs(tmp_path: Path):
     assert detail_response.json()["validation"]["ok"] is True
 
 
+def test_setting_plan_route_exposes_normalized_actions(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [1],
+            "round1_turn0_np": [1],
+        },
+    )
+
+    response = client.get("/api/settings/demo/plan")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "demo"
+    assert payload["rounds"][0]["turns"][0]["actions"] == [
+        {"type": "skill", "command": 1},
+        {"type": "np", "servant": 1},
+    ]
+    assert payload["summary"]["action_count"] == 2
+
+
 def test_strategy_routes_expose_data_dir_presets(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

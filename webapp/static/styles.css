@@ -264,6 +264,30 @@ select:disabled {
   line-height: 1.35;
 }
 
+.detail-box {
+  max-height: 180px;
+  overflow: auto;
+  align-content: start;
+  white-space: pre-wrap;
+}
+
+.status-line {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-line.ok {
+  color: var(--ok);
+}
+
+.status-line.error {
+  color: var(--danger);
+}
+
 .screen-panel {
   min-width: 0;
   min-height: 0;

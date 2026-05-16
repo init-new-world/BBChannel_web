@@ -138,6 +138,10 @@ def create_app(
     def setting_detail(name: str) -> dict:
         return script_data.get_setting(name)
 
+    @app.get("/api/settings/{name}/plan")
+    def setting_plan(name: str) -> dict:
+        return script_data.get_setting_plan(name)
+
     @app.get("/api/strategies")
     def strategies() -> dict[str, list[dict[str, str]]]:
         return {"strategies": script_data.list_strategies()}

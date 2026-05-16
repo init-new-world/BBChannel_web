@@ -28,6 +28,19 @@
       <section class="workspace">
         <aside class="tool-panel">
           <section class="panel-section">
+            <div class="section-label">Script</div>
+            <select id="setting-select" class="field" aria-label="Script setting"></select>
+            <div id="setting-validation" class="status-line">No setting</div>
+            <div id="setting-plan" class="result-box detail-box">No script selected</div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-label">Strategy</div>
+            <select id="strategy-select" class="field" aria-label="Strategy preset"></select>
+            <div id="strategy-summary" class="result-box detail-box">No strategy selected</div>
+          </section>
+
+          <section class="panel-section">
             <div class="section-label">Screenshot</div>
             <button id="snapshot-button" class="tool-button" type="button">Capture</button>
             <button id="clear-screenshot" class="ghost-button wide" type="button">Clear</button>

@@ -73,6 +73,76 @@ def test_get_setting_returns_config_summary_and_validation(tmp_path: Path):
     assert detail["validation"] == {"ok": True, "errors": [], "warnings": []}
 
 
+def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {
+            "Servant A": {"other_name": [], "class": "Caster", "SN": "100"},
+            "Support B": {"other_name": ["B"], "class": "Rider", "SN": "101"},
+        },
+    )
+    strategy = _strategy_payload()
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "servant_1_name": "B",
+            "servant_2_name": None,
+            "usedServant": [0, 1],
+            "master_equip": 7,
+            "master_sex": 1,
+            "round1_extraSkill": [["extra", 1]],
+            "round1_extraStrategy": [strategy],
+            "round1_turns": 2,
+            "round1_turn0_replace": {"2": 4, "4": None},
+            "round1_turn0_skill": [1, [2, 1]],
+            "round1_turn0_np": [1],
+            "round1_turn0_strategy": [strategy],
+            "round1_turn0_condition": {"card": "1B"},
+            "round1_turn1_skill": [],
+            "round1_turn1_np": [],
+            "round2_turns": 0,
+        },
+    )
+
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+
+    assert plan["name"] == "demo"
+    assert plan["server"] == "CH"
+    assert plan["validation"]["ok"] is True
+    assert plan["servants"] == [
+        {"slot": 0, "name": "Servant A", "active": True},
+        {"slot": 1, "name": "B", "active": True},
+        {"slot": 2, "name": None, "active": False},
+        {"slot": 3, "name": None, "active": False},
+        {"slot": 4, "name": None, "active": False},
+        {"slot": 5, "name": None, "active": False},
+    ]
+    assert plan["master"] == {"equip": 7, "sex": 1}
+    assert plan["rounds"][0]["round"] == 1
+    assert plan["rounds"][0]["extra_skill"] == [["extra", 1]]
+    assert plan["rounds"][0]["extra_strategy"] == [strategy]
+    assert plan["rounds"][0]["turns"][0] == {
+        "round": 1,
+        "turn": 0,
+        "skills": [1, [2, 1]],
+        "nps": [1],
+        "strategy": [strategy],
+        "condition": {"card": "1B"},
+        "replace": {"2": 4, "4": None},
+        "actions": [
+            {"type": "replace", "replacements": {"2": 4, "4": None}},
+            {"type": "skill", "command": 1},
+            {"type": "skill", "command": [2, 1]},
+            {"type": "np", "servant": 1},
+            {"type": "strategy", "strategies": [strategy]},
+        ],
+    }
+    assert plan["summary"]["round_count"] == 1
+    assert plan["summary"]["action_count"] == 5
+
+
 def test_get_setting_reports_unknown_servants(tmp_path: Path):
     _write_json(tmp_path / "servant_info_CH.json", {"Known": {"other_name": []}})
     _write_json(
