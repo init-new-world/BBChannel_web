@@ -16,6 +16,8 @@ class ErrorCode(str, Enum):
     SWIPE_FAILED = "swipe_failed"
     TEMPLATE_NOT_FOUND = "template_not_found"
     TEMPLATE_LOAD_FAILED = "template_load_failed"
+    DATA_FILE_NOT_FOUND = "data_file_not_found"
+    DATA_FILE_INVALID = "data_file_invalid"
     OPENCV_UNAVAILABLE = "opencv_unavailable"
     MATCH_FAILED = "match_failed"
     MUMU_UNSUPPORTED_PLATFORM = "mumu_unsupported_platform"

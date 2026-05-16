@@ -16,6 +16,23 @@ from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 
 
+def _write_json(path: Path, payload: object) -> None:
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _strategy_payload() -> dict:
+    return {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 1, "cards": ["1B"], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, False],
+        "colorFirst": True,
+    }
+
+
 class FakeBackend:
     name = "fake"
 
@@ -85,6 +102,59 @@ def test_templates_route(tmp_path: Path):
 
     assert response.status_code == 200
     assert response.json() == {"templates": ["assist/icon.png"]}
+
+
+def test_settings_routes_expose_data_dir_configs(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_strategy": [_strategy_payload()],
+        },
+    )
+
+    list_response = client.get("/api/settings")
+    detail_response = client.get("/api/settings/demo")
+
+    assert list_response.status_code == 200
+    assert list_response.json() == {"settings": [{"name": "demo", "path": "settings/demo.json"}]}
+    assert detail_response.status_code == 200
+    assert detail_response.json()["summary"]["strategy_count"] == 1
+    assert detail_response.json()["validation"]["ok"] is True
+
+
+def test_strategy_routes_expose_data_dir_presets(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "strategy" / "brave.json", [{"tag": "brave", "strategy": _strategy_payload()}])
+
+    list_response = client.get("/api/strategies")
+    detail_response = client.get("/api/strategies/brave")
+
+    assert list_response.status_code == 200
+    assert list_response.json() == {"strategies": [{"name": "brave", "path": "strategy/brave.json"}]}
+    assert detail_response.status_code == 200
+    assert detail_response.json()["entries"][0]["tag"] == "brave"
+
+
+def test_servant_and_master_routes_expose_catalogs(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": ["A"], "SN": "100"}})
+    _write_json(data / "master_info.json", {"Chaldea": {"SN": 7, "skill_name": ["Heal"]}})
+
+    servants_response = client.get("/api/servants", params={"server": "CH"})
+    masters_response = client.get("/api/masters")
+
+    assert servants_response.status_code == 200
+    assert servants_response.json()["servants"][0]["name"] == "Servant A"
+    assert masters_response.status_code == 200
+    assert masters_response.json()["masters"][0]["name"] == "Chaldea"
 
 
 def test_tap_route_returns_structured_error_when_disconnected(tmp_path: Path):

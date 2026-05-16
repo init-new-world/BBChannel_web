@@ -1,0 +1,179 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from webapp.core.errors import AppError, ErrorCode
+from webapp.services.script_data import ScriptDataService
+
+
+def _write_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _strategy_payload() -> dict:
+    return {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 1, "cards": ["1B"], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, False],
+        "colorFirst": True,
+    }
+
+
+def test_lists_settings_and_strategies_by_stem(tmp_path: Path):
+    _write_json(tmp_path / "settings" / "beta.json", {})
+    _write_json(tmp_path / "settings" / "alpha.json", {})
+    _write_json(tmp_path / "settings" / "notes.txt", {})
+    _write_json(tmp_path / "strategy" / "brave.json", [])
+
+    service = ScriptDataService(tmp_path)
+
+    assert service.list_settings() == [
+        {"name": "alpha", "path": "settings/alpha.json"},
+        {"name": "beta", "path": "settings/beta.json"},
+    ]
+    assert service.list_strategies() == [
+        {"name": "brave", "path": "strategy/brave.json"},
+    ]
+
+
+def test_get_setting_returns_config_summary_and_validation(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {
+            "Servant A": {"other_name": ["A"], "class": "Caster", "SN": "100"},
+            "Altria Caster": {"other_name": ["Caber"], "class": "Caster", "SN": "101"},
+        },
+    )
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "servant_1_name": "Caber",
+            "servant_2_name": None,
+            "round1_turns": 1,
+            "round1_turn0_skill": [1, [2, 1]],
+            "round1_turn0_np": [1],
+            "round1_turn0_strategy": [_strategy_payload()],
+        },
+    )
+
+    detail = ScriptDataService(tmp_path).get_setting("demo")
+
+    assert detail["name"] == "demo"
+    assert detail["path"] == "settings/demo.json"
+    assert detail["config"]["server"] == "CH"
+    assert detail["summary"]["server"] == "CH"
+    assert detail["summary"]["servants"] == ["Servant A", "Caber"]
+    assert detail["summary"]["turn_count"] == 1
+    assert detail["summary"]["strategy_count"] == 1
+    assert detail["validation"] == {"ok": True, "errors": [], "warnings": []}
+
+
+def test_get_setting_reports_unknown_servants(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CH.json", {"Known": {"other_name": []}})
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {"server": "CH", "servant_0_name": "Missing"},
+    )
+
+    detail = ScriptDataService(tmp_path).get_setting("demo")
+
+    assert detail["validation"]["ok"] is False
+    assert {
+        "code": "unknown_servant",
+        "field": "servant_0_name",
+        "message": "Unknown servant: Missing",
+    } in detail["validation"]["errors"]
+
+
+def test_get_setting_reports_non_string_servant_names(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CH.json", {"Known": {"other_name": []}})
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {"server": "CH", "servant_0_name": ["Known"]},
+    )
+
+    detail = ScriptDataService(tmp_path).get_setting("demo")
+
+    assert detail["validation"]["ok"] is False
+    assert {
+        "code": "invalid_servant_name",
+        "field": "servant_0_name",
+        "message": "Servant name must be a string.",
+    } in detail["validation"]["errors"]
+
+
+def test_get_strategy_returns_entries_summary_and_validation(tmp_path: Path):
+    _write_json(
+        tmp_path / "strategy" / "brave.json",
+        [{"tag": "brave", "strategy": _strategy_payload()}],
+    )
+
+    detail = ScriptDataService(tmp_path).get_strategy("brave")
+
+    assert detail["name"] == "brave"
+    assert detail["path"] == "strategy/brave.json"
+    assert detail["entries"][0]["tag"] == "brave"
+    assert detail["summary"] == {"entry_count": 1}
+    assert detail["validation"] == {"ok": True, "errors": [], "warnings": []}
+
+
+def test_get_strategy_reports_missing_card_fields(tmp_path: Path):
+    payload = _strategy_payload()
+    payload.pop("card2")
+    _write_json(tmp_path / "strategy" / "broken.json", [{"tag": "broken", "strategy": payload}])
+
+    detail = ScriptDataService(tmp_path).get_strategy("broken")
+
+    assert detail["validation"]["ok"] is False
+    assert {
+        "code": "missing_strategy_card",
+        "field": "[0].strategy.card2",
+        "message": "Strategy card2 is missing.",
+    } in detail["validation"]["errors"]
+
+
+def test_get_setting_rejects_path_traversal(tmp_path: Path):
+    service = ScriptDataService(tmp_path)
+
+    with pytest.raises(AppError) as excinfo:
+        service.get_setting("../secret")
+
+    assert excinfo.value.code == ErrorCode.DATA_FILE_NOT_FOUND
+
+
+def test_lists_servants_and_masters(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {"Servant A": {"other_name": ["A"], "class": "Caster", "SN": "100", "skill_name": ["Buff"]}},
+    )
+    _write_json(
+        tmp_path / "master_info.json",
+        {"Chaldea": {"SN": 7, "skill_name": ["Heal"], "skill_type": [1]}},
+    )
+
+    service = ScriptDataService(tmp_path)
+
+    assert service.list_servants("CH") == {
+        "server": "CH",
+        "servants": [
+            {
+                "name": "Servant A",
+                "class": "Caster",
+                "sn": "100",
+                "aliases": ["A"],
+                "skills": ["Buff"],
+                "skill_types": [],
+                "np_color": None,
+            }
+        ],
+    }
+    assert service.list_masters() == {
+        "masters": [
+            {"name": "Chaldea", "sn": 7, "skills": ["Heal"], "skill_types": [1]},
+        ],
+    }

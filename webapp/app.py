@@ -16,6 +16,7 @@ from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
+from webapp.services.script_data import ScriptDataService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -66,11 +67,13 @@ def create_app(
         event_log,
     )
     recognition = RecognitionService(resources)
+    script_data = ScriptDataService(resources.data_dir)
 
     app.state.event_log = event_log
     app.state.resources = resources
     app.state.device_service = device_service
     app.state.recognition = recognition
+    app.state.script_data = script_data
 
     @app.exception_handler(AppError)
     async def app_error_handler(_request, exc: AppError) -> JSONResponse:
@@ -127,6 +130,30 @@ def create_app(
     def templates() -> dict[str, list[str]]:
         return {"templates": resources.list_templates()}
 
+    @app.get("/api/settings")
+    def settings() -> dict[str, list[dict[str, str]]]:
+        return {"settings": script_data.list_settings()}
+
+    @app.get("/api/settings/{name}")
+    def setting_detail(name: str) -> dict:
+        return script_data.get_setting(name)
+
+    @app.get("/api/strategies")
+    def strategies() -> dict[str, list[dict[str, str]]]:
+        return {"strategies": script_data.list_strategies()}
+
+    @app.get("/api/strategies/{name}")
+    def strategy_detail(name: str) -> dict:
+        return script_data.get_strategy(name)
+
+    @app.get("/api/servants")
+    def servants(server: str = "CH") -> dict:
+        return script_data.list_servants(server)
+
+    @app.get("/api/masters")
+    def masters() -> dict:
+        return script_data.list_masters()
+
     @app.post("/api/match")
     def match_template(request: MatchRequest) -> dict:
         resources.resolve_template(request.template_path)
@@ -157,8 +184,10 @@ def _decode_base64(value: str) -> bytes:
 
 
 def _status_code_for(code: ErrorCode) -> int:
-    if code == ErrorCode.TEMPLATE_NOT_FOUND:
+    if code in {ErrorCode.TEMPLATE_NOT_FOUND, ErrorCode.DATA_FILE_NOT_FOUND}:
         return 404
+    if code == ErrorCode.DATA_FILE_INVALID:
+        return 400
     if code == ErrorCode.OPENCV_UNAVAILABLE:
         return 503
     if code in {

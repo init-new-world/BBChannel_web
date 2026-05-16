@@ -21,6 +21,7 @@ def test_app_error_serializes_to_api_shape():
 def test_error_code_contains_known_codes():
     assert ErrorCode.DEVICE_NOT_CONNECTED.value == "device_not_connected"
     assert ErrorCode.TEMPLATE_NOT_FOUND.value == "template_not_found"
+    assert ErrorCode.DATA_FILE_NOT_FOUND.value == "data_file_not_found"
     assert ErrorCode.MUMU_UNSUPPORTED_PLATFORM.value == "mumu_unsupported_platform"
 
 
