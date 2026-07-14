@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import platform
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -54,6 +55,13 @@ class MumuNativeApi(Protocol):
         ...
 
 
+class MumuNativeCallError(RuntimeError):
+    def __init__(self, function: str, result: object, message: str | None = None) -> None:
+        self.function = function
+        self.result = result
+        super().__init__(message or f"{function} failed with result {result}")
+
+
 class UnavailableMumuNativeApi:
     def is_ready(self) -> bool:
         return False
@@ -81,6 +89,181 @@ class UnavailableMumuNativeApi:
 
     def touch_up(self, handle: int, display_id: int) -> None:
         raise RuntimeError("MuMu native adapter is not initialized.")
+
+
+class CtypesMumuNativeApi:
+    REQUIRED_EXPORTS = (
+        "nemu_connect",
+        "nemu_disconnect",
+        "nemu_capture_display",
+        "nemu_input_event_touch_down",
+        "nemu_input_event_touch_up",
+    )
+
+    def __init__(
+        self,
+        dll_path: Path,
+        platform_name: str | None = None,
+        load_library: Callable[[str], object] = ctypes.CDLL,
+        max_frame_bytes: int = 256 * 1024 * 1024,
+    ) -> None:
+        self.dll_path = dll_path
+        self.platform_name = platform_name or platform.system()
+        self.max_frame_bytes = max(max_frame_bytes, 1)
+        self._dll: object | None = None
+        self._missing_exports: list[str] = []
+        self._native_error: str | None = None
+
+        if self.platform_name != "Windows":
+            self._native_error = "MuMu native IPC can only load on Windows."
+            return
+        try:
+            self._dll = load_library(str(dll_path))
+        except Exception as exc:
+            self._native_error = f"Unable to load MuMu native library: {exc}"
+            return
+
+        self._missing_exports = [
+            name for name in self.REQUIRED_EXPORTS if not hasattr(self._dll, name)
+        ]
+        if self._missing_exports:
+            self._native_error = "MuMu native library is missing required exports."
+            return
+        self._bind_signatures()
+
+    def is_ready(self) -> bool:
+        return self._dll is not None and not self._missing_exports and self._native_error is None
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "library_loaded": self._dll is not None,
+            "exports_complete": self._dll is not None and not self._missing_exports,
+            "invocation_ready": self.is_ready(),
+            "required_exports": list(self.REQUIRED_EXPORTS),
+            "missing_exports": list(self._missing_exports),
+            "native_error": self._native_error,
+            "process_bits": ctypes.sizeof(ctypes.c_void_p) * 8,
+        }
+
+    def connect(self, install_path: Path, instance_index: int) -> int:
+        dll = self._require_ready()
+        handle = dll.nemu_connect(str(install_path.absolute()), instance_index)
+        if handle <= 0:
+            raise MumuNativeCallError("nemu_connect", handle)
+        return handle
+
+    def disconnect(self, handle: int) -> None:
+        self._require_ready().nemu_disconnect(handle)
+
+    def capture_display(self, handle: int, display_id: int) -> MumuNativeFrame:
+        dll = self._require_ready()
+        width = ctypes.c_int(0)
+        height = ctypes.c_int(0)
+        empty_pixels = (ctypes.c_ubyte * 0)()
+        result = dll.nemu_capture_display(
+            handle,
+            display_id,
+            0,
+            ctypes.byref(width),
+            ctypes.byref(height),
+            empty_pixels,
+        )
+        self._check_zero("nemu_capture_display", result)
+        frame_size = self._frame_size(width.value, height.value)
+
+        pixels = (ctypes.c_ubyte * frame_size)()
+        result = dll.nemu_capture_display(
+            handle,
+            display_id,
+            frame_size,
+            ctypes.byref(width),
+            ctypes.byref(height),
+            pixels,
+        )
+        self._check_zero("nemu_capture_display", result)
+        if self._frame_size(width.value, height.value) != frame_size:
+            raise MumuNativeCallError(
+                "nemu_capture_display",
+                result,
+                "MuMu display dimensions changed during capture.",
+            )
+        return MumuNativeFrame(
+            width=width.value,
+            height=height.value,
+            pixels=bytes(pixels),
+            bottom_up=True,
+        )
+
+    def touch_down(self, handle: int, display_id: int, x: int, y: int) -> None:
+        result = self._require_ready().nemu_input_event_touch_down(
+            handle,
+            display_id,
+            x,
+            y,
+        )
+        self._check_zero("nemu_input_event_touch_down", result)
+
+    def touch_up(self, handle: int, display_id: int) -> None:
+        result = self._require_ready().nemu_input_event_touch_up(handle, display_id)
+        self._check_zero("nemu_input_event_touch_up", result)
+
+    def _bind_signatures(self) -> None:
+        dll = self._require_library()
+        dll.nemu_connect.argtypes = [ctypes.c_wchar_p, ctypes.c_int]
+        dll.nemu_connect.restype = ctypes.c_int
+        dll.nemu_disconnect.argtypes = [ctypes.c_int]
+        dll.nemu_disconnect.restype = None
+        dll.nemu_capture_display.argtypes = [
+            ctypes.c_int,
+            ctypes.c_uint,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        dll.nemu_capture_display.restype = ctypes.c_int
+        dll.nemu_input_event_touch_down.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        dll.nemu_input_event_touch_down.restype = ctypes.c_int
+        dll.nemu_input_event_touch_up.argtypes = [ctypes.c_int, ctypes.c_int]
+        dll.nemu_input_event_touch_up.restype = ctypes.c_int
+
+    def _frame_size(self, width: int, height: int) -> int:
+        frame_size = width * height * 4
+        if width <= 0 or height <= 0 or frame_size > self.max_frame_bytes:
+            raise MumuNativeCallError(
+                "nemu_capture_display",
+                frame_size,
+                f"MuMu frame size is invalid: {width}x{height} ({frame_size} bytes).",
+            )
+        return frame_size
+
+    def _require_library(self):
+        if self._dll is None:
+            raise MumuNativeCallError(
+                "load_library",
+                None,
+                self._native_error or "MuMu native library is not loaded.",
+            )
+        return self._dll
+
+    def _require_ready(self):
+        if not self.is_ready():
+            raise MumuNativeCallError(
+                "native_api",
+                None,
+                self._native_error or "MuMu native API is not ready.",
+            )
+        return self._require_library()
+
+    @staticmethod
+    def _check_zero(function: str, result: int) -> None:
+        if result != 0:
+            raise MumuNativeCallError(function, result)
 
 
 def default_mumu_install_paths() -> list[Path]:
@@ -121,7 +304,15 @@ class MumuBackend:
             default_mumu_install_paths() if install_paths is None else install_paths
         )
         self.install_path, self.dll_path = self._find_dll()
-        self.native_api = native_api or UnavailableMumuNativeApi()
+        if native_api is not None:
+            self.native_api = native_api
+        elif self.dll_path is not None:
+            self.native_api = CtypesMumuNativeApi(
+                self.dll_path,
+                platform_name=self.platform_name,
+            )
+        else:
+            self.native_api = UnavailableMumuNativeApi()
         self.instance_indices = tuple(dict.fromkeys(instance_indices))
         self.display_id = display_id
         self.swipe_steps = max(swipe_steps, 2)

@@ -1,3 +1,4 @@
+import ctypes
 from io import BytesIO
 from pathlib import Path
 
@@ -5,7 +6,12 @@ import pytest
 from PIL import Image
 
 from webapp.core.errors import AppError, ErrorCode
-from webapp.devices.mumu import MumuBackend, MumuNativeFrame
+from webapp.devices.mumu import (
+    CtypesMumuNativeApi,
+    MumuBackend,
+    MumuNativeCallError,
+    MumuNativeFrame,
+)
 
 
 class FakeNativeApi:
@@ -53,6 +59,39 @@ class FakeNativeApi:
 
     def touch_up(self, handle: int, display_id: int) -> None:
         self.touch_up_calls.append((handle, display_id))
+
+
+class FakeDllFunction:
+    def __init__(self, result=0, callback=None) -> None:
+        self.result = result
+        self.callback = callback
+        self.calls: list[tuple] = []
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        if self.callback is not None:
+            return self.callback(*args)
+        return self.result
+
+
+class FakeDll:
+    def __init__(self) -> None:
+        self.nemu_connect = FakeDllFunction(result=42)
+        self.nemu_disconnect = FakeDllFunction(result=None)
+        self.nemu_capture_display = FakeDllFunction(callback=self._capture)
+        self.nemu_input_event_touch_down = FakeDllFunction()
+        self.nemu_input_event_touch_up = FakeDllFunction()
+
+    @staticmethod
+    def _capture(handle, display_id, buffer_size, width, height, pixels):
+        width._obj.value = 2
+        height._obj.value = 1
+        if buffer_size:
+            for index, value in enumerate(b"\x01\x02\x03\x04\x05\x06\x07\x08"):
+                pixels[index] = value
+        return 0
 
 
 def _create_dll(root: Path) -> Path:
@@ -199,3 +238,118 @@ def test_mumu_finds_current_mumu_12_layout(tmp_path: Path):
     backend = MumuBackend(platform_name="Windows", install_paths=[tmp_path])
 
     assert backend.dll_path == dll
+
+
+def test_ctypes_api_binds_verified_exports_and_calls_connect(tmp_path: Path):
+    dll_path = _create_dll(tmp_path)
+    dll = FakeDll()
+    loaded_paths: list[str] = []
+
+    api = CtypesMumuNativeApi(
+        dll_path,
+        platform_name="Windows",
+        load_library=lambda path: loaded_paths.append(path) or dll,
+    )
+
+    handle = api.connect(tmp_path, 3)
+
+    assert api.is_ready() is True
+    assert loaded_paths == [str(dll_path)]
+    assert dll.nemu_connect.calls == [(str(tmp_path), 3)]
+    assert dll.nemu_connect.argtypes == [ctypes.c_wchar_p, ctypes.c_int]
+    assert dll.nemu_connect.restype is ctypes.c_int
+    assert dll.nemu_disconnect.argtypes == [ctypes.c_int]
+    assert dll.nemu_capture_display.argtypes[0:3] == [
+        ctypes.c_int,
+        ctypes.c_uint,
+        ctypes.c_int,
+    ]
+    assert handle == 42
+
+
+def test_ctypes_api_captures_dimensions_then_rgba_pixels(tmp_path: Path):
+    dll = FakeDll()
+    api = CtypesMumuNativeApi(
+        _create_dll(tmp_path),
+        platform_name="Windows",
+        load_library=lambda path: dll,
+    )
+
+    frame = api.capture_display(42, 0)
+
+    assert frame == MumuNativeFrame(
+        width=2,
+        height=1,
+        pixels=b"\x01\x02\x03\x04\x05\x06\x07\x08",
+        bottom_up=True,
+    )
+    assert [call[2] for call in dll.nemu_capture_display.calls] == [0, 8]
+
+
+def test_ctypes_api_rejects_failed_native_operation(tmp_path: Path):
+    dll = FakeDll()
+    dll.nemu_input_event_touch_down.result = -7
+    api = CtypesMumuNativeApi(
+        _create_dll(tmp_path),
+        platform_name="Windows",
+        load_library=lambda path: dll,
+    )
+
+    with pytest.raises(MumuNativeCallError) as exc_info:
+        api.touch_down(42, 0, 10, 20)
+
+    assert exc_info.value.function == "nemu_input_event_touch_down"
+    assert exc_info.value.result == -7
+
+
+def test_ctypes_api_reports_missing_exports_without_invocation(tmp_path: Path):
+    dll = FakeDll()
+    del dll.nemu_input_event_touch_up
+
+    api = CtypesMumuNativeApi(
+        _create_dll(tmp_path),
+        platform_name="Windows",
+        load_library=lambda path: dll,
+    )
+
+    diagnostics = api.diagnostics()
+    assert api.is_ready() is False
+    assert diagnostics["library_loaded"] is True
+    assert diagnostics["exports_complete"] is False
+    assert diagnostics["missing_exports"] == ["nemu_input_event_touch_up"]
+
+
+def test_ctypes_api_does_not_load_windows_dll_on_other_platforms(tmp_path: Path):
+    load_calls: list[str] = []
+
+    api = CtypesMumuNativeApi(
+        _create_dll(tmp_path),
+        platform_name="Linux",
+        load_library=lambda path: load_calls.append(path),
+    )
+
+    assert api.is_ready() is False
+    assert load_calls == []
+    assert "Windows" in api.diagnostics()["native_error"]
+
+
+def test_ctypes_api_rejects_unreasonable_frame_allocation(tmp_path: Path):
+    dll = FakeDll()
+
+    def huge_capture(handle, display_id, buffer_size, width, height, pixels):
+        width._obj.value = 100_000
+        height._obj.value = 100_000
+        return 0
+
+    dll.nemu_capture_display.callback = huge_capture
+    api = CtypesMumuNativeApi(
+        _create_dll(tmp_path),
+        platform_name="Windows",
+        load_library=lambda path: dll,
+        max_frame_bytes=1024,
+    )
+
+    with pytest.raises(MumuNativeCallError) as exc_info:
+        api.capture_display(42, 0)
+
+    assert "frame size" in str(exc_info.value)
