@@ -28,13 +28,33 @@ class DeviceInfo:
 
 
 @dataclass(frozen=True)
+class DeviceEndpoint:
+    backend: str
+    device_id: str
+    name: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ConnectionState:
     connected: bool
     backend: str | None = None
     device_id: str | None = None
+    capture: DeviceEndpoint | None = None
+    control: DeviceEndpoint | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload: dict[str, Any] = {
+            "connected": self.connected,
+            "backend": self.backend,
+            "device_id": self.device_id,
+        }
+        if self.capture is not None or self.control is not None:
+            payload["capture"] = self.capture.to_dict() if self.capture is not None else None
+            payload["control"] = self.control.to_dict() if self.control is not None else None
+        return payload
 
 
 @dataclass(frozen=True)

@@ -93,6 +93,31 @@ def test_capabilities_route(tmp_path: Path):
     assert response.json()["capabilities"][0]["name"] == "fake"
 
 
+def test_connect_channels_route_preserves_capture_and_control_state(tmp_path: Path):
+    class ConnectedBackend(FakeBackend):
+        def list_devices(self):
+            return [DeviceInfo(backend="fake", device_id="fake-1", name="Fake Device")]
+
+    client = _client(
+        tmp_path,
+        DeviceService([ConnectedBackend()], EventLog()),
+    )
+
+    response = client.post(
+        "/api/connect/channels",
+        json={
+            "capture_backend": "fake",
+            "capture_device_id": "fake-1",
+            "control_backend": "fake",
+            "control_device_id": "fake-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["capture"]["device_id"] == "fake-1"
+    assert response.json()["control"]["device_id"] == "fake-1"
+
+
 def test_templates_route(tmp_path: Path):
     client = _client(tmp_path)
     assets = Path(client.app.state.resources.assets_dir)

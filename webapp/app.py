@@ -33,6 +33,13 @@ class ConnectRequest(BaseModel):
     device_id: str
 
 
+class ConnectChannelsRequest(BaseModel):
+    capture_backend: str
+    capture_device_id: str
+    control_backend: str
+    control_device_id: str
+
+
 class AdbEndpointRequest(BaseModel):
     endpoint: str = Field(min_length=1)
 
@@ -89,10 +96,7 @@ def create_app(
     register_diagnostic_job(job_manager, device_service, recognition)
 
     def active_device_key() -> str | None:
-        state = device_service.state()
-        if not state.connected or state.backend is None or state.device_id is None:
-            return None
-        return f"{state.backend}:{state.device_id}"
+        return device_service.session_key()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -135,6 +139,15 @@ def create_app(
     @app.post("/api/connect")
     def connect(request: ConnectRequest) -> dict:
         return device_service.connect(request.backend, request.device_id).to_dict()
+
+    @app.post("/api/connect/channels")
+    def connect_channels(request: ConnectChannelsRequest) -> dict:
+        return device_service.connect_channels(
+            capture_backend=request.capture_backend,
+            capture_device_id=request.capture_device_id,
+            control_backend=request.control_backend,
+            control_device_id=request.control_device_id,
+        ).to_dict()
 
     @app.post("/api/adb/connect-endpoint")
     def connect_adb_endpoint(request: AdbEndpointRequest) -> dict:
