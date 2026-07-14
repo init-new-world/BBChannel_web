@@ -18,9 +18,9 @@ from webapp.core.models import Capability, DeviceInfo, OperationResult
 
 DLL_NAME = "external_renderer_ipc.dll"
 DLL_LAYOUTS = (
-    (Path("shell") / "sdk" / DLL_NAME, Path()),
-    (Path("nx_device") / "12.0" / "shell" / "sdk" / DLL_NAME, Path("nx_device") / "12.0"),
-    (Path("nx_main") / "sdk" / DLL_NAME, Path("nx_main")),
+    Path("shell") / "sdk" / DLL_NAME,
+    Path("nx_device") / "12.0" / "shell" / "sdk" / DLL_NAME,
+    Path("nx_main") / "sdk" / DLL_NAME,
 )
 
 
@@ -318,6 +318,7 @@ class MumuBackend:
         self.swipe_steps = max(swipe_steps, 2)
         self._sleep = sleep
         self._sessions: dict[int, int] = {}
+        self._frame_sizes: dict[int, tuple[int, int]] = {}
         self._session_lock = RLock()
 
     def capability(self) -> Capability:
@@ -374,7 +375,7 @@ class MumuBackend:
     def snapshot(self, device_id: str) -> bytes:
         index = self._parse_device_id(device_id)
         try:
-            frame = self.native_api.capture_display(self._session(index), self.display_id)
+            frame = self._capture_frame(index, self._session(index))
             return self._frame_to_png(frame)
         except AppError:
             raise
@@ -389,7 +390,8 @@ class MumuBackend:
         index = self._parse_device_id(device_id)
         try:
             handle = self._session(index)
-            self.native_api.touch_down(handle, self.display_id, x, y)
+            native_x, native_y = self._native_touch_point(index, handle, x, y)
+            self.native_api.touch_down(handle, self.display_id, native_x, native_y)
             self.native_api.touch_up(handle, self.display_id)
         except AppError:
             raise
@@ -418,12 +420,19 @@ class MumuBackend:
         index = self._parse_device_id(device_id)
         try:
             handle = self._session(index)
+            frame_height = self._frame_height(index, handle)
             delay = max(duration_ms, 0) / self.swipe_steps / 1000
             for step in range(self.swipe_steps):
                 fraction = step / (self.swipe_steps - 1)
                 x = round(x1 + (x2 - x1) * fraction)
                 y = round(y1 + (y2 - y1) * fraction)
-                self.native_api.touch_down(handle, self.display_id, x, y)
+                native_x, native_y = frame_height - y, x
+                self.native_api.touch_down(
+                    handle,
+                    self.display_id,
+                    native_x,
+                    native_y,
+                )
                 self._sleep(delay)
             self.native_api.touch_up(handle, self.display_id)
         except AppError:
@@ -445,6 +454,7 @@ class MumuBackend:
         with self._session_lock:
             sessions = sorted(self._sessions.items())
             self._sessions.clear()
+            self._frame_sizes.clear()
         for _, handle in sessions:
             self.native_api.disconnect(handle)
 
@@ -464,6 +474,30 @@ class MumuBackend:
                 raise RuntimeError(f"nemu_connect returned invalid handle {handle}")
             self._sessions[instance_index] = handle
             return handle
+
+    def _capture_frame(self, instance_index: int, handle: int) -> MumuNativeFrame:
+        frame = self.native_api.capture_display(handle, self.display_id)
+        with self._session_lock:
+            self._frame_sizes[instance_index] = (frame.width, frame.height)
+        return frame
+
+    def _frame_height(self, instance_index: int, handle: int) -> int:
+        with self._session_lock:
+            frame_size = self._frame_sizes.get(instance_index)
+        if frame_size is None:
+            frame = self._capture_frame(instance_index, handle)
+            return frame.height
+        return frame_size[1]
+
+    def _native_touch_point(
+        self,
+        instance_index: int,
+        handle: int,
+        x: int,
+        y: int,
+    ) -> tuple[int, int]:
+        # MuMu IPC touch space is rotated relative to its captured landscape frame.
+        return self._frame_height(instance_index, handle) - y, x
 
     def _parse_device_id(self, device_id: str) -> int:
         if device_id == "mumu":
@@ -502,8 +536,8 @@ class MumuBackend:
 
     def _find_dll(self) -> tuple[Path | None, Path | None]:
         for install_path in self.install_paths:
-            for dll_relative_path, native_root_suffix in DLL_LAYOUTS:
+            for dll_relative_path in DLL_LAYOUTS:
                 candidate = install_path / dll_relative_path
                 if candidate.exists():
-                    return install_path / native_root_suffix, candidate
+                    return install_path, candidate
         return None, None

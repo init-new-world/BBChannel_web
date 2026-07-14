@@ -15,8 +15,13 @@ from webapp.devices.mumu import (
 
 
 class FakeNativeApi:
-    def __init__(self, ready: bool = True) -> None:
+    def __init__(
+        self,
+        ready: bool = True,
+        frame: MumuNativeFrame | None = None,
+    ) -> None:
         self.ready = ready
+        self.frame = frame
         self.connect_calls: list[tuple[Path, int]] = []
         self.disconnect_calls: list[int] = []
         self.capture_calls: list[tuple[int, int]] = []
@@ -43,6 +48,8 @@ class FakeNativeApi:
 
     def capture_display(self, handle: int, display_id: int) -> MumuNativeFrame:
         self.capture_calls.append((handle, display_id))
+        if self.frame is not None:
+            return self.frame
         # Native MuMu frames are bottom-up RGBA rows.
         return MumuNativeFrame(
             width=2,
@@ -158,7 +165,13 @@ def test_mumu_snapshot_reuses_connection_and_converts_bottom_up_rgba_to_png(tmp_
 
 def test_mumu_tap_and_swipe_delegate_touch_events(tmp_path: Path):
     _create_dll(tmp_path)
-    native = FakeNativeApi()
+    native = FakeNativeApi(
+        frame=MumuNativeFrame(
+            width=200,
+            height=100,
+            pixels=b"\x00" * (200 * 100 * 4),
+        )
+    )
     delays: list[float] = []
     backend = MumuBackend(
         platform_name="Windows",
@@ -174,13 +187,14 @@ def test_mumu_tap_and_swipe_delegate_touch_events(tmp_path: Path):
     assert tap.ok is True
     assert swipe.ok is True
     assert native.touch_down_calls == [
-        (100, 0, 10, 20),
-        (100, 0, 0, 0),
-        (100, 0, 15, 30),
-        (100, 0, 30, 60),
+        (100, 0, 80, 10),
+        (100, 0, 100, 0),
+        (100, 0, 70, 15),
+        (100, 0, 40, 30),
     ]
     assert native.touch_up_calls == [(100, 0), (100, 0)]
     assert delays == [0.1, 0.1, 0.1]
+    assert native.capture_calls == [(100, 0)]
 
 
 def test_mumu_close_disconnects_cached_sessions(tmp_path: Path):
@@ -238,6 +252,22 @@ def test_mumu_finds_current_mumu_12_layout(tmp_path: Path):
     backend = MumuBackend(platform_name="Windows", install_paths=[tmp_path])
 
     assert backend.dll_path == dll
+
+
+def test_mumu_current_layout_connects_with_top_level_install_path(tmp_path: Path):
+    dll = tmp_path / "nx_device" / "12.0" / "shell" / "sdk" / "external_renderer_ipc.dll"
+    dll.parent.mkdir(parents=True)
+    dll.write_bytes(b"dll")
+    native = FakeNativeApi()
+    backend = MumuBackend(
+        platform_name="Windows",
+        install_paths=[tmp_path],
+        native_api=native,
+    )
+
+    backend.snapshot("mumu:0")
+
+    assert native.connect_calls == [(tmp_path, 0)]
 
 
 def test_ctypes_api_binds_verified_exports_and_calls_connect(tmp_path: Path):
