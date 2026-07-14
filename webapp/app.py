@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Response
@@ -9,9 +11,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from webapp.api import create_job_router
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
 from webapp.devices.mumu import MumuBackend
+from webapp.runtime import JobDatabase, JobManager
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
@@ -55,8 +59,9 @@ def create_app(
     data_dir: Path | str | None = None,
     device_service: DeviceService | None = None,
     event_log: EventLog | None = None,
+    job_manager: JobManager | None = None,
+    runtime_db_path: Path | str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="BBchannel Web PoC")
     event_log = event_log or EventLog()
     resources = ResourceService(
         assets_dir or PROJECT_ROOT / "assets",
@@ -68,12 +73,30 @@ def create_app(
     )
     recognition = RecognitionService(resources)
     script_data = ScriptDataService(resources.data_dir)
+    owns_job_manager = job_manager is None
+    if job_manager is None:
+        default_db_path = os.environ.get(
+            "BBCHANNEL_RUNTIME_DB",
+            str(PROJECT_ROOT / "runtime" / "bbchannel.db"),
+        )
+        job_manager = JobManager(JobDatabase(runtime_db_path or default_db_path))
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            if owns_job_manager:
+                job_manager.close()
+
+    app = FastAPI(title="BBchannel Web PoC", lifespan=lifespan)
 
     app.state.event_log = event_log
     app.state.resources = resources
     app.state.device_service = device_service
     app.state.recognition = recognition
     app.state.script_data = script_data
+    app.state.job_manager = job_manager
 
     @app.exception_handler(AppError)
     async def app_error_handler(_request, exc: AppError) -> JSONResponse:
@@ -170,6 +193,8 @@ def create_app(
     @app.get("/api/events")
     def events(limit: int | None = None) -> dict[str, list[dict]]:
         return {"events": event_log.recent(limit)}
+
+    app.include_router(create_job_router(job_manager))
 
     static_dir = Path(__file__).with_name("static")
     if static_dir.exists():

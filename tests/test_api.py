@@ -74,6 +74,7 @@ def _client(tmp_path: Path, device_service: DeviceService | None = None) -> Test
         data_dir=data,
         device_service=device_service,
         event_log=event_log,
+        runtime_db_path=tmp_path / "runtime.db",
     )
     return TestClient(app)
 
