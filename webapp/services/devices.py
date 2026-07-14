@@ -31,6 +31,7 @@ class DeviceService:
         self._state_lock = threading.RLock()
         self._endpoint_locks_guard = threading.Lock()
         self._endpoint_locks: dict[str, threading.RLock] = {}
+        self._closed = False
 
     def state(self) -> ConnectionState:
         with self._state_lock:
@@ -155,6 +156,25 @@ class DeviceService:
                 },
             )
         return self.state()
+
+    def close(self) -> None:
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+        self.disconnect()
+        for backend in self._backends.values():
+            close_backend = getattr(backend, "close", None)
+            if not callable(close_backend):
+                continue
+            try:
+                close_backend()
+            except Exception as exc:
+                self._event_log.error(
+                    "backend_close",
+                    "Device backend close failed.",
+                    {"backend": backend.name, "error": str(exc)},
+                )
 
     def snapshot(self) -> bytes:
         backend, endpoint = self._require_capture()

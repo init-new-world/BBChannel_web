@@ -105,8 +105,11 @@ def create_app(
         try:
             yield
         finally:
-            if owns_job_manager:
-                job_manager.close()
+            try:
+                if owns_job_manager:
+                    job_manager.close()
+            finally:
+                device_service.close()
 
     app = FastAPI(title="BBchannel Web PoC", lifespan=lifespan)
 

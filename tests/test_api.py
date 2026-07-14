@@ -86,6 +86,35 @@ def test_health_route(tmp_path: Path):
     assert response.json() == {"ok": True}
 
 
+def test_app_lifespan_closes_device_service(tmp_path: Path):
+    from webapp.app import create_app
+
+    class ClosableBackend(FakeBackend):
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    backend = ClosableBackend()
+    event_log = EventLog()
+    service = DeviceService([backend], event_log)
+    app = create_app(
+        assets_dir=tmp_path / "assets",
+        data_dir=tmp_path / "data",
+        device_service=service,
+        event_log=event_log,
+        runtime_db_path=tmp_path / "runtime.db",
+    )
+    Path(app.state.resources.assets_dir).mkdir()
+    Path(app.state.resources.data_dir).mkdir()
+
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+
+    assert backend.close_calls == 1
+
+
 def test_capabilities_route(tmp_path: Path):
     response = _client(tmp_path).get("/api/capabilities")
 

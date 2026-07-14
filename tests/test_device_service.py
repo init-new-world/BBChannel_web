@@ -60,6 +60,26 @@ def test_device_service_connects_and_disconnects():
     assert disconnected.connected is False
 
 
+def test_device_service_close_disconnects_and_closes_backends_once():
+    class ClosableBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    backend = ClosableBackend()
+    service = DeviceService([backend], EventLog())
+    service.connect("fake", "dev1")
+
+    service.close()
+    service.close()
+
+    assert service.state().connected is False
+    assert backend.close_calls == 1
+
+
 def test_device_service_delegates_tap_to_connected_backend():
     backend = FakeBackend()
     service = DeviceService([backend], EventLog())
