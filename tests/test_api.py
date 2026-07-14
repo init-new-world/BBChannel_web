@@ -191,6 +191,81 @@ def test_template_index_and_metadata_routes(tmp_path: Path):
     assert metadata_response.json()["height"] == 8
 
 
+def test_match_route_accepts_roi_and_scales(tmp_path: Path):
+    pytest.importorskip("cv2")
+    import base64
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    template = Image.new("RGB", (10, 10), "black")
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((1, 1, 8, 8), outline="white")
+    draw.line((1, 8, 8, 1), fill="red", width=2)
+    template.save(assets / "target.png")
+    screenshot = Image.new("RGB", (80, 60), "black")
+    screenshot.paste(template, (45, 25))
+    output = BytesIO()
+    screenshot.save(output, format="PNG")
+
+    response = client.post(
+        "/api/match",
+        json={
+            "screenshot_base64": base64.b64encode(output.getvalue()).decode("ascii"),
+            "template_path": "target.png",
+            "threshold": 0.8,
+            "roi": [40, 20, 30, 25],
+            "scales": [1.0],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["top_left"] == [45, 25]
+    assert response.json()["roi"] == [40, 20, 30, 25]
+    assert response.json()["scale"] == 1.0
+
+
+def test_batch_match_route_returns_candidates_in_request_order(tmp_path: Path):
+    pytest.importorskip("cv2")
+    import base64
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    screenshot = Image.new("RGB", (80, 60), "black")
+    for name, position, color in [
+        ("first.png", (10, 15), "red"),
+        ("second.png", (50, 30), "green"),
+    ]:
+        template = Image.new("RGB", (10, 10), "black")
+        draw = ImageDraw.Draw(template)
+        draw.rectangle((1, 1, 8, 8), outline="white")
+        draw.line((1, 8, 8, 1), fill=color, width=2)
+        template.save(assets / name)
+        screenshot.paste(template, position)
+    output = BytesIO()
+    screenshot.save(output, format="PNG")
+
+    response = client.post(
+        "/api/match/batch",
+        json={
+            "screenshot_base64": base64.b64encode(output.getvalue()).decode("ascii"),
+            "candidates": [
+                {"template_path": "second.png", "threshold": 0.8},
+                {"template_path": "first.png", "threshold": 0.8},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert [match["template_path"] for match in response.json()["matches"]] == [
+        "second.png",
+        "first.png",
+    ]
+
+
 def test_settings_routes_expose_data_dir_configs(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

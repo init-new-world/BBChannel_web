@@ -62,6 +62,20 @@ class MatchRequest(BaseModel):
     screenshot_base64: str
     template_path: str
     threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    roi: list[int] | None = Field(default=None, min_length=4, max_length=4)
+    scales: list[float] | None = Field(default=None, min_length=1, max_length=20)
+
+
+class MatchCandidateRequest(BaseModel):
+    template_path: str
+    threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    roi: list[int] | None = Field(default=None, min_length=4, max_length=4)
+    scales: list[float] | None = Field(default=None, min_length=1, max_length=20)
+
+
+class BatchMatchRequest(BaseModel):
+    screenshot_base64: str
+    candidates: list[MatchCandidateRequest] = Field(min_length=1, max_length=100)
 
 
 def create_app(
@@ -249,7 +263,24 @@ def create_app(
             _decode_base64(request.screenshot_base64),
             request.template_path,
             request.threshold,
+            roi=request.roi,
+            scales=request.scales,
         ).to_dict()
+
+    @app.post("/api/match/batch")
+    def match_templates(request: BatchMatchRequest) -> dict[str, list[dict]]:
+        candidates = [candidate.model_dump() for candidate in request.candidates]
+        for candidate in candidates:
+            resources.resolve_template(str(candidate["template_path"]))
+        return {
+            "matches": [
+                result.to_dict()
+                for result in recognition.match_templates(
+                    _decode_base64(request.screenshot_base64),
+                    candidates,
+                )
+            ]
+        }
 
     @app.get("/api/events")
     def events(limit: int | None = None) -> dict[str, list[dict]]:

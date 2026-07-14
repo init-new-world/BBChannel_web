@@ -77,6 +77,8 @@ class MatchResult:
     top_left: list[int]
     size: list[int]
     center: list[int]
+    scale: float = 1.0
+    roi: list[int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

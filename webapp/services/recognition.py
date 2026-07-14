@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from collections.abc import Sequence
 from typing import Any
 
 from webapp.core.errors import AppError, ErrorCode
@@ -26,10 +28,40 @@ class RecognitionService:
         screenshot: bytes,
         template_path: str,
         threshold: float = 0.8,
+        roi: Sequence[int] | None = None,
+        scales: Sequence[float] | None = None,
     ) -> MatchResult:
-        cv, numpy = self._require_opencv()
-        template_file = self._resources.resolve_template(template_path)
+        screenshot_image = self._decode_screenshot(screenshot, template_path)
+        return self._match_decoded(
+            screenshot_image,
+            template_path,
+            threshold=threshold,
+            roi=roi,
+            scales=scales,
+        )
 
+    def match_templates(
+        self,
+        screenshot: bytes,
+        candidates: Sequence[dict[str, object]],
+    ) -> list[MatchResult]:
+        screenshot_image = self._decode_screenshot(screenshot, None)
+        results: list[MatchResult] = []
+        for candidate in candidates:
+            template_path = str(candidate["template_path"])
+            results.append(
+                self._match_decoded(
+                    screenshot_image,
+                    template_path,
+                    threshold=float(candidate.get("threshold", 0.8)),
+                    roi=candidate.get("roi"),
+                    scales=candidate.get("scales"),
+                )
+            )
+        return results
+
+    def _decode_screenshot(self, screenshot: bytes, template_path: str | None):
+        cv, numpy = self._require_opencv()
         screenshot_image = cv.imdecode(
             numpy.frombuffer(screenshot, dtype=numpy.uint8),
             cv.IMREAD_COLOR,
@@ -38,9 +70,21 @@ class RecognitionService:
             raise AppError(
                 ErrorCode.MATCH_FAILED,
                 "Screenshot image could not be decoded.",
-                {"template_path": template_path},
+                {"template_path": template_path} if template_path is not None else {},
             )
+        return screenshot_image
 
+    def _match_decoded(
+        self,
+        screenshot_image,
+        template_path: str,
+        *,
+        threshold: float,
+        roi: object = None,
+        scales: object = None,
+    ) -> MatchResult:
+        cv, _ = self._require_opencv()
+        template_file = self._resources.resolve_template(template_path)
         template_image = cv.imread(str(template_file), cv.IMREAD_COLOR)
         if template_image is None:
             raise AppError(
@@ -50,34 +94,123 @@ class RecognitionService:
             )
 
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
+        normalized_roi = self._normalize_roi(
+            roi,
+            screenshot_width,
+            screenshot_height,
+            template_path,
+        )
+        roi_x, roi_y, roi_width, roi_height = normalized_roi
+        search_image = screenshot_image[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
+        normalized_scales = self._normalize_scales(scales, template_path)
+
+        best: tuple[float, tuple[int, int], int, int, float] | None = None
         template_height, template_width = template_image.shape[:2]
-        if template_width > screenshot_width or template_height > screenshot_height:
+        for scale in normalized_scales:
+            scaled_width = max(round(template_width * scale), 1)
+            scaled_height = max(round(template_height * scale), 1)
+            if scaled_width > roi_width or scaled_height > roi_height:
+                continue
+            if scaled_width == template_width and scaled_height == template_height:
+                scaled_template = template_image
+            else:
+                interpolation = cv.INTER_AREA if scale < 1 else cv.INTER_LINEAR
+                scaled_template = cv.resize(
+                    template_image,
+                    (scaled_width, scaled_height),
+                    interpolation=interpolation,
+                )
+            matches = cv.matchTemplate(search_image, scaled_template, cv.TM_CCOEFF_NORMED)
+            _, confidence, _, max_location = cv.minMaxLoc(matches)
+            candidate = (
+                float(confidence),
+                max_location,
+                scaled_width,
+                scaled_height,
+                scale,
+            )
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+
+        if best is None:
             raise AppError(
                 ErrorCode.MATCH_FAILED,
-                "Template is larger than the screenshot.",
+                "Template is larger than the selected screenshot region at every scale.",
                 {
                     "template_path": template_path,
-                    "screenshot_size": [screenshot_width, screenshot_height],
-                    "template_size": [template_width, template_height],
+                    "roi": normalized_roi,
+                    "scales": normalized_scales,
                 },
             )
 
-        matches = cv.matchTemplate(screenshot_image, template_image, cv.TM_CCOEFF_NORMED)
-        _, confidence, _, max_location = cv.minMaxLoc(matches)
-        top_left = [int(max_location[0]), int(max_location[1])]
-        size = [int(template_width), int(template_height)]
-
+        confidence, max_location, matched_width, matched_height, best_scale = best
+        top_left = [roi_x + int(max_location[0]), roi_y + int(max_location[1])]
+        result_roi = normalized_roi if roi is not None else None
         return MatchResult(
             template_path=template_path,
             matched=confidence >= threshold,
-            confidence=float(confidence),
+            confidence=confidence,
             threshold=threshold,
             top_left=top_left,
-            size=size,
-            center=[
-                top_left[0] + template_width // 2,
-                top_left[1] + template_height // 2,
-            ],
+            size=[matched_width, matched_height],
+            center=[top_left[0] + matched_width // 2, top_left[1] + matched_height // 2],
+            scale=best_scale,
+            roi=result_roi,
+        )
+
+    @staticmethod
+    def _normalize_roi(
+        roi: object,
+        screenshot_width: int,
+        screenshot_height: int,
+        template_path: str,
+    ) -> list[int]:
+        if roi is None:
+            return [0, 0, screenshot_width, screenshot_height]
+        try:
+            values = [int(value) for value in roi]  # type: ignore[union-attr]
+        except (TypeError, ValueError) as exc:
+            raise RecognitionService._invalid_roi(template_path, roi) from exc
+        if len(values) != 4:
+            raise RecognitionService._invalid_roi(template_path, roi)
+        x, y, width, height = values
+        if (
+            x < 0
+            or y < 0
+            or width <= 0
+            or height <= 0
+            or x + width > screenshot_width
+            or y + height > screenshot_height
+        ):
+            raise RecognitionService._invalid_roi(template_path, roi)
+        return values
+
+    @staticmethod
+    def _invalid_roi(template_path: str, roi: object) -> AppError:
+        return AppError(
+            ErrorCode.MATCH_FAILED,
+            "ROI must be [x, y, width, height] inside the screenshot.",
+            {"template_path": template_path, "roi": roi},
+        )
+
+    @staticmethod
+    def _normalize_scales(scales: object, template_path: str) -> list[float]:
+        if scales is None:
+            return [1.0]
+        try:
+            values = [float(value) for value in scales]  # type: ignore[union-attr]
+        except (TypeError, ValueError) as exc:
+            raise RecognitionService._invalid_scales(template_path, scales) from exc
+        if not values or any(value <= 0 or not math.isfinite(value) for value in values):
+            raise RecognitionService._invalid_scales(template_path, scales)
+        return list(dict.fromkeys(values))
+
+    @staticmethod
+    def _invalid_scales(template_path: str, scales: object) -> AppError:
+        return AppError(
+            ErrorCode.MATCH_FAILED,
+            "Template scales must contain positive finite numbers.",
+            {"template_path": template_path, "scales": scales},
         )
 
     def _require_opencv(self) -> tuple[Any, Any]:
