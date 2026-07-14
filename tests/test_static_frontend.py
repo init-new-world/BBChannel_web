@@ -22,6 +22,13 @@ def test_operator_console_references_api_controls():
     assert 'id="strategy-select"' in index
     assert 'id="template-select"' in index
     assert 'id="event-log"' in index
+    assert 'id="start-diagnostic"' in index
+    assert 'id="job-status"' in index
+    assert 'id="job-progress"' in index
+    assert 'id="pause-job"' in index
+    assert 'id="resume-job"' in index
+    assert 'id="cancel-job"' in index
+    assert 'id="job-events"' in index
     assert "/api/capabilities" in script
     assert "/api/adb/connect-endpoint" in script
     assert "/api/settings" in script
@@ -31,3 +38,6 @@ def test_operator_console_references_api_controls():
     assert "/api/match" in script
     assert "/api/tap" in script
     assert "/api/swipe" in script
+    assert "/api/jobs" in script
+    assert "/events/stream" in script
+    assert "new EventSource" in script

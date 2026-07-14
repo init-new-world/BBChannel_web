@@ -1,3 +1,6 @@
+const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
+const ACTIVE_JOB_STATES = new Set(["queued", "running", "paused", "cancelling"]);
+
 const state = {
   connected: false,
   backends: [],
@@ -10,6 +13,10 @@ const state = {
   latestMatch: null,
   selectedSettingPlan: null,
   selectedStrategy: null,
+  jobs: [],
+  activeJob: null,
+  jobEvents: [],
+  jobEventSource: null,
 };
 
 const els = {
@@ -51,6 +58,21 @@ const els = {
   refreshEvents: document.querySelector("#refresh-events"),
   eventLog: document.querySelector("#event-log"),
   logCount: document.querySelector("#log-count"),
+  diagnosticVerifyTemplate: document.querySelector("#diagnostic-verify-template"),
+  diagnosticTimeout: document.querySelector("#diagnostic-timeout"),
+  diagnosticTap: document.querySelector("#diagnostic-tap"),
+  startDiagnostic: document.querySelector("#start-diagnostic"),
+  jobHistory: document.querySelector("#job-history"),
+  jobStatus: document.querySelector("#job-status"),
+  jobKind: document.querySelector("#job-kind"),
+  jobProgress: document.querySelector("#job-progress"),
+  jobStep: document.querySelector("#job-step"),
+  pauseJob: document.querySelector("#pause-job"),
+  resumeJob: document.querySelector("#resume-job"),
+  cancelJob: document.querySelector("#cancel-job"),
+  jobError: document.querySelector("#job-error"),
+  jobEvents: document.querySelector("#job-events"),
+  jobEventCount: document.querySelector("#job-event-count"),
 };
 
 async function api(path, options = {}) {
@@ -65,7 +87,10 @@ async function api(path, options = {}) {
     } catch {
       payload = null;
     }
-    const message = payload?.error?.message || `${response.status} ${response.statusText}`;
+    const message = payload?.error?.message
+      || payload?.detail?.message
+      || payload?.detail?.code
+      || `${response.status} ${response.statusText}`;
     const error = new Error(message);
     error.payload = payload;
     throw error;
@@ -86,6 +111,7 @@ async function init() {
     loadStrategies(),
     loadTemplates(),
     loadEvents(),
+    loadJobs(),
   ]);
   await loadConnectionState();
   updateControls();
@@ -116,6 +142,11 @@ function bindEvents() {
   els.refreshEvents.addEventListener("click", loadEvents);
   els.screenshot.addEventListener("load", onScreenshotLoaded);
   els.screenStage.addEventListener("click", populateTapFromClick);
+  els.startDiagnostic.addEventListener("click", startDiagnosticJob);
+  els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
+  els.pauseJob.addEventListener("click", () => controlJob("pause"));
+  els.resumeJob.addEventListener("click", () => controlJob("resume"));
+  els.cancelJob.addEventListener("click", () => controlJob("cancel"));
 }
 
 async function loadCapabilities() {
@@ -155,6 +186,19 @@ async function loadTemplates() {
         return option;
       }),
     );
+    const emptyOption = document.createElement("option");
+    emptyOption.value = "";
+    emptyOption.textContent = "No verification";
+    els.diagnosticVerifyTemplate.replaceChildren(
+      emptyOption,
+      ...templates.map((template) => {
+        const option = document.createElement("option");
+        option.value = template;
+        option.textContent = template;
+        return option;
+      }),
+    );
+    updateControls();
   } catch (error) {
     showError(error);
   }
@@ -417,6 +461,249 @@ async function sendSwipe() {
   }
 }
 
+async function startDiagnosticJob() {
+  const templatePath = els.templateSelect.value;
+  if (!templatePath) {
+    return;
+  }
+  const payload = {
+    template_path: templatePath,
+    threshold: Number(els.thresholdInput.value),
+    timeout_seconds: Number(els.diagnosticTimeout.value),
+    tap_on_match: els.diagnosticTap.checked,
+  };
+  if (els.diagnosticVerifyTemplate.value) {
+    payload.verify_template_path = els.diagnosticVerifyTemplate.value;
+  }
+
+  try {
+    const response = await api("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({ kind: "diagnostic.template-tap", payload }),
+    });
+    const job = response.job;
+    mergeJob(job);
+    renderJobHistory(job.job_id);
+    await selectJob(job.job_id);
+  } catch (error) {
+    showError(error);
+  } finally {
+    updateControls();
+  }
+}
+
+async function loadJobs(preferredJobId = "") {
+  try {
+    const payload = await api("/api/jobs?limit=50");
+    state.jobs = payload.jobs || [];
+    const selectedJobId = preferredJobId || state.activeJob?.job_id || state.jobs[0]?.job_id || "";
+    renderJobHistory(selectedJobId);
+    if (selectedJobId) {
+      await selectJob(selectedJobId);
+    } else {
+      state.activeJob = null;
+      state.jobEvents = [];
+      renderJob(null);
+      renderJobEvents();
+    }
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function renderJobHistory(selectedJobId = "") {
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = state.jobs.length ? "Select a job" : "No job history";
+  els.jobHistory.replaceChildren(
+    emptyOption,
+    ...state.jobs.map((job) => {
+      const option = document.createElement("option");
+      option.value = job.job_id;
+      option.textContent = `${job.kind} · ${job.status} · ${formatTime(job.created_at)}`;
+      return option;
+    }),
+  );
+  els.jobHistory.value = selectedJobId;
+}
+
+async function selectJob(jobId) {
+  if (!jobId) {
+    closeJobEventSource();
+    state.activeJob = null;
+    state.jobEvents = [];
+    renderJob(null);
+    renderJobEvents();
+    updateControls();
+    return;
+  }
+  const previousJobId = state.activeJob?.job_id;
+  try {
+    const [jobPayload, eventPayload] = await Promise.all([
+      api(`/api/jobs/${encodeURIComponent(jobId)}`),
+      api(`/api/jobs/${encodeURIComponent(jobId)}/events?limit=500`),
+    ]);
+    state.activeJob = jobPayload.job;
+    state.jobEvents = eventPayload.events || [];
+    mergeJob(state.activeJob);
+    renderJobHistory(jobId);
+    renderJob(state.activeJob);
+    renderJobEvents();
+    if (!TERMINAL_JOB_STATES.has(state.activeJob.status)) {
+      const lastEventId = state.jobEvents.at(-1)?.event_id || 0;
+      if (previousJobId !== jobId || !state.jobEventSource) {
+        openJobEventStream(jobId, lastEventId);
+      }
+    } else {
+      closeJobEventSource();
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    updateControls();
+  }
+}
+
+async function refreshActiveJob(jobId) {
+  if (!jobId || state.activeJob?.job_id !== jobId) {
+    return;
+  }
+  try {
+    const payload = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
+    state.activeJob = payload.job;
+    mergeJob(state.activeJob);
+    renderJobHistory(jobId);
+    renderJob(state.activeJob);
+    if (TERMINAL_JOB_STATES.has(state.activeJob.status)) {
+      closeJobEventSource();
+    }
+    updateControls();
+  } catch (error) {
+    closeJobEventSource();
+    showError(error);
+  }
+}
+
+async function controlJob(action) {
+  const jobId = state.activeJob?.job_id;
+  if (!jobId) {
+    return;
+  }
+  try {
+    const payload = await api(`/api/jobs/${encodeURIComponent(jobId)}/${action}`, {
+      method: "POST",
+    });
+    state.activeJob = payload.job;
+    mergeJob(state.activeJob);
+    renderJobHistory(jobId);
+    renderJob(state.activeJob);
+    if (!TERMINAL_JOB_STATES.has(state.activeJob.status) && !state.jobEventSource) {
+      openJobEventStream(jobId, state.jobEvents.at(-1)?.event_id || 0);
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    updateControls();
+  }
+}
+
+function openJobEventStream(jobId, afterId) {
+  closeJobEventSource();
+  const source = new EventSource(
+    `/api/jobs/${encodeURIComponent(jobId)}/events/stream?after_id=${encodeURIComponent(afterId)}`,
+  );
+  state.jobEventSource = source;
+  source.addEventListener("job_event", (message) => {
+    if (state.activeJob?.job_id !== jobId) {
+      return;
+    }
+    try {
+      const event = JSON.parse(message.data);
+      if (!state.jobEvents.some((candidate) => candidate.event_id === event.event_id)) {
+        state.jobEvents.push(event);
+        renderJobEvents();
+      }
+      refreshActiveJob(jobId);
+    } catch {
+      closeJobEventSource();
+    }
+  });
+  source.addEventListener("error", () => {
+    source.close();
+    if (state.jobEventSource === source) {
+      state.jobEventSource = null;
+    }
+    refreshActiveJob(jobId).then(() => {
+      if (
+        state.activeJob?.job_id === jobId
+        && !TERMINAL_JOB_STATES.has(state.activeJob.status)
+        && !state.jobEventSource
+      ) {
+        window.setTimeout(() => {
+          if (state.activeJob?.job_id === jobId && !state.jobEventSource) {
+            openJobEventStream(jobId, state.jobEvents.at(-1)?.event_id || 0);
+          }
+        }, 1000);
+      }
+    });
+  });
+}
+
+function closeJobEventSource() {
+  if (state.jobEventSource) {
+    state.jobEventSource.close();
+    state.jobEventSource = null;
+  }
+}
+
+function mergeJob(job) {
+  const index = state.jobs.findIndex((candidate) => candidate.job_id === job.job_id);
+  if (index === -1) {
+    state.jobs.unshift(job);
+    return;
+  }
+  state.jobs[index] = job;
+}
+
+function renderJob(job) {
+  const status = job?.status || "idle";
+  els.jobStatus.textContent = status[0].toUpperCase() + status.slice(1);
+  els.jobStatus.className = `job-status ${status}`;
+  els.jobKind.textContent = job ? job.kind : "No job selected";
+  els.jobStep.textContent = job?.current_step || "Waiting";
+  if (typeof job?.progress === "number") {
+    els.jobProgress.value = job.progress;
+  } else {
+    els.jobProgress.removeAttribute("value");
+  }
+  if (job?.error) {
+    els.jobError.hidden = false;
+    els.jobError.textContent = `${job.error.type || job.error.code || "Error"}: ${job.error.message || "Job failed"}`;
+  } else {
+    els.jobError.hidden = true;
+    els.jobError.textContent = "";
+  }
+}
+
+function renderJobEvents() {
+  els.jobEventCount.textContent = `${state.jobEvents.length} ${state.jobEvents.length === 1 ? "event" : "events"}`;
+  els.jobEvents.replaceChildren(...state.jobEvents.map(renderJobEvent));
+  els.jobEvents.scrollTop = els.jobEvents.scrollHeight;
+}
+
+function renderJobEvent(event) {
+  const row = document.createElement("div");
+  row.className = "job-event-row";
+  const meta = document.createElement("div");
+  meta.className = "job-event-meta";
+  meta.textContent = `${formatTime(event.created_at)} · ${event.event_type}`;
+  const message = document.createElement("div");
+  message.className = event.level === "error" ? "job-event-message error" : "job-event-message";
+  message.textContent = event.message;
+  row.append(meta, message);
+  return row;
+}
+
 async function loadEvents() {
   try {
     const payload = await api("/api/events?limit=80");
@@ -536,6 +823,13 @@ function updateControls() {
   els.matchButton.disabled = !hasScreenshot || !hasTemplate;
   els.tapButton.disabled = !state.connected;
   els.swipeButton.disabled = !state.connected;
+  const selectedJobStatus = state.activeJob?.status || "idle";
+  const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
+  els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
+  els.pauseJob.disabled = selectedJobStatus !== "running";
+  els.resumeJob.disabled = selectedJobStatus !== "paused";
+  els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)
+    || selectedJobStatus === "cancelling";
 }
 
 function mergeDevice(device) {
