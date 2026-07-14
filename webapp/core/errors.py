@@ -10,6 +10,7 @@ class ErrorCode(str, Enum):
     ADB_NO_DEVICES = "adb_no_devices"
     ADB_DEVICE_OFFLINE = "adb_device_offline"
     ADB_CONNECT_FAILED = "adb_connect_failed"
+    ADB_COMMAND_FAILED = "adb_command_failed"
     DEVICE_BACKEND_NOT_FOUND = "device_backend_not_found"
     DEVICE_NOT_FOUND = "device_not_found"
     DEVICE_OFFLINE = "device_offline"

@@ -93,6 +93,15 @@ def test_capabilities_route(tmp_path: Path):
     assert response.json()["capabilities"][0]["name"] == "fake"
 
 
+def test_device_diagnostics_route(tmp_path: Path):
+    response = _client(tmp_path).get("/api/device-diagnostics")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "diagnostics": [{"backend": "fake", "available": True, "reason": None}]
+    }
+
+
 def test_connect_channels_route_preserves_capture_and_control_state(tmp_path: Path):
     class ConnectedBackend(FakeBackend):
         def list_devices(self):

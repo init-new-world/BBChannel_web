@@ -68,6 +68,23 @@ class DeviceService:
             devices.extend(backend.list_devices())
         return devices
 
+    def diagnostics(self) -> list[dict]:
+        diagnostics: list[dict] = []
+        for backend in self._backends.values():
+            provider = getattr(backend, "diagnostics", None)
+            if callable(provider):
+                diagnostics.append(provider())
+                continue
+            capability = backend.capability()
+            diagnostics.append(
+                {
+                    "backend": backend.name,
+                    "available": capability.available,
+                    "reason": capability.reason,
+                }
+            )
+        return diagnostics
+
     def connect(self, backend_name: str, device_id: str) -> ConnectionState:
         return self.connect_channels(
             capture_backend=backend_name,

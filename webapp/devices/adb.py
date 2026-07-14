@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import shutil
@@ -8,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from ipaddress import ip_address
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep as system_sleep
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import Capability, DeviceInfo, OperationResult
@@ -23,6 +24,31 @@ DEFAULT_DETAILS_TIMEOUT_SECONDS = 2.0
 
 CommandRunner = Callable[[list[str], bool, float], subprocess.CompletedProcess]
 TcpProbe = Callable[[str, int, float], bool]
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AdbRetryConfig:
+    snapshot_attempts: int = 3
+    control_attempts: int = 2
+    initial_delay_seconds: float = 0.1
+    max_delay_seconds: float = 0.5
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "AdbRetryConfig":
+        values = os.environ if env is None else env
+        return cls(
+            snapshot_attempts=_positive_int(values.get("BBCHANNEL_ADB_SNAPSHOT_ATTEMPTS"), 3),
+            control_attempts=_positive_int(values.get("BBCHANNEL_ADB_CONTROL_ATTEMPTS"), 2),
+            initial_delay_seconds=_non_negative_float(
+                values.get("BBCHANNEL_ADB_RETRY_DELAY_SECONDS"),
+                0.1,
+            ),
+            max_delay_seconds=_non_negative_float(
+                values.get("BBCHANNEL_ADB_RETRY_MAX_DELAY_SECONDS"),
+                0.5,
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -87,6 +113,24 @@ def _env_milliseconds(value: str | None, default_seconds: float) -> float:
     if value is None:
         return default_seconds
     return max(int(value), 1) / 1000
+
+
+def _positive_int(value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return max(int(value), 1)
+    except ValueError:
+        return default
+
+
+def _non_negative_float(value: str | None, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return max(float(value), 0.0)
+    except ValueError:
+        return default
 
 
 def default_adb_candidates() -> list[Path]:
@@ -241,12 +285,16 @@ class AdbBackend:
         discovery_config: AdbDiscoveryConfig | None = None,
         probe_tcp: TcpProbe = probe_tcp,
         run_command: CommandRunner | None = None,
+        retry_config: AdbRetryConfig | None = None,
+        sleep: Callable[[float], None] = system_sleep,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.adb_path = self._find_adb(adb_candidates or default_adb_candidates())
         self.discovery_config = discovery_config or AdbDiscoveryConfig.from_env()
         self._probe_tcp = probe_tcp
         self._run_command = run_command
+        self.retry_config = retry_config or AdbRetryConfig.from_env()
+        self._sleep = sleep
         self._last_discovery_at = 0.0
 
     def capability(self) -> Capability:
@@ -257,6 +305,43 @@ class AdbBackend:
                 reason="ADB executable was not found.",
             )
         return Capability(name=self.name, available=True, reason=None)
+
+    def diagnostics(self) -> dict[str, object]:
+        details: dict[str, object] = {
+            "backend": self.name,
+            "available": self.adb_path is not None,
+            "path": str(self.adb_path) if self.adb_path is not None else None,
+            "retry": {
+                "snapshot_attempts": self.retry_config.snapshot_attempts,
+                "control_attempts": self.retry_config.control_attempts,
+                "initial_delay_seconds": self.retry_config.initial_delay_seconds,
+                "max_delay_seconds": self.retry_config.max_delay_seconds,
+            },
+        }
+        if self.adb_path is None:
+            details["error"] = "ADB executable was not found."
+            return details
+        try:
+            version = self._run(["version"], text=True, timeout_seconds=3.0).stdout
+            devices = parse_adb_devices(
+                self._run(["devices", "-l"], text=True, timeout_seconds=3.0).stdout
+            )
+        except AppError as exc:
+            details["server_reachable"] = False
+            details["error"] = exc.to_response()["error"]
+            return details
+        status_counts: dict[str, int] = {}
+        for device in devices:
+            status_counts[device.status] = status_counts.get(device.status, 0) + 1
+        details.update(
+            {
+                "server_reachable": True,
+                "version": version.splitlines()[0].strip() if version else "",
+                "device_count": len(devices),
+                "device_statuses": status_counts,
+            }
+        )
+        return details
 
     def list_devices(self) -> list[DeviceInfo]:
         devices = self._list_devices_once()
@@ -291,11 +376,24 @@ class AdbBackend:
         return device
 
     def snapshot(self, device_id: str) -> bytes:
-        return self._run(["-s", device_id, "exec-out", "screencap", "-p"]).stdout
+        result, _attempts = self._run_with_retry(
+            ["-s", device_id, "exec-out", "screencap", "-p"],
+            attempts=self.retry_config.snapshot_attempts,
+        )
+        return result.stdout
 
     def tap(self, device_id: str, x: int, y: int) -> OperationResult:
-        self._run(["-s", device_id, "shell", "input", "tap", str(x), str(y)], text=True)
-        return OperationResult(ok=True, action="tap", message=f"Tapped {x},{y}")
+        _result, attempts = self._run_with_retry(
+            ["-s", device_id, "shell", "input", "tap", str(x), str(y)],
+            text=True,
+            attempts=self.retry_config.control_attempts,
+        )
+        return OperationResult(
+            ok=True,
+            action="tap",
+            message=f"Tapped {x},{y}",
+            data={"attempts": attempts},
+        )
 
     def swipe(
         self,
@@ -306,7 +404,7 @@ class AdbBackend:
         y2: int,
         duration_ms: int,
     ) -> OperationResult:
-        self._run(
+        _result, attempts = self._run_with_retry(
             [
                 "-s",
                 device_id,
@@ -320,8 +418,52 @@ class AdbBackend:
                 str(duration_ms),
             ],
             text=True,
+            attempts=self.retry_config.control_attempts,
         )
-        return OperationResult(ok=True, action="swipe", message="Swipe sent")
+        return OperationResult(
+            ok=True,
+            action="swipe",
+            message="Swipe sent",
+            data={"attempts": attempts},
+        )
+
+    def _run_with_retry(
+        self,
+        args: list[str],
+        *,
+        attempts: int,
+        text: bool = False,
+    ) -> tuple[subprocess.CompletedProcess, int]:
+        delay = min(
+            self.retry_config.initial_delay_seconds,
+            self.retry_config.max_delay_seconds,
+        )
+        last_error: AppError | None = None
+        for attempt in range(1, max(attempts, 1) + 1):
+            try:
+                return self._run(args, text=text), attempt
+            except AppError as exc:
+                last_error = exc
+                if attempt >= attempts or exc.code not in _retryable_codes(args):
+                    break
+                logger.warning(
+                    "Retrying ADB command after failure.",
+                    extra={
+                        "adb_args": args,
+                        "attempt": attempt,
+                        "max_attempts": attempts,
+                        "error_code": exc.code.value,
+                    },
+                )
+                if delay > 0:
+                    self._sleep(delay)
+                delay = min(delay * 2, self.retry_config.max_delay_seconds)
+        assert last_error is not None
+        raise AppError(
+            last_error.code,
+            last_error.message,
+            {**last_error.details, "attempts": max(attempts, 1)},
+        ) from last_error
 
     def _list_devices_once(self) -> list[DeviceInfo]:
         output = self._run(["devices", "-l"], text=True).stdout
@@ -419,16 +561,18 @@ class AdbBackend:
             raise AppError(ErrorCode.ADB_NOT_FOUND, "ADB executable was not found.")
         command = [str(self.adb_path), *args]
         timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
-        if self._run_command is not None:
-            return self._run_command(command, text, timeout)
         try:
-            return subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                timeout=timeout,
-                text=text,
-            )
+            if self._run_command is not None:
+                result = self._run_command(command, text, timeout)
+                if result.returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        result.returncode,
+                        command,
+                        output=result.stdout,
+                        stderr=result.stderr,
+                    )
+                return result
+            return subprocess.run(command, check=True, capture_output=True, timeout=timeout, text=text)
         except subprocess.TimeoutExpired as exc:
             raise AppError(
                 ErrorCode.ADB_TIMEOUT,
@@ -436,9 +580,9 @@ class AdbBackend:
                 {"args": args},
             ) from exc
         except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            stderr = _decode_output(exc.stderr)
             raise AppError(
-                ErrorCode.SNAPSHOT_FAILED if "screencap" in args else ErrorCode.ADB_NOT_FOUND,
+                _command_error_code(args),
                 stderr or "ADB command failed.",
                 {"args": args, "returncode": exc.returncode},
             ) from exc
@@ -489,3 +633,23 @@ def _device_display_name(details: dict[str, object], fallback: str) -> str:
     if brand and model and brand.lower() not in model.lower():
         return f"{brand} {model}"
     return model or fallback
+
+
+def _command_error_code(args: list[str]) -> ErrorCode:
+    if "screencap" in args:
+        return ErrorCode.SNAPSHOT_FAILED
+    if "input" in args and "tap" in args:
+        return ErrorCode.TAP_FAILED
+    if "input" in args and "swipe" in args:
+        return ErrorCode.SWIPE_FAILED
+    return ErrorCode.ADB_COMMAND_FAILED
+
+
+def _retryable_codes(args: list[str]) -> set[ErrorCode]:
+    return {ErrorCode.ADB_TIMEOUT, _command_error_code(args)}
+
+
+def _decode_output(value: str | bytes | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return value.strip() if isinstance(value, str) else ""

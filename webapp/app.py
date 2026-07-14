@@ -134,6 +134,10 @@ def create_app(
     def devices() -> dict[str, list[dict]]:
         return {"devices": [device.to_dict() for device in device_service.list_devices()]}
 
+    @app.get("/api/device-diagnostics")
+    def device_diagnostics() -> dict[str, list[dict]]:
+        return {"diagnostics": device_service.diagnostics()}
+
     @app.get("/api/state")
     def state() -> dict:
         return device_service.state().to_dict()
@@ -253,6 +257,7 @@ def _status_code_for(code: ErrorCode) -> int:
         return 503
     if code in {
         ErrorCode.ADB_TIMEOUT,
+        ErrorCode.ADB_COMMAND_FAILED,
         ErrorCode.SNAPSHOT_FAILED,
         ErrorCode.TAP_FAILED,
         ErrorCode.SWIPE_FAILED,

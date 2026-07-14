@@ -7,6 +7,7 @@ from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import (
     AdbBackend,
     AdbDiscoveryConfig,
+    AdbRetryConfig,
     candidate_adb_endpoints,
     detect_wsl_host_ip,
     normalize_adb_endpoint,
@@ -240,3 +241,101 @@ def test_find_adb_prefers_existing_candidate(tmp_path: Path):
     backend = AdbBackend(adb_candidates=[candidate])
 
     assert backend.adb_path == candidate
+
+
+def test_snapshot_retries_transient_command_failure(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+    attempts = 0
+    delays: list[float] = []
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return CompletedProcess(command, 1, stdout=b"", stderr=b"device offline")
+        return CompletedProcess(command, 0, stdout=b"png", stderr=b"")
+
+    backend = AdbBackend(
+        adb_candidates=[candidate],
+        run_command=run_command,
+        retry_config=AdbRetryConfig(snapshot_attempts=3, initial_delay_seconds=0.2),
+        sleep=delays.append,
+    )
+
+    assert backend.snapshot("device-1") == b"png"
+    assert attempts == 2
+    assert delays == [0.2]
+
+
+def test_tap_reports_retry_attempt_count(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+    attempts = 0
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        nonlocal attempts
+        attempts += 1
+        return CompletedProcess(
+            command,
+            0 if attempts == 2 else 1,
+            stdout="",
+            stderr="transport error",
+        )
+
+    backend = AdbBackend(
+        adb_candidates=[candidate],
+        run_command=run_command,
+        retry_config=AdbRetryConfig(control_attempts=2, initial_delay_seconds=0),
+    )
+
+    result = backend.tap("device-1", 10, 20)
+
+    assert result.data == {"attempts": 2}
+
+
+def test_adb_failure_uses_action_specific_error_and_attempts(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        return CompletedProcess(command, 1, stdout="", stderr="input failed")
+
+    backend = AdbBackend(
+        adb_candidates=[candidate],
+        run_command=run_command,
+        retry_config=AdbRetryConfig(control_attempts=2, initial_delay_seconds=0),
+    )
+
+    with pytest.raises(AppError) as exc_info:
+        backend.swipe("device-1", 1, 2, 3, 4, 300)
+
+    assert exc_info.value.code == ErrorCode.SWIPE_FAILED
+    assert exc_info.value.details["attempts"] == 2
+
+
+def test_adb_diagnostics_reports_version_and_device_statuses(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        args = command[1:]
+        if args == ["version"]:
+            return CompletedProcess(command, 0, stdout="Android Debug Bridge version 1.0.41\n", stderr="")
+        if args == ["devices", "-l"]:
+            return CompletedProcess(
+                command,
+                0,
+                stdout="List of devices attached\none device\ntwo offline\n",
+                stderr="",
+            )
+        raise AssertionError(args)
+
+    backend = AdbBackend(adb_candidates=[candidate], run_command=run_command)
+
+    diagnostics = backend.diagnostics()
+
+    assert diagnostics["server_reachable"] is True
+    assert diagnostics["version"] == "Android Debug Bridge version 1.0.41"
+    assert diagnostics["device_count"] == 2
+    assert diagnostics["device_statuses"] == {"device": 1, "offline": 1}
