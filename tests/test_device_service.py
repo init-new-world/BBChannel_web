@@ -1,9 +1,12 @@
 import threading
+from io import BytesIO
 
 import pytest
+from PIL import Image
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import Capability, DeviceInfo, OperationResult
+from webapp.devices.coordinates import FrameNormalizer
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 
@@ -158,3 +161,46 @@ def test_different_endpoints_allow_snapshot_and_tap_concurrently():
     release_snapshot.set()
     snapshot_thread.join(timeout=2)
     assert not snapshot_thread.is_alive()
+
+
+def test_device_service_normalizes_frame_and_maps_actions_to_raw_screen():
+    class ImageBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.swipes = []
+
+        def snapshot(self, device_id):
+            image = Image.new("RGB", (2400, 1080), (20, 40, 60))
+            output = BytesIO()
+            image.save(output, format="PNG")
+            return output.getvalue()
+
+        def swipe(self, device_id, x1, y1, x2, y2, duration_ms):
+            self.swipes.append((device_id, x1, y1, x2, y2, duration_ms))
+            return OperationResult(ok=True, action="swipe", message="swipe")
+
+    backend = ImageBackend()
+    service = DeviceService([backend], EventLog(), frame_normalizer=FrameNormalizer())
+    service.connect("fake", "dev1")
+
+    with pytest.raises(AppError) as exc_info:
+        service.tap(0, 360)
+    assert exc_info.value.code == ErrorCode.SCREEN_GEOMETRY_UNAVAILABLE
+
+    screenshot = service.snapshot()
+    with Image.open(BytesIO(screenshot)) as image:
+        assert image.size == (1280, 720)
+    assert service.screen_geometry()["content"] == {
+        "x": 240,
+        "y": 0,
+        "width": 1920,
+        "height": 1080,
+    }
+
+    tap_result = service.tap(0, 360)
+    swipe_result = service.swipe(0, 0, 1280, 720, 300)
+
+    assert backend.taps == [("dev1", 240, 540)]
+    assert backend.swipes == [("dev1", 240, 0, 2160, 1079, 300)]
+    assert tap_result.data["mapped"] == [240, 540]
+    assert swipe_result.data["mapped"] == [[240, 0], [2160, 1079]]

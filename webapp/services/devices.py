@@ -11,15 +11,23 @@ from webapp.core.models import (
     OperationResult,
 )
 from webapp.devices.base import DeviceBackend
+from webapp.devices.coordinates import FrameNormalizer, ScreenTransform
 from webapp.services.event_log import EventLog
 
 
 class DeviceService:
-    def __init__(self, backends: list[DeviceBackend], event_log: EventLog) -> None:
+    def __init__(
+        self,
+        backends: list[DeviceBackend],
+        event_log: EventLog,
+        frame_normalizer: FrameNormalizer | None = None,
+    ) -> None:
         self._backends = {backend.name: backend for backend in backends}
         self._event_log = event_log
         self._capture: DeviceEndpoint | None = None
         self._control: DeviceEndpoint | None = None
+        self._frame_normalizer = frame_normalizer
+        self._screen_transform: ScreenTransform | None = None
         self._state_lock = threading.RLock()
         self._endpoint_locks_guard = threading.Lock()
         self._endpoint_locks: dict[str, threading.RLock] = {}
@@ -45,6 +53,11 @@ class DeviceService:
         if capture_key == control_key:
             return capture_key
         return f"capture={capture_key};control={control_key}"
+
+    def screen_geometry(self) -> dict | None:
+        with self._state_lock:
+            transform = self._screen_transform
+        return transform.to_dict() if transform is not None else None
 
     def capabilities(self) -> list[Capability]:
         return [backend.capability() for backend in self._backends.values()]
@@ -76,6 +89,7 @@ class DeviceService:
         with self._state_lock:
             self._capture = capture
             self._control = control
+            self._screen_transform = None
         self._event_log.info(
             "connect",
             "Device session connected.",
@@ -109,6 +123,7 @@ class DeviceService:
         with self._state_lock:
             self._capture = None
             self._control = None
+            self._screen_transform = None
         if previous_state.capture is not None or previous_state.control is not None:
             self._event_log.info(
                 "disconnect",
@@ -129,36 +144,63 @@ class DeviceService:
         with self._lock_for(endpoint):
             try:
                 data = backend.snapshot(endpoint.device_id)
+                if self._frame_normalizer is not None:
+                    frame = self._frame_normalizer.normalize(data)
+                    data = frame.png
+                    with self._state_lock:
+                        self._screen_transform = frame.transform
             except AppError as exc:
+                if self._frame_normalizer is not None:
+                    with self._state_lock:
+                        self._screen_transform = None
                 self._event_log.error("snapshot", exc.message, exc.details)
                 raise
         self._event_log.info(
             "snapshot",
             "Screenshot captured.",
-            {"backend": endpoint.backend, "device_id": endpoint.device_id},
+            {
+                "backend": endpoint.backend,
+                "device_id": endpoint.device_id,
+                "geometry": self.screen_geometry(),
+            },
         )
         return data
 
     def tap(self, x: int, y: int) -> OperationResult:
         backend, endpoint = self._require_control()
+        mapped_x, mapped_y = self._map_point(x, y)
         with self._lock_for(endpoint):
             try:
-                result = backend.tap(endpoint.device_id, x, y)
+                result = backend.tap(endpoint.device_id, mapped_x, mapped_y)
             except AppError as exc:
                 self._event_log.error("tap", exc.message, exc.details)
                 raise
         self._event_log.info(
             "tap",
             result.message,
-            {"backend": endpoint.backend, "device_id": endpoint.device_id, "x": x, "y": y},
+            {
+                "backend": endpoint.backend,
+                "device_id": endpoint.device_id,
+                "requested": [x, y],
+                "mapped": [mapped_x, mapped_y],
+            },
         )
-        return result
+        return _operation_with_mapping(result, [x, y], [mapped_x, mapped_y])
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> OperationResult:
         backend, endpoint = self._require_control()
+        mapped_start = self._map_point(x1, y1)
+        mapped_end = self._map_point(x2, y2)
         with self._lock_for(endpoint):
             try:
-                result = backend.swipe(endpoint.device_id, x1, y1, x2, y2, duration_ms)
+                result = backend.swipe(
+                    endpoint.device_id,
+                    mapped_start[0],
+                    mapped_start[1],
+                    mapped_end[0],
+                    mapped_end[1],
+                    duration_ms,
+                )
             except AppError as exc:
                 self._event_log.error("swipe", exc.message, exc.details)
                 raise
@@ -168,12 +210,16 @@ class DeviceService:
             {
                 "backend": endpoint.backend,
                 "device_id": endpoint.device_id,
-                "from": [x1, y1],
-                "to": [x2, y2],
+                "requested": [[x1, y1], [x2, y2]],
+                "mapped": [list(mapped_start), list(mapped_end)],
                 "duration_ms": duration_ms,
             },
         )
-        return result
+        return _operation_with_mapping(
+            result,
+            [[x1, y1], [x2, y2]],
+            [list(mapped_start), list(mapped_end)],
+        )
 
     def _validate_endpoint(self, backend_name: str, device_id: str) -> DeviceEndpoint:
         backend = self._backend_for(backend_name)
@@ -226,6 +272,31 @@ class DeviceService:
         with self._endpoint_locks_guard:
             return self._endpoint_locks.setdefault(key, threading.RLock())
 
+    def _map_point(self, x: int, y: int) -> tuple[int, int]:
+        with self._state_lock:
+            transform = self._screen_transform
+        if transform is None:
+            if self._frame_normalizer is not None:
+                raise AppError(
+                    ErrorCode.SCREEN_GEOMETRY_UNAVAILABLE,
+                    "Capture a screenshot before sending mapped device actions.",
+                )
+            return x, y
+        return transform.logical_to_raw(x, y)
+
 
 def _endpoint_key(endpoint: DeviceEndpoint) -> str:
     return f"{endpoint.backend}:{endpoint.device_id}"
+
+
+def _operation_with_mapping(
+    result: OperationResult,
+    requested: list,
+    mapped: list,
+) -> OperationResult:
+    return OperationResult(
+        ok=result.ok,
+        action=result.action,
+        message=result.message,
+        data={**result.data, "requested": requested, "mapped": mapped},
+    )

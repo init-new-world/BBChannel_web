@@ -16,6 +16,7 @@ from webapp.automation import register_diagnostic_job
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
 from webapp.devices.mumu import MumuBackend
+from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager
 from webapp.services.devices import DeviceService
@@ -83,6 +84,7 @@ def create_app(
             ReplayBackend(PROJECT_ROOT / "runtime" / "replays"),
         ],
         event_log,
+        frame_normalizer=FrameNormalizer(),
     )
     recognition = RecognitionService(resources)
     script_data = ScriptDataService(resources.data_dir)
@@ -135,6 +137,10 @@ def create_app(
     @app.get("/api/state")
     def state() -> dict:
         return device_service.state().to_dict()
+
+    @app.get("/api/screen/geometry")
+    def screen_geometry() -> dict:
+        return {"geometry": device_service.screen_geometry()}
 
     @app.post("/api/connect")
     def connect(request: ConnectRequest) -> dict:
