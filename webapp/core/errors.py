@@ -22,6 +22,9 @@ class ErrorCode(str, Enum):
     MATCH_FAILED = "match_failed"
     MUMU_UNSUPPORTED_PLATFORM = "mumu_unsupported_platform"
     MUMU_DLL_NOT_FOUND = "mumu_dll_not_found"
+    REPLAY_SESSION_NOT_FOUND = "replay_session_not_found"
+    REPLAY_MANIFEST_INVALID = "replay_manifest_invalid"
+    REPLAY_ACTION_MISMATCH = "replay_action_mismatch"
 
 
 class AppError(Exception):
