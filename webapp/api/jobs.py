@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from webapp.runtime import JobManager, JobStateError, UnknownJobKindError
+from webapp.runtime import (
+    DeviceKeyRequiredError,
+    JobManager,
+    JobStateError,
+    UnknownJobKindError,
+)
 
 
 class StartJobRequest(BaseModel):
@@ -18,7 +23,10 @@ class StartJobRequest(BaseModel):
     device_key: str | None = None
 
 
-def create_job_router(job_manager: JobManager) -> APIRouter:
+def create_job_router(
+    job_manager: JobManager,
+    device_key_resolver: Callable[[], str | None] | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["jobs"])
 
     @router.get("/job-kinds")
@@ -28,15 +36,34 @@ def create_job_router(job_manager: JobManager) -> APIRouter:
     @router.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
     def start_job(request: StartJobRequest) -> dict[str, Any]:
         try:
+            device_key = request.device_key
+            if job_manager.requires_device(request.kind) and device_key_resolver is not None:
+                active_device_key = device_key_resolver()
+                if active_device_key is None:
+                    raise DeviceKeyRequiredError("No device is connected.")
+                if device_key is not None and device_key != active_device_key:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "DEVICE_KEY_MISMATCH",
+                            "active_device_key": active_device_key,
+                        },
+                    )
+                device_key = active_device_key
             job = job_manager.start(
                 request.kind,
                 request.payload,
-                device_key=request.device_key,
+                device_key=device_key,
             )
         except UnknownJobKindError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"code": "UNKNOWN_JOB_KIND", "kind": request.kind},
+            ) from exc
+        except DeviceKeyRequiredError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "DEVICE_REQUIRED", "message": str(exc)},
             ) from exc
         return {"job": job.to_dict()}
 

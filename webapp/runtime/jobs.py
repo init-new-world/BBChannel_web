@@ -28,6 +28,10 @@ class JobStateError(RuntimeError):
     pass
 
 
+class DeviceKeyRequiredError(JobStateError):
+    pass
+
+
 class RunControl:
     def __init__(self) -> None:
         self._cancelled = threading.Event()
@@ -146,6 +150,12 @@ class _JobExecution:
     future: Future[None] | None = None
 
 
+@dataclass(frozen=True)
+class _RegisteredJob:
+    handler: JobHandler
+    requires_device: bool
+
+
 class JobManager:
     def __init__(
         self,
@@ -161,7 +171,7 @@ class JobManager:
             thread_name_prefix="bbchannel-job",
         )
         self._lease_registry = lease_registry or DeviceLeaseRegistry()
-        self._handlers: dict[str, JobHandler] = {}
+        self._handlers: dict[str, _RegisteredJob] = {}
         self._executions: dict[str, _JobExecution] = {}
         self._guard = threading.Lock()
         self._closed = False
@@ -172,14 +182,29 @@ class JobManager:
     def __exit__(self, _exc_type, _exc, _traceback) -> None:
         self.close()
 
-    def register(self, kind: str, handler: JobHandler) -> None:
+    def register(
+        self,
+        kind: str,
+        handler: JobHandler,
+        *,
+        requires_device: bool = False,
+    ) -> None:
         normalized = kind.strip()
         if not normalized:
             raise ValueError("Job kind must not be empty.")
-        self._handlers[normalized] = handler
+        self._handlers[normalized] = _RegisteredJob(handler, requires_device)
 
     def registered_kinds(self) -> list[str]:
         return sorted(self._handlers)
+
+    def has_kind(self, kind: str) -> bool:
+        return kind in self._handlers
+
+    def requires_device(self, kind: str) -> bool:
+        definition = self._handlers.get(kind)
+        if definition is None:
+            raise UnknownJobKindError(kind)
+        return definition.requires_device
 
     def start(
         self,
@@ -190,9 +215,11 @@ class JobManager:
     ) -> JobRecord:
         if self._closed:
             raise RuntimeError("Job manager is closed.")
-        handler = self._handlers.get(kind)
-        if handler is None:
+        definition = self._handlers.get(kind)
+        if definition is None:
             raise UnknownJobKindError(kind)
+        if definition.requires_device and device_key is None:
+            raise DeviceKeyRequiredError(f"Job kind {kind} requires a connected device.")
 
         job_id = uuid4().hex
         record = self.database.create_job(job_id, kind, payload or {}, device_key)
@@ -203,7 +230,7 @@ class JobManager:
         execution.future = self._executor.submit(
             self._run_job,
             record,
-            handler,
+            definition.handler,
             execution,
         )
         return record

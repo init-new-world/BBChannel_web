@@ -24,7 +24,9 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
             job_id = response.json()["job"]["job_id"]
             completed = manager.wait(job_id, timeout=2)
 
-            assert client.get("/api/job-kinds").json() == {"kinds": ["echo"]}
+            assert client.get("/api/job-kinds").json() == {
+                "kinds": ["diagnostic.template-tap", "echo"]
+            }
             assert client.get(f"/api/jobs/{job_id}").json()["job"]["status"] == "succeeded"
             assert client.get("/api/jobs").json()["jobs"][0]["job_id"] == job_id
             assert completed.result == {"echo": 9}
@@ -63,6 +65,21 @@ def test_job_api_returns_structured_errors(tmp_path: Path):
     assert unknown.json()["detail"]["code"] == "UNKNOWN_JOB_KIND"
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "JOB_NOT_FOUND"
+
+
+def test_device_job_requires_active_device(tmp_path: Path):
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        with TestClient(_app(tmp_path, manager)) as client:
+            response = client.post(
+                "/api/jobs",
+                json={
+                    "kind": "diagnostic.template-tap",
+                    "payload": {"template_path": "target.png"},
+                },
+            )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "DEVICE_REQUIRED"
 
 
 def test_job_event_stream_replays_terminal_job_and_closes(tmp_path: Path):

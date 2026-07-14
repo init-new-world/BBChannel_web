@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from webapp.runtime import JobDatabase, JobManager, JobStateError, JobStatus
+from webapp.runtime import (
+    DeviceKeyRequiredError,
+    JobDatabase,
+    JobManager,
+    JobStateError,
+    JobStatus,
+)
 
 
 def _manager(tmp_path: Path, max_workers: int = 4) -> JobManager:
@@ -148,3 +154,14 @@ def test_job_manager_rejects_unknown_kind_and_invalid_transition(tmp_path: Path)
         manager.wait(job.job_id, timeout=2)
         with pytest.raises(JobStateError):
             manager.pause(job.job_id)
+
+
+def test_job_manager_requires_device_key_for_device_job(tmp_path: Path):
+    with _manager(tmp_path) as manager:
+        manager.register("device-job", lambda _context, _payload: None, requires_device=True)
+
+        with pytest.raises(DeviceKeyRequiredError):
+            manager.start("device-job")
+
+        job = manager.start("device-job", device_key="replay:recording-1")
+        assert manager.wait(job.job_id, timeout=2).status == JobStatus.SUCCEEDED

@@ -12,9 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from webapp.api import create_job_router
+from webapp.automation import register_diagnostic_job
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
 from webapp.devices.mumu import MumuBackend
+from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
@@ -68,7 +70,11 @@ def create_app(
         data_dir or PROJECT_ROOT / "data",
     )
     device_service = device_service or DeviceService(
-        [MumuBackend(), AdbBackend()],
+        [
+            MumuBackend(),
+            AdbBackend(),
+            ReplayBackend(PROJECT_ROOT / "runtime" / "replays"),
+        ],
         event_log,
     )
     recognition = RecognitionService(resources)
@@ -80,6 +86,13 @@ def create_app(
             str(PROJECT_ROOT / "runtime" / "bbchannel.db"),
         )
         job_manager = JobManager(JobDatabase(runtime_db_path or default_db_path))
+    register_diagnostic_job(job_manager, device_service, recognition)
+
+    def active_device_key() -> str | None:
+        state = device_service.state()
+        if not state.connected or state.backend is None or state.device_id is None:
+            return None
+        return f"{state.backend}:{state.device_id}"
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -194,7 +207,7 @@ def create_app(
     def events(limit: int | None = None) -> dict[str, list[dict]]:
         return {"events": event_log.recent(limit)}
 
-    app.include_router(create_job_router(job_manager))
+    app.include_router(create_job_router(job_manager, active_device_key))
 
     static_dir = Path(__file__).with_name("static")
     if static_dir.exists():
