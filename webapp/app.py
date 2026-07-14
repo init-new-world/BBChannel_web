@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Query, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -191,6 +191,28 @@ def create_app(
     @app.get("/api/templates")
     def templates() -> dict[str, list[str]]:
         return {"templates": resources.list_templates()}
+
+    @app.get("/api/template-index")
+    def template_index(
+        prefix: str | None = None,
+        query: str | None = None,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=200, ge=1, le=1000),
+    ) -> dict:
+        return resources.template_index(
+            prefix=prefix,
+            query=query,
+            offset=offset,
+            limit=limit,
+        )
+
+    @app.post("/api/template-index/refresh")
+    def refresh_template_index() -> dict[str, int]:
+        return {"total": resources.refresh_template_index()}
+
+    @app.get("/api/template-metadata/{template_path:path}")
+    def template_metadata(template_path: str) -> dict:
+        return resources.template_metadata(template_path)
 
     @app.get("/api/settings")
     def settings() -> dict[str, list[dict[str, str]]]:

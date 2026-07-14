@@ -168,6 +168,29 @@ def test_templates_route(tmp_path: Path):
     assert response.json() == {"templates": ["assist/icon.png"]}
 
 
+def test_template_index_and_metadata_routes(tmp_path: Path):
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    template = assets / "battle" / "CH" / "target.png"
+    template.parent.mkdir(parents=True)
+    from PIL import Image
+
+    Image.new("RGB", (12, 8), "red").save(template)
+
+    index_response = client.get(
+        "/api/template-index",
+        params={"prefix": "battle/CH", "query": "TARGET", "limit": 10},
+    )
+    metadata_response = client.get("/api/template-metadata/battle/CH/target.png")
+
+    assert index_response.status_code == 200
+    assert index_response.json()["total"] == 1
+    assert index_response.json()["entries"][0]["category"] == "battle"
+    assert metadata_response.status_code == 200
+    assert metadata_response.json()["width"] == 12
+    assert metadata_response.json()["height"] == 8
+
+
 def test_settings_routes_expose_data_dir_configs(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)
