@@ -379,12 +379,14 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
         "supported_action_count": 3,
         "unsupported_action_count": 0,
         "tap_count": 4,
+        "execution_tap_count": 7,
     }
     assert payload["execution"] == {
         "skills": {
             "ready": False,
             "reason": "Program contains non-skill actions.",
-        }
+        },
+        "battle": {"ready": True, "reason": None},
     }
     actions = payload["rounds"][0]["turns"][0]["actions"]
     assert actions[0]["steps"] == [
@@ -397,6 +399,43 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
     assert actions[2]["steps"] == [
         {"type": "tap", "role": "np_3", "x": 870, "y": 200},
     ]
+    assert payload["rounds"][0]["turns"][0]["command_phase"] == {
+        "supported": True,
+        "steps": [
+            {"type": "tap", "role": "attack", "x": 1150, "y": 600},
+            {"type": "tap", "role": "np_3", "x": 870, "y": 200},
+            {"type": "tap", "role": "face_card_1", "x": 150, "y": 500},
+            {"type": "tap", "role": "face_card_2", "x": 375, "y": 500},
+        ],
+        "reason": None,
+    }
+def test_setting_program_requires_card_recognition_for_strategy(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "strategy.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_strategy": [_strategy_payload()],
+        },
+    )
+
+    response = client.get("/api/settings/strategy/program")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution"]["battle"] == {
+        "ready": False,
+        "reason": "Program contains unsupported actions.",
+    }
+    assert payload["rounds"][0]["turns"][0]["command_phase"] == {
+        "supported": False,
+        "steps": [],
+        "reason": "Card strategy recognition is not available yet.",
+    }
 
 
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):

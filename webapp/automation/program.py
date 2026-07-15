@@ -18,6 +18,8 @@ SKILL_TARGET_POINTS = ((350, 440), (640, 440), (970, 440))
 MASTER_SKILL_MENU_POINT = (1131, 320)
 MASTER_SKILL_POINTS = ((850, 310), (940, 310), (1020, 310))
 NP_POINTS = ((500, 110), (650, 200), (870, 200))
+ATTACK_POINT = (1150, 600)
+FACE_CARD_POINTS = ((150, 500), (375, 500), (650, 500), (900, 500), (1175, 500))
 
 
 def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
@@ -25,17 +27,33 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
     action_count = 0
     supported_action_count = 0
     tap_count = 0
+    execution_tap_count = 0
     source_types: list[object] = []
+    command_phases: list[dict[str, Any]] = []
 
     for round_plan in plan["rounds"]:
         turns: list[dict[str, Any]] = []
         for turn in round_plan["turns"]:
             actions = [_compile_action(action) for action in turn["actions"]]
+            command_phase = _compile_command_phase(turn)
             action_count += len(actions)
             supported_action_count += sum(bool(action["supported"]) for action in actions)
             tap_count += sum(len(action["steps"]) for action in actions)
+            execution_tap_count += sum(
+                len(action["steps"])
+                for action in actions
+                if action["source"].get("type") == "skill"
+            )
+            execution_tap_count += len(command_phase["steps"])
             source_types.extend(action["source"].get("type") for action in actions)
-            turns.append({"turn": turn["turn"], "actions": actions})
+            command_phases.append(command_phase)
+            turns.append(
+                {
+                    "turn": turn["turn"],
+                    "actions": actions,
+                    "command_phase": command_phase,
+                }
+            )
         rounds.append({"round": round_plan["round"], "turns": turns})
 
     unsupported_action_count = action_count - supported_action_count
@@ -43,6 +61,12 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
         action_count,
         unsupported_action_count,
         source_types,
+    )
+    battle_execution = _battle_execution_status(
+        len(command_phases),
+        unsupported_action_count,
+        source_types,
+        command_phases,
     )
     return {
         "name": plan["name"],
@@ -54,8 +78,9 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
             "supported_action_count": supported_action_count,
             "unsupported_action_count": unsupported_action_count,
             "tap_count": tap_count,
+            "execution_tap_count": execution_tap_count,
         },
-        "execution": {"skills": skill_execution},
+        "execution": {"skills": skill_execution, "battle": battle_execution},
         "validation": plan["validation"],
     }
 
@@ -72,6 +97,52 @@ def _skill_execution_status(
     if any(action_type != "skill" for action_type in source_types):
         return {"ready": False, "reason": "Program contains non-skill actions."}
     return {"ready": True, "reason": None}
+
+
+def _battle_execution_status(
+    turn_count: int,
+    unsupported_action_count: int,
+    source_types: list[object],
+    command_phases: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if turn_count == 0:
+        return {"ready": False, "reason": "Program contains no turns."}
+    if unsupported_action_count or any(not phase["supported"] for phase in command_phases):
+        return {"ready": False, "reason": "Program contains unsupported actions."}
+    if any(action_type not in {"skill", "np"} for action_type in source_types):
+        return {"ready": False, "reason": "Program contains unsupported action types."}
+    return {"ready": True, "reason": None}
+
+
+def _compile_command_phase(turn: dict[str, Any]) -> dict[str, Any]:
+    if turn.get("strategy"):
+        return {
+            "supported": False,
+            "steps": [],
+            "reason": "Card strategy recognition is not available yet.",
+        }
+
+    nps = turn.get("nps") if isinstance(turn.get("nps"), list) else []
+    if len(nps) > 3:
+        return {
+            "supported": False,
+            "steps": [],
+            "reason": "A turn cannot select more than three Noble Phantasms.",
+        }
+
+    steps = [_tap("attack", *ATTACK_POINT)]
+    for servant in nps:
+        np_action = _compile_np({"type": "np", "servant": servant})
+        if not np_action["supported"]:
+            return {
+                "supported": False,
+                "steps": [],
+                "reason": np_action["reason"],
+            }
+        steps.extend(np_action["steps"])
+    for index, (x, y) in enumerate(FACE_CARD_POINTS[: 3 - len(nps)], start=1):
+        steps.append(_tap(f"face_card_{index}", x, y))
+    return {"supported": True, "steps": steps, "reason": None}
 
 
 def _compile_action(action: dict[str, Any]) -> dict[str, Any]:
