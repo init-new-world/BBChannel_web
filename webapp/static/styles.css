@@ -226,6 +226,12 @@ select:disabled {
   border-bottom: 0;
 }
 
+.panel-divider {
+  height: 1px;
+  margin: 3px 0;
+  background: var(--line);
+}
+
 .section-label {
   color: var(--muted);
   font-size: 11px;

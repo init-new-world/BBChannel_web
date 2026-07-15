@@ -89,6 +89,9 @@ const els = {
   diagnosticTimeout: document.querySelector("#diagnostic-timeout"),
   diagnosticTap: document.querySelector("#diagnostic-tap"),
   startDiagnostic: document.querySelector("#start-diagnostic"),
+  battleScriptName: document.querySelector("#battle-script-name"),
+  battleActionDelay: document.querySelector("#battle-action-delay"),
+  startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   jobHistory: document.querySelector("#job-history"),
   jobStatus: document.querySelector("#job-status"),
   jobKind: document.querySelector("#job-kind"),
@@ -184,6 +187,7 @@ function bindEvents() {
   els.screenshot.addEventListener("load", onScreenshotLoaded);
   els.screenStage.addEventListener("click", populateTapFromClick);
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
+  els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -640,10 +644,25 @@ async function startDiagnosticJob() {
     payload.verify_template_path = els.diagnosticVerifyTemplate.value;
   }
 
+  await enqueueJob("diagnostic.template-tap", payload);
+}
+
+async function startBattleDryRun() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("battle.dry-run", {
+    setting_name: settingName,
+    action_delay_seconds: Number(els.battleActionDelay.value),
+  });
+}
+
+async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
       method: "POST",
-      body: JSON.stringify({ kind: "diagnostic.template-tap", payload }),
+      body: JSON.stringify({ kind, payload }),
     });
     const job = response.job;
     mergeJob(job);
@@ -900,6 +919,7 @@ function renderSettingPlan(plan) {
   if (!plan) {
     els.settingValidation.textContent = "No setting";
     els.settingPlan.textContent = "No script selected";
+    els.battleScriptName.textContent = "No script selected";
     return;
   }
 
@@ -928,6 +948,7 @@ function renderSettingPlan(plan) {
     }
   }
   els.settingPlan.textContent = lines.join("\n");
+  els.battleScriptName.textContent = plan.name;
 }
 
 function renderStrategyDetail(strategy) {
@@ -991,6 +1012,7 @@ function updateControls() {
   const selectedJobStatus = state.activeJob?.status || "idle";
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
+  els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)
