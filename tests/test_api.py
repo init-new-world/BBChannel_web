@@ -266,6 +266,44 @@ def test_batch_match_route_returns_candidates_in_request_order(tmp_path: Path):
     ]
 
 
+def test_match_debug_route_returns_png_overlay(tmp_path: Path):
+    pytest.importorskip("cv2")
+    import base64
+    from io import BytesIO
+    from PIL import Image, ImageDraw
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    template = Image.new("RGB", (10, 10), "black")
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((1, 1, 8, 8), outline="white")
+    draw.line((1, 8, 8, 1), fill="red", width=2)
+    template.save(assets / "target.png")
+    screenshot = Image.new("RGB", (80, 60), "black")
+    screenshot.paste(template, (45, 25))
+    screenshot_bytes = BytesIO()
+    screenshot.save(screenshot_bytes, format="PNG")
+
+    response = client.post(
+        "/api/match/debug",
+        json={
+            "screenshot_base64": base64.b64encode(screenshot_bytes.getvalue()).decode("ascii"),
+            "template_path": "target.png",
+            "threshold": 0.8,
+            "roi": [40, 20, 30, 25],
+            "scales": [1.0],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["result"]["top_left"] == [45, 25]
+    overlay = base64.b64decode(payload["overlay_base64"], validate=True)
+    with Image.open(BytesIO(overlay)) as image:
+        assert image.format == "PNG"
+        assert image.size == (80, 60)
+
+
 def test_settings_routes_expose_data_dir_configs(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

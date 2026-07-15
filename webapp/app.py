@@ -282,6 +282,21 @@ def create_app(
             ]
         }
 
+    @app.post("/api/match/debug")
+    def match_template_debug(request: MatchRequest) -> dict:
+        resources.resolve_template(request.template_path)
+        result, overlay = recognition.match_template_debug(
+            _decode_base64(request.screenshot_base64),
+            request.template_path,
+            request.threshold,
+            roi=request.roi,
+            scales=request.scales,
+        )
+        return {
+            "result": result.to_dict(),
+            "overlay_base64": base64.b64encode(overlay).decode("ascii"),
+        }
+
     @app.get("/api/events")
     def events(limit: int | None = None) -> dict[str, list[dict]]:
         return {"events": event_log.recent(limit)}

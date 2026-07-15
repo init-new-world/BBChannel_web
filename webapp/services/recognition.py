@@ -60,6 +60,83 @@ class RecognitionService:
             )
         return results
 
+    def match_template_debug(
+        self,
+        screenshot: bytes,
+        template_path: str,
+        threshold: float = 0.8,
+        roi: Sequence[int] | None = None,
+        scales: Sequence[float] | None = None,
+    ) -> tuple[MatchResult, bytes]:
+        cv, _ = self._require_opencv()
+        screenshot_image = self._decode_screenshot(screenshot, template_path)
+        result = self._match_decoded(
+            screenshot_image,
+            template_path,
+            threshold=threshold,
+            roi=roi,
+            scales=scales,
+        )
+        overlay = screenshot_image.copy()
+        if result.roi is not None:
+            roi_x, roi_y, roi_width, roi_height = result.roi
+            cv.rectangle(
+                overlay,
+                (roi_x, roi_y),
+                (roi_x + roi_width - 1, roi_y + roi_height - 1),
+                (255, 210, 0),
+                1,
+            )
+        x, y = result.top_left
+        width, height = result.size
+        match_color = (55, 190, 70) if result.matched else (0, 145, 255)
+        cv.rectangle(
+            overlay,
+            (x, y),
+            (x + width - 1, y + height - 1),
+            match_color,
+            2,
+        )
+        cv.circle(overlay, tuple(result.center), 4, match_color, -1)
+        label = f"{result.confidence:.3f}  {result.scale:.2f}x"
+        font = cv.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        (label_width, label_height), baseline = cv.getTextSize(
+            label,
+            font,
+            font_scale,
+            thickness,
+        )
+        label_x = max(x, 0)
+        label_y = y - 6 if y - label_height - baseline - 8 >= 0 else y + label_height + 8
+        background_top = label_y - label_height - 4
+        cv.rectangle(
+            overlay,
+            (label_x, background_top),
+            (label_x + label_width + 6, label_y + baseline + 2),
+            (22, 28, 35),
+            -1,
+        )
+        cv.putText(
+            overlay,
+            label,
+            (label_x + 3, label_y),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+            cv.LINE_AA,
+        )
+        encoded, png = cv.imencode(".png", overlay)
+        if not encoded:
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Recognition debug overlay could not be encoded.",
+                {"template_path": template_path},
+            )
+        return result, png.tobytes()
+
     def _decode_screenshot(self, screenshot: bytes, template_path: str | None):
         cv, numpy = self._require_opencv()
         screenshot_image = cv.imdecode(

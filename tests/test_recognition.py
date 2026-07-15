@@ -2,7 +2,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.services.resources import ResourceService
@@ -167,3 +167,29 @@ def test_match_template_rejects_roi_outside_screenshot(tmp_path: Path):
         )
 
     assert exc_info.value.code == ErrorCode.MATCH_FAILED
+
+
+def test_match_template_debug_renders_roi_match_box_and_label(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = _pattern()
+    template.save(resources.assets_dir / "target.png")
+    screenshot = Image.new("RGB", (100, 60), "black")
+    screenshot.paste(template, (63, 24))
+    screenshot_bytes = _png_bytes(screenshot)
+
+    result, overlay_bytes = RecognitionService(resources).match_template_debug(
+        screenshot_bytes,
+        "target.png",
+        threshold=0.8,
+        roi=[50, 10, 40, 40],
+        scales=[1.0],
+    )
+
+    overlay = Image.open(BytesIO(overlay_bytes)).convert("RGB")
+    difference = ImageChops.difference(screenshot, overlay)
+    assert result.top_left == [63, 24]
+    assert overlay.size == screenshot.size
+    assert difference.getbbox() is not None
