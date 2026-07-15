@@ -17,6 +17,7 @@ def create_full_run_handler(
     prepare_battle: StageHandler,
     execute_battle: StageHandler,
     complete_battle: StageHandler,
+    detect_stage: StageHandler | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -62,33 +63,47 @@ def create_full_run_handler(
         completed_runs = 0
         clear_runs = 0
         run_number = 1
+        resume = payload.get("resume", True)
+        if not isinstance(resume, bool):
+            raise ValueError("resume must be a boolean.")
+        initial_stage = "assist"
+        if resume and detect_stage is not None:
+            detected = detect_stage(context, {"setting_name": normalized_name}) or {}
+            initial_stage = str(detected.get("stage") or "unknown")
+            if initial_stage not in {"assist", "prepare", "battle", "completion"}:
+                raise RuntimeError("Current battle flow stage was not recognized.")
 
         while run_number <= max_runs or (clear_ap and clear_runs < max_clear_runs):
             clearing_ap = run_number > max_runs
+            current_stage = initial_stage if run_number == 1 else "assist"
             progress = min(completed_runs / max(max_runs, 1), 0.95)
-            context.checkpoint(
-                "run.select_assist",
-                progress=progress,
-                message=f"Selecting assist for run {run_number}.",
-            )
-            assist_result = select_assist(
-                context,
-                {"setting_name": normalized_name, **stage_options["assist"]},
-            ) or {}
+            assist_result = {}
+            if current_stage == "assist":
+                context.checkpoint(
+                    "run.select_assist",
+                    progress=progress,
+                    message=f"Selecting assist for run {run_number}.",
+                )
+                assist_result = select_assist(
+                    context,
+                    {"setting_name": normalized_name, **stage_options["assist"]},
+                ) or {}
 
-            context.checkpoint(
-                "run.prepare_battle",
-                progress=progress,
-                message=f"Preparing run {run_number}.",
-            )
-            prepare_result = prepare_battle(
-                context,
-                {
-                    **stage_options["prepare"],
-                    "setting_name": normalized_name,
-                    "recover_ap": not clearing_ap,
-                },
-            ) or {}
+            prepare_result = {"ready": True}
+            if current_stage in {"assist", "prepare"}:
+                context.checkpoint(
+                    "run.prepare_battle",
+                    progress=progress,
+                    message=f"Preparing run {run_number}.",
+                )
+                prepare_result = prepare_battle(
+                    context,
+                    {
+                        **stage_options["prepare"],
+                        "setting_name": normalized_name,
+                        "recover_ap": not clearing_ap,
+                    },
+                ) or {}
             if prepare_result.get("ready") is False:
                 prepare_reason = str(
                     prepare_result.get("reason") or "battle_not_ready"
@@ -100,24 +115,25 @@ def create_full_run_handler(
                     stopped = True
                     stop_reason = prepare_reason
                 break
-            if interval_before_fight:
-                context.sleep(interval_before_fight)
-
-            context.checkpoint(
-                "run.execute_battle",
-                progress=progress,
-                message=f"Executing run {run_number}.",
-            )
-            battle_result = execute_battle(
-                context,
-                {
-                    **stage_options["battle"],
-                    "setting_name": normalized_name,
-                    "initialize_settings": first_battle_set and run_number == 1,
-                },
-            ) or {}
-            if interval_after_fight:
-                context.sleep(interval_after_fight)
+            battle_result = {}
+            if current_stage != "completion":
+                if interval_before_fight:
+                    context.sleep(interval_before_fight)
+                context.checkpoint(
+                    "run.execute_battle",
+                    progress=progress,
+                    message=f"Executing run {run_number}.",
+                )
+                battle_result = execute_battle(
+                    context,
+                    {
+                        **stage_options["battle"],
+                        "setting_name": normalized_name,
+                        "initialize_settings": first_battle_set and run_number == 1,
+                    },
+                ) or {}
+                if interval_after_fight:
+                    context.sleep(interval_after_fight)
 
             context.checkpoint(
                 "run.complete_battle",
@@ -188,6 +204,7 @@ def register_full_run_job(
     prepare_battle: StageHandler,
     execute_battle: StageHandler,
     complete_battle: StageHandler,
+    detect_stage: StageHandler | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
         return
@@ -199,6 +216,7 @@ def register_full_run_job(
             prepare_battle,
             execute_battle,
             complete_battle,
+            detect_stage,
         ),
         requires_device=True,
     )

@@ -18,12 +18,14 @@ from webapp.automation import (
     create_battle_entry_handler,
     create_battle_execute_plan_handler,
     create_completion_handler,
+    create_stage_handler,
     register_assist_job,
     register_battle_entry_job,
     register_battle_jobs,
     register_completion_job,
     register_diagnostic_job,
     register_full_run_job,
+    register_stage_job,
 )
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
@@ -162,6 +164,12 @@ def create_app(
         recognition,
         card_recognizer,
     )
+    register_stage_job(
+        job_manager,
+        script_data,
+        device_service,
+        recognition,
+    )
     register_full_run_job(
         job_manager,
         script_data,
@@ -178,6 +186,11 @@ def create_app(
             device_service,
             recognition,
             resources,
+        ),
+        detect_stage=create_stage_handler(
+            script_data,
+            device_service,
+            recognition,
         ),
     )
 

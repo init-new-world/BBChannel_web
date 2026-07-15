@@ -226,3 +226,35 @@ def test_full_run_clears_remaining_ap_without_consuming_more_items(tmp_path: Pat
     assert result.result["reason"] == "ap_cleared"
     assert [payload["recover_ap"] for payload in prepare_payloads] == [True, False]
     assert completion_payloads[0]["repeat"] is True
+
+
+def test_full_run_resumes_from_an_active_battle(tmp_path: Path):
+    calls: list[str] = []
+
+    def stage(name: str, result=None):
+        def execute(_context, _payload):
+            calls.append(name)
+            return dict(result or {})
+
+        return execute
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(),
+            stage("assist"),
+            stage("prepare", {"ready": True}),
+            stage("battle"),
+            stage("complete", {"complete": True, "drop_count": 0}),
+            detect_stage=stage("detect", {"stage": "battle"}),
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {"setting_name": "demo", "max_runs": 1},
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 1
+    assert calls == ["detect", "battle", "complete"]

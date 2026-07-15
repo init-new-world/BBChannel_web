@@ -27,10 +27,16 @@ from webapp.automation.run import (
     create_full_run_handler,
     register_full_run_job,
 )
+from webapp.automation.stage import (
+    BATTLE_DETECT_STAGE_JOB_KIND,
+    create_stage_handler,
+    register_stage_job,
+)
 
 __all__ = [
     "ASSIST_SELECT_JOB_KIND",
     "BATTLE_COMPLETE_JOB_KIND",
+    "BATTLE_DETECT_STAGE_JOB_KIND",
     "BATTLE_DRY_RUN_JOB_KIND",
     "BATTLE_EXECUTE_PLAN_JOB_KIND",
     "BATTLE_EXECUTE_SKILLS_JOB_KIND",
@@ -42,10 +48,12 @@ __all__ = [
     "create_battle_execute_plan_handler",
     "create_completion_handler",
     "create_full_run_handler",
+    "create_stage_handler",
     "register_assist_job",
     "register_battle_jobs",
     "register_completion_job",
     "register_battle_entry_job",
     "register_diagnostic_job",
     "register_full_run_job",
+    "register_stage_job",
 ]

@@ -1,0 +1,70 @@
+from pathlib import Path
+
+import pytest
+
+from webapp.automation.stage import BATTLE_DETECT_STAGE_JOB_KIND, create_stage_handler
+from webapp.runtime import JobDatabase, JobManager, JobStatus
+
+
+class _ScriptData:
+    def get_setting_plan(self, _name):
+        return {"server": "CH"}
+
+
+class _Device:
+    def snapshot(self):
+        return b"screen"
+
+
+class _Match:
+    def __init__(self, matched):
+        self.matched = matched
+
+
+class _Recognition:
+    def __init__(self, matched_name):
+        self.matched_name = matched_name
+
+    def match_template(self, _screen, template_path, **_options):
+        return _Match(template_path.endswith(f"/{self.matched_name}.png"))
+
+
+@pytest.mark.parametrize(
+    ("template", "stage"),
+    [
+        ("run_again", "completion"),
+        ("attack", "battle"),
+        ("teamDecide", "prepare"),
+        ("listupdatebtn", "assist"),
+    ],
+)
+def test_stage_handler_recognizes_current_battle_flow_page(template: str, stage: str):
+    handler = create_stage_handler(
+        _ScriptData(),
+        _Device(),
+        _Recognition(template),
+    )
+
+    result = handler(None, {"setting_name": "demo"})
+
+    assert result["stage"] == stage
+    assert result["matched_template"].endswith(f"/{template}.png")
+
+
+def test_detect_stage_job_is_device_scoped(tmp_path: Path):
+    handler = create_stage_handler(
+        _ScriptData(),
+        _Device(),
+        _Recognition("attack"),
+    )
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        manager.register(BATTLE_DETECT_STAGE_JOB_KIND, handler, requires_device=True)
+        job = manager.start(
+            BATTLE_DETECT_STAGE_JOB_KIND,
+            {"setting_name": "demo"},
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["stage"] == "battle"
