@@ -409,7 +409,7 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
         ],
         "reason": None,
     }
-def test_setting_program_requires_card_recognition_for_strategy(tmp_path: Path):
+def test_setting_program_compiles_runtime_card_strategy(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)
     _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
@@ -427,15 +427,49 @@ def test_setting_program_requires_card_recognition_for_strategy(tmp_path: Path):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    assert payload["rounds"][0]["turns"][0]["command_phase"] == {
+        "supported": True,
+        "steps": [
+            {"type": "tap", "role": "attack", "x": 1150, "y": 600},
+            {
+                "type": "strategy",
+                "role": "command_card_strategy",
+                "strategies": [_strategy_payload()],
+                "preselected_nps": [],
+                "selection_count": 3,
+            },
+        ],
+        "reason": None,
+    }
+    assert payload["summary"]["execution_tap_count"] == 4
+
+
+def test_setting_program_rejects_strategy_that_requires_critical_stars(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    strategy = _strategy_payload()
+    strategy["card2"]["criticalStar"] = 5
+    _write_json(
+        data / "settings" / "stars.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_strategy": [strategy],
+        },
+    )
+
+    payload = client.get("/api/settings/stars/program").json()
+
     assert payload["execution"]["battle"] == {
         "ready": False,
         "reason": "Program contains unsupported actions.",
     }
-    assert payload["rounds"][0]["turns"][0]["command_phase"] == {
-        "supported": False,
-        "steps": [],
-        "reason": "Card strategy recognition is not available yet.",
-    }
+    assert payload["rounds"][0]["turns"][0]["command_phase"]["reason"] == (
+        "Critical star recognition is not available yet."
+    )
 
 
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
