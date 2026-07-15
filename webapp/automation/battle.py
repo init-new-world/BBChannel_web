@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import random
 from collections import Counter
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
 
-from webapp.automation.interaction import match_touch_point, randomized_touch_point
+from webapp.automation.interaction import (
+    configured_random_time,
+    match_touch_point,
+    randomized_touch_point,
+    randomized_wait_seconds,
+)
 from webapp.automation.program import (
     ATTACK_POINT,
     COMMAND_CARD_BACK_POINT,
@@ -41,6 +45,7 @@ def initialize_battle_settings(
     server: str,
     *,
     action_wait_seconds: float = 0.5,
+    random_time: float = 0.0,
     random_touch: bool = False,
 ) -> dict[str, Any]:
     server = server.upper()
@@ -55,7 +60,7 @@ def initialize_battle_settings(
         raise RuntimeError("Battle menu button was not recognized.")
     device_service.tap(*match_touch_point(menu_button, enabled=random_touch))
     actions = ["open_menu"]
-    context.sleep(action_wait_seconds)
+    context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
 
     screenshot = device_service.snapshot()
     candidates = []
@@ -86,7 +91,7 @@ def initialize_battle_settings(
             continue
         device_service.tap(*match_touch_point(match, enabled=random_touch))
         actions.append(f"toggle_{index}")
-        context.sleep(action_wait_seconds)
+        context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
 
     screenshot = device_service.snapshot()
     back_button = recognition.match_template(
@@ -104,7 +109,7 @@ def initialize_battle_settings(
         "Initial battle settings were normalized.",
         data={"states": initial_states, "actions": actions},
     )
-    context.sleep(action_wait_seconds)
+    context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
     return {
         "changed": any(
             state != desired
@@ -451,7 +456,7 @@ def create_battle_execute_plan_handler(
         plan = script_data.get_setting_plan(setting_name)
         tap_interval = _TapTiming(
             tap_interval,
-            _configured_random_time(plan["run"].get("random_time", 0)),
+            configured_random_time(plan["run"].get("random_time", 0)),
             bool(plan["run"].get("random_touch")),
         )
         initialize_settings = payload.get(
@@ -497,6 +502,7 @@ def create_battle_execute_plan_handler(
                 recognition,
                 program["server"],
                 action_wait_seconds=tap_interval.interval,
+                random_time=tap_interval.random_time,
                 random_touch=tap_interval.random_touch,
             )
 
@@ -1061,7 +1067,7 @@ def _execute_skills_handler(
         plan = script_data.get_setting_plan(setting_name)
         tap_interval = _TapTiming(
             tap_interval,
-            _configured_random_time(plan["run"].get("random_time", 0)),
+            configured_random_time(plan["run"].get("random_time", 0)),
             bool(plan["run"].get("random_touch")),
         )
         program = compile_battle_program(plan)
@@ -1164,7 +1170,7 @@ def _execute_steps(
         if isinstance(tap_interval, _TapTiming)
         else _TapTiming(
             float(tap_interval),
-            _configured_random_time(random_time),
+            configured_random_time(random_time),
             random_touch,
         )
     )
@@ -1180,21 +1186,12 @@ def _execute_steps(
             data={"role": step["role"], "operation": operation.to_dict()},
         )
         wait_after = max(
-            timing.interval + timing.random_time * random.random(),
+            randomized_wait_seconds(timing.interval, timing.random_time),
             float(step.get("wait_after_seconds", 0.0)),
         )
         if wait_after:
             context.sleep(wait_after)
     return len(steps)
-
-
-def _configured_random_time(value: object) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("random_time must be a number.")
-    result = float(value)
-    if not 0 <= result <= 10:
-        raise ValueError("random_time must be between 0 and 10.")
-    return result
 
 
 def _wait_for_battle_ready(

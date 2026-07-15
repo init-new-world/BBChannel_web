@@ -4,7 +4,11 @@ import hashlib
 from time import monotonic
 from typing import Any
 
-from webapp.automation.interaction import match_touch_point
+from webapp.automation.interaction import (
+    configured_random_time,
+    match_touch_point,
+    randomized_wait_seconds,
+)
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
@@ -42,6 +46,7 @@ def create_completion_handler(
             raise ValueError("initial_drop_count must be a non-negative integer.")
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
+        random_time = configured_random_time(plan["run"].get("random_time", 0))
         server = str(plan["server"]).upper()
         drop_limit = int(plan["run"]["drop_stop_num"])
         drop_template = _resolve_drop_template(
@@ -138,7 +143,9 @@ def create_completion_handler(
                         "Started the next run.",
                         data={"role": "run_again", "operation": operation.to_dict()},
                     )
-                    context.sleep(action_wait_seconds)
+                    context.sleep(
+                        randomized_wait_seconds(action_wait_seconds, random_time)
+                    )
                 context.checkpoint(
                     "complete",
                     progress=1.0,
@@ -168,7 +175,7 @@ def create_completion_handler(
                     "Advanced friendship level dialog.",
                     data={"role": "relationship_up", "operation": operation.to_dict()},
                 )
-                context.sleep(action_wait_seconds)
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
             next_button = _match_optional(
@@ -186,7 +193,7 @@ def create_completion_handler(
                     "Advanced battle settlement.",
                     data={"role": "next", "operation": operation.to_dict()},
                 )
-                context.sleep(action_wait_seconds)
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
             context.emit(

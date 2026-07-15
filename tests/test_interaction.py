@@ -1,6 +1,13 @@
 from types import SimpleNamespace
 
-from webapp.automation.interaction import match_touch_point, randomized_touch_point
+import pytest
+
+from webapp.automation.interaction import (
+    configured_random_time,
+    match_touch_point,
+    randomized_touch_point,
+    randomized_wait_seconds,
+)
 
 
 def test_randomized_touch_point_returns_center_when_disabled():
@@ -29,3 +36,17 @@ def test_match_touch_point_randomizes_inside_the_matched_rectangle():
 
     assert point == (68, 184)
     assert bounds == [(68, 132), (184, 216)]
+
+
+def test_randomized_wait_seconds_adds_bounded_random_time():
+    assert randomized_wait_seconds(
+        0.5,
+        0.4,
+        random_value=lambda: 0.25,
+    ) == pytest.approx(0.6)
+
+
+@pytest.mark.parametrize("value", [True, -0.1, 10.1, "0.5"])
+def test_configured_random_time_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="random_time"):
+        configured_random_time(value)

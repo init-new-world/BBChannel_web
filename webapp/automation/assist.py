@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from webapp.automation.interaction import match_touch_point, randomized_touch_point
+from webapp.automation.interaction import (
+    configured_random_time,
+    match_touch_point,
+    randomized_touch_point,
+    randomized_wait_seconds,
+)
 from webapp.runtime import JobManager, RunContext
 from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
@@ -60,6 +65,7 @@ def create_assist_handler(
 
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
+        random_time = configured_random_time(plan["run"].get("random_time", 0))
         attempts = 0
         scrolls = 0
         scrolls_since_refresh = 0
@@ -98,7 +104,7 @@ def create_assist_handler(
                         "operation": operation.to_dict(),
                     },
                 )
-                context.sleep(float(scroll_wait_seconds))
+                context.sleep(randomized_wait_seconds(scroll_wait_seconds, random_time))
                 continue
             if refreshes >= max_refreshes:
                 raise RuntimeError("No matching assist candidate was found.")
@@ -113,7 +119,7 @@ def create_assist_handler(
             device_service.tap(
                 *match_touch_point(refresh_button, enabled=random_touch)
             )
-            context.sleep(float(refresh_wait_seconds))
+            context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
             refresh_confirmation = assist_recognizer.match_refresh_confirmation(
                 device_service.snapshot(),
                 plan["server"],
@@ -130,7 +136,7 @@ def create_assist_handler(
                 "Refreshed assist list.",
                 data={"role": "assist_refresh", "refresh": refreshes},
             )
-            context.sleep(float(refresh_wait_seconds))
+            context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
 
         selected = dict(recognition["candidates"][0])
         scale = float(selected["scale"])
@@ -151,7 +157,7 @@ def create_assist_handler(
             "Selected assist candidate.",
             data={"role": "assist_candidate", "x": tap_point[0], "y": tap_point[1]},
         )
-        context.sleep(float(tap_wait_seconds))
+        context.sleep(randomized_wait_seconds(tap_wait_seconds, random_time))
         context.checkpoint("complete", progress=1.0, message="Assist selected.")
         return {
             "setting_name": setting_name.strip(),

@@ -111,7 +111,7 @@ def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
 
     random_values = iter((0.25, 0.75))
     monkeypatch.setattr(
-        "webapp.automation.battle.random.random",
+        "webapp.automation.interaction.random.random",
         lambda: next(random_values),
     )
     touch_values = iter((0, 8, 0, 3))

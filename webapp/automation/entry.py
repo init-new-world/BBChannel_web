@@ -3,7 +3,11 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any
 
-from webapp.automation.interaction import match_touch_point
+from webapp.automation.interaction import (
+    configured_random_time,
+    match_touch_point,
+    randomized_wait_seconds,
+)
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
@@ -35,6 +39,7 @@ def create_battle_entry_handler(
             raise ValueError("recover_ap must be a boolean.")
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
+        random_time = configured_random_time(plan["run"].get("random_time", 0))
         server = str(plan["server"]).upper()
         template_roles = (
             ("battle_ready", f"battle/{server}/attack.png"),
@@ -127,7 +132,7 @@ def create_battle_entry_handler(
                     "Selected AP recovery item.",
                     data={"role": action, "operation": operation.to_dict()},
                 )
-                context.sleep(action_wait_seconds)
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
             if matched_role is not None and matched_result is not None:
                 operation = device_service.tap(
@@ -144,7 +149,7 @@ def create_battle_entry_handler(
                         "operation": operation.to_dict(),
                     },
                 )
-                context.sleep(action_wait_seconds)
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
             context.sleep(poll_interval)
 

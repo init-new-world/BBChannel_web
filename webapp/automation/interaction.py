@@ -6,6 +6,7 @@ from typing import Any
 
 
 RandInt = Callable[[int, int], int]
+RandomValue = Callable[[], float]
 BASE_WIDTH = 1280
 BASE_HEIGHT = 720
 
@@ -52,6 +53,25 @@ def match_touch_point(
         size=getattr(match, "size", None),
         randint=randint,
     )
+
+
+def configured_random_time(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("random_time must be a number.")
+    result = float(value)
+    if not 0 <= result <= 10:
+        raise ValueError("random_time must be between 0 and 10.")
+    return result
+
+
+def randomized_wait_seconds(
+    base_seconds: int | float,
+    random_time: object,
+    *,
+    random_value: RandomValue | None = None,
+) -> float:
+    choose = random_value or random.random
+    return float(base_seconds) + configured_random_time(random_time) * choose()
 
 
 def _screen_bounds(lower: int, upper: int, *, maximum: int) -> tuple[int, int]:
