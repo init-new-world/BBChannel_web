@@ -213,7 +213,7 @@ def test_battle_prepare_job_consumes_available_apple_when_ap_is_empty(tmp_path: 
         json.dumps(
             {
                 "server": "CH",
-                "clearAP": 1,
+                "clearAP": 0,
                 "allowOtherApple": 1,
             }
         ),
@@ -242,6 +242,7 @@ def test_battle_prepare_job_consumes_available_apple_when_ap_is_empty(tmp_path: 
                 "timeout_seconds": 2,
                 "poll_interval": 0,
                 "action_wait_seconds": 0,
+                "recover_ap": True,
             },
             device_key="replay:apple",
         )

@@ -29,6 +29,9 @@ def create_battle_entry_handler(
         preferred_apple = payload.get("apple", "gold")
         if preferred_apple not in {"gold", "silver", "blue", "copper"}:
             raise ValueError("apple must be gold, silver, blue, or copper.")
+        recover_ap = payload.get("recover_ap", True)
+        if not isinstance(recover_ap, bool):
+            raise ValueError("recover_ap must be a boolean.")
         plan = script_data.get_setting_plan(setting_name.strip())
         server = str(plan["server"]).upper()
         template_roles = (
@@ -85,7 +88,7 @@ def create_battle_entry_handler(
                     "attempts": attempts,
                 }
             if matched_role == "apple_close" and matched_result is not None:
-                if not plan["run"]["clear_ap"]:
+                if not recover_ap:
                     operation = device_service.tap(*matched_result.center)
                     actions.append("apple_close")
                     context.emit(
@@ -96,7 +99,7 @@ def create_battle_entry_handler(
                     return {
                         "setting_name": setting_name.strip(),
                         "ready": False,
-                        "reason": "ap_recovery_disabled",
+                        "reason": "ap_empty",
                         "actions": actions,
                         "attempts": attempts,
                     }

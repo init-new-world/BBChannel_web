@@ -30,6 +30,13 @@ def create_full_run_handler(
             or not 1 <= max_runs <= 10000
         ):
             raise ValueError("max_runs must be between 1 and 10000.")
+        max_clear_runs = payload.get("max_clear_runs", 100)
+        if (
+            isinstance(max_clear_runs, bool)
+            or not isinstance(max_clear_runs, int)
+            or not 1 <= max_clear_runs <= 10000
+        ):
+            raise ValueError("max_clear_runs must be between 1 and 10000.")
 
         normalized_name = setting_name.strip()
         run_options = script_data.get_setting_plan(normalized_name)["run"]
@@ -41,6 +48,7 @@ def create_full_run_handler(
             run_options.get("interval_after_fight", 0),
             "interval_after_fight",
         )
+        clear_ap = bool(run_options.get("clear_ap"))
         stage_options = {
             name: _stage_options(payload, name)
             for name in ("assist", "prepare", "battle", "completion")
@@ -49,11 +57,17 @@ def create_full_run_handler(
         run_results: list[dict[str, Any]] = []
         stopped = False
         stop_reason = None
+        cleared_ap = False
+        completed_runs = 0
+        clear_runs = 0
+        run_number = 1
 
-        for run_number in range(1, max_runs + 1):
+        while run_number <= max_runs or (clear_ap and clear_runs < max_clear_runs):
+            clearing_ap = run_number > max_runs
+            progress = min(completed_runs / max(max_runs, 1), 0.95)
             context.checkpoint(
                 "run.select_assist",
-                progress=(run_number - 1) / max_runs,
+                progress=progress,
                 message=f"Selecting assist for run {run_number}.",
             )
             assist_result = select_assist(
@@ -63,30 +77,34 @@ def create_full_run_handler(
 
             context.checkpoint(
                 "run.prepare_battle",
-                progress=(run_number - 0.75) / max_runs,
+                progress=progress,
                 message=f"Preparing run {run_number}.",
             )
             prepare_result = prepare_battle(
                 context,
-                {"setting_name": normalized_name, **stage_options["prepare"]},
+                {
+                    **stage_options["prepare"],
+                    "setting_name": normalized_name,
+                    "recover_ap": not clearing_ap,
+                },
             ) or {}
             if prepare_result.get("ready") is False:
-                stopped = True
-                stop_reason = str(prepare_result.get("reason") or "battle_not_ready")
-                run_results.append(
-                    {
-                        "run": run_number,
-                        "assist": assist_result,
-                        "prepare": prepare_result,
-                    }
+                prepare_reason = str(
+                    prepare_result.get("reason") or "battle_not_ready"
                 )
+                if clearing_ap and prepare_reason == "ap_empty":
+                    cleared_ap = True
+                    stop_reason = "ap_cleared"
+                else:
+                    stopped = True
+                    stop_reason = prepare_reason
                 break
             if interval_before_fight:
                 context.sleep(interval_before_fight)
 
             context.checkpoint(
                 "run.execute_battle",
-                progress=(run_number - 0.5) / max_runs,
+                progress=progress,
                 message=f"Executing run {run_number}.",
             )
             battle_result = execute_battle(
@@ -98,7 +116,7 @@ def create_full_run_handler(
 
             context.checkpoint(
                 "run.complete_battle",
-                progress=(run_number - 0.25) / max_runs,
+                progress=progress,
                 message=f"Completing run {run_number}.",
             )
             completion_result = complete_battle(
@@ -106,7 +124,11 @@ def create_full_run_handler(
                 {
                     **stage_options["completion"],
                     "setting_name": normalized_name,
-                    "repeat": run_number < max_runs,
+                    "repeat": run_number < max_runs
+                    or (
+                        clear_ap
+                        and (not clearing_ap or clear_runs + 1 < max_clear_runs)
+                    ),
                     "initial_drop_count": drop_count,
                 },
             ) or {}
@@ -122,10 +144,18 @@ def create_full_run_handler(
                     "completion": completion_result,
                 }
             )
+            completed_runs += 1
+            if clearing_ap:
+                clear_runs += 1
             if completion_result.get("stopped"):
                 stopped = True
                 stop_reason = str(completion_result.get("reason") or "completion_stop")
                 break
+            run_number += 1
+
+        if clear_ap and not cleared_ap and not stopped and clear_runs >= max_clear_runs:
+            stopped = True
+            stop_reason = "clear_ap_limit"
 
         context.checkpoint(
             "complete",
@@ -134,10 +164,11 @@ def create_full_run_handler(
         )
         return {
             "setting_name": normalized_name,
-            "runs_completed": len(run_results),
+            "runs_completed": completed_runs,
             "max_runs": max_runs,
             "stopped": stopped,
             "reason": stop_reason,
+            "cleared_ap": cleared_ap,
             "drop_count": drop_count,
             "runs": run_results,
         }

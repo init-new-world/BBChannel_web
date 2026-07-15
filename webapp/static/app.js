@@ -927,7 +927,9 @@ function renderJobResult(job) {
       `${result.runs_completed || 0}/${result.max_runs || 0} runs`,
       `${result.drop_count || 0} configured drops`,
     ];
-    if (result.reason) {
+    if (result.cleared_ap) {
+      lines.push("AP cleared");
+    } else if (result.reason) {
       lines.push(`Stopped: ${String(result.reason).replaceAll("_", " ")}`);
     }
     els.jobResult.textContent = lines.join(" · ");

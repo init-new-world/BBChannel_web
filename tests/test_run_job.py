@@ -9,15 +9,22 @@ from webapp.runtime import JobDatabase, JobManager, JobStatus
 
 
 class _ScriptData:
-    def __init__(self, before: float = 0, after: float = 0) -> None:
+    def __init__(
+        self,
+        before: float = 0,
+        after: float = 0,
+        clear_ap: bool = False,
+    ) -> None:
         self.before = before
         self.after = after
+        self.clear_ap = clear_ap
 
     def get_setting_plan(self, _name: str):
         return {
             "run": {
                 "interval_before_fight": self.before,
                 "interval_after_fight": self.after,
+                "clear_ap": self.clear_ap,
             }
         }
 
@@ -172,3 +179,45 @@ def test_full_run_applies_configured_before_and_after_fight_intervals():
         "complete",
         "complete",
     ]
+
+
+def test_full_run_clears_remaining_ap_without_consuming_more_items(tmp_path: Path):
+    prepare_payloads: list[dict] = []
+    completion_payloads: list[dict] = []
+
+    def ordinary(_context, _payload):
+        return {}
+
+    def prepare(_context, payload):
+        prepare_payloads.append(dict(payload))
+        if len(prepare_payloads) == 2:
+            return {"ready": False, "reason": "ap_empty"}
+        return {"ready": True}
+
+    def complete(_context, payload):
+        completion_payloads.append(dict(payload))
+        return {"complete": True, "repeated": payload["repeat"], "drop_count": 0}
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(clear_ap=True),
+            ordinary,
+            prepare,
+            ordinary,
+            complete,
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {"setting_name": "demo", "max_runs": 1, "max_clear_runs": 1},
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 1
+    assert result.result["cleared_ap"] is True
+    assert result.result["stopped"] is False
+    assert result.result["reason"] == "ap_cleared"
+    assert [payload["recover_ap"] for payload in prepare_payloads] == [True, False]
+    assert completion_payloads[0]["repeat"] is True

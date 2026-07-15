@@ -77,6 +77,7 @@ def test_operator_console_references_api_controls():
     assert "max_runs" in script
     assert "prepare:" in script
     assert "execution?.battle" in script
+    assert "result.cleared_ap" in script
     assert "/program" in script
     assert "/events/stream" in script
     assert "new EventSource" in script
