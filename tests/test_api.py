@@ -445,7 +445,7 @@ def test_setting_program_compiles_runtime_card_strategy(tmp_path: Path):
     assert payload["summary"]["execution_tap_count"] == 4
 
 
-def test_setting_program_rejects_strategy_that_requires_critical_stars(tmp_path: Path):
+def test_setting_program_compiles_strategy_that_requires_critical_stars(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)
     _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
@@ -463,13 +463,10 @@ def test_setting_program_rejects_strategy_that_requires_critical_stars(tmp_path:
 
     payload = client.get("/api/settings/stars/program").json()
 
-    assert payload["execution"]["battle"] == {
-        "ready": False,
-        "reason": "Program contains unsupported actions.",
-    }
-    assert payload["rounds"][0]["turns"][0]["command_phase"]["reason"] == (
-        "Critical star recognition is not available yet."
-    )
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    command_phase = payload["rounds"][0]["turns"][0]["command_phase"]
+    assert command_phase["supported"] is True
+    assert command_phase["steps"][1]["strategies"][0]["card2"]["criticalStar"] == 5
 
 
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):

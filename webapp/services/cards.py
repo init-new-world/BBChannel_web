@@ -7,6 +7,13 @@ from webapp.services.resources import ResourceService
 
 
 CARD_SLOT_ROIS = tuple((slot * 256, 340, 256, 330) for slot in range(5))
+STAR_SLOT_ROIS = (
+    (73, 353, 47, 50),
+    (329, 353, 47, 50),
+    (584, 353, 47, 50),
+    (841, 353, 47, 50),
+    (1101, 353, 47, 50),
+)
 CARD_TEMPLATE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 COLOR_TEMPLATES = {
     "B": "Buster.png",
@@ -86,10 +93,23 @@ class CommandCardRecognizer:
                         },
                     )
                 )
+            star_roi = STAR_SLOT_ROIS[slot_index]
+            for template_number in range(10):
+                candidates.append(
+                    {
+                        "template_path": f"battle/public/starNum/n{template_number}.png",
+                        "mask_path": f"battle/public/starNum/n{template_number}mask.png",
+                        "threshold": 0.7,
+                        "roi": star_roi,
+                    }
+                )
+                candidate_meta.append(
+                    ("star", slot_index, 10 if template_number == 0 else template_number)
+                )
 
         matches = self._recognition.match_templates(screenshot, candidates)
         grouped: list[dict[str, list[tuple[Any, Any]]]] = [
-            {"color": [], "servant": []} for _ in CARD_SLOT_ROIS
+            {"color": [], "servant": [], "star": []} for _ in CARD_SLOT_ROIS
         ]
         for meta, match in zip(candidate_meta, matches, strict=True):
             kind, slot_index, value = meta
@@ -99,6 +119,7 @@ class CommandCardRecognizer:
         for slot_index, groups in enumerate(grouped):
             color_value, color_match = _best_match(groups["color"])
             servant_value, servant_match = _best_match(groups["servant"])
+            star_value, star_match = _best_match(groups["star"])
             recognized = color_match is not None and servant_match is not None
             cards.append(
                 {
@@ -114,17 +135,24 @@ class CommandCardRecognizer:
                         servant_value["name"] if servant_match is not None else None
                     ),
                     "servant_sn": servant_value["sn"] if servant_match is not None else None,
+                    "stars": star_value if star_match is not None else 0,
                     "color_confidence": (
                         color_match.confidence if color_match is not None else None
                     ),
                     "servant_confidence": (
                         servant_match.confidence if servant_match is not None else None
                     ),
+                    "star_confidence": (
+                        star_match.confidence if star_match is not None else None
+                    ),
                     "color_template": (
                         color_match.template_path if color_match is not None else None
                     ),
                     "servant_template": (
                         servant_match.template_path if servant_match is not None else None
+                    ),
+                    "star_template": (
+                        star_match.template_path if star_match is not None else None
                     ),
                 }
             )

@@ -299,6 +299,18 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path
         directory = assets / "commands_CH" / str(100 + position)
         directory.mkdir(parents=True)
         _write_image(directory / "card_servant_1.png", image)
+    star_directory = assets / "battle" / "public" / "starNum"
+    star_directory.mkdir(parents=True)
+    star_templates = {}
+    for number in range(10):
+        image = np.zeros((39, 40), dtype=np.uint8)
+        image[5:34, 5:35] = 20 + number * 15
+        image[6:33, 6 + number * 2 : 8 + number * 2] = 240
+        mask = np.zeros_like(image)
+        mask[5:34, 5:35] = 255
+        _write_image(star_directory / f"n{number}.png", image)
+        _write_image(star_directory / f"n{number}mask.png", mask)
+        star_templates[number] = image
 
     battle_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     battle_frame[560:588, 1100:1134] = attack[:, :, :3]
@@ -310,6 +322,11 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path
         portrait = portraits[position]
         command_frame[420:440, x + 20 : x + 54] = color[:, :, :3]
         command_frame[500:548, x + 100 : x + 148] = portrait[:, :, :3]
+    command_frame[353:392, 584:624] = np.repeat(
+        star_templates[6][:, :, np.newaxis],
+        3,
+        axis=2,
+    )
 
     expectations = [
         (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
@@ -338,7 +355,7 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path
     (data / "servant_info_CH.json").write_text(json.dumps(servants), encoding="utf-8")
     strategy = {
         "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
-        "card2": {"type": 1, "cards": ["1A"], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 1, "cards": ["1A"], "criticalStar": 5, "more_or_less": True},
         "card3": {"type": 1, "cards": ["2B"], "criticalStar": 0, "more_or_less": True},
         "breakpoint": [False, False],
         "colorFirst": True,

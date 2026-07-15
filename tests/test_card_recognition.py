@@ -38,6 +38,20 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
     for name, template in colors.items():
         template.save(assets / "battle" / "CH" / f"{name}.png")
 
+    star_directory = assets / "battle" / "public" / "starNum"
+    star_directory.mkdir(parents=True)
+    star_templates = {}
+    for number in range(10):
+        template = Image.new("L", (40, 39), 0)
+        draw = ImageDraw.Draw(template)
+        draw.rectangle((5, 5, 34, 33), fill=20 + number * 15)
+        draw.line((6 + number * 2, 6, 8 + number * 2, 32), fill=240, width=2)
+        template.save(star_directory / f"n{number}.png")
+        mask = Image.new("L", template.size, 0)
+        ImageDraw.Draw(mask).rectangle((5, 5, 34, 33), fill=255)
+        mask.save(star_directory / f"n{number}mask.png")
+        star_templates[number] = template
+
     servant_templates = {}
     for position, sn in enumerate(("100", "101", "102"), start=1):
         directory = assets / "commands_CH" / sn
@@ -48,12 +62,17 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
 
     screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
     expected = [(1, "B"), (2, "A"), (3, "Q"), (1, "A"), (2, "B")]
+    expected_stars = [5, 0, 10, 2, 9]
     color_names = {"B": "Buster", "A": "Arts", "Q": "Quick"}
-    for slot, (position, color) in enumerate(expected):
+    star_rois = ((73, 353), (329, 353), (584, 353), (841, 353), (1101, 353))
+    for slot, ((position, color), stars) in enumerate(zip(expected, expected_stars, strict=True)):
         x = slot * 256
         screenshot.paste(colors[color_names[color]], (x + 20, 420), colors[color_names[color]])
         portrait = servant_templates[position]
         screenshot.paste(portrait, (x + 100, 500), portrait)
+        if stars:
+            template_number = 0 if stars == 10 else stars
+            screenshot.paste(star_templates[template_number].convert("RGB"), star_rois[slot])
 
     resources = ResourceService(assets, data)
     result = CommandCardRecognizer(
@@ -74,5 +93,12 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
     assert result["recognized_count"] == 5
     assert [card["code"] for card in result["cards"]] == ["1B", "2A", "3Q", "1A", "2B"]
     assert [card["slot"] for card in result["cards"]] == [1, 2, 3, 4, 5]
+    assert [card["stars"] for card in result["cards"]] == expected_stars
+    assert result["cards"][1]["star_confidence"] is None
+    assert all(
+        card["star_confidence"] >= 0.99
+        for card in result["cards"]
+        if card["stars"]
+    )
     assert all(card["color_confidence"] >= 0.99 for card in result["cards"])
     assert all(card["servant_confidence"] >= 0.99 for card in result["cards"])

@@ -119,12 +119,6 @@ def _battle_execution_status(
 def _compile_command_phase(turn: dict[str, Any]) -> dict[str, Any]:
     if turn.get("strategy"):
         strategies = turn["strategy"]
-        if _strategies_require_stars(strategies):
-            return {
-                "supported": False,
-                "steps": [],
-                "reason": "Critical star recognition is not available yet.",
-            }
         return {
             "supported": True,
             "steps": [
@@ -170,26 +164,8 @@ def _compile_action(action: dict[str, Any]) -> dict[str, Any]:
     if action_type == "np":
         return _compile_np(action)
     if action_type == "strategy":
-        if _strategies_require_stars(action.get("strategies")):
-            return _unsupported(action, "Critical star recognition is not available yet.")
         return _supported(action, [])
     return _unsupported(action, f"{action_type or 'Unknown'} actions are not compiled yet.")
-
-
-def _strategies_require_stars(strategies: Any) -> bool:
-    if not isinstance(strategies, list):
-        return False
-    return any(
-        isinstance(strategy, dict)
-        and any(
-            isinstance(strategy.get(card_name), dict)
-            and isinstance(strategy[card_name].get("criticalStar"), (int, float))
-            and not isinstance(strategy[card_name].get("criticalStar"), bool)
-            and strategy[card_name]["criticalStar"] > 0
-            for card_name in ("card1", "card2", "card3")
-        )
-        for strategy in strategies
-    )
 
 
 def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:

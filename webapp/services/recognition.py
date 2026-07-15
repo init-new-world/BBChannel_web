@@ -30,6 +30,7 @@ class RecognitionService:
         threshold: float = 0.8,
         roi: Sequence[int] | None = None,
         scales: Sequence[float] | None = None,
+        mask_path: str | None = None,
     ) -> MatchResult:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
         return self._match_decoded(
@@ -38,6 +39,7 @@ class RecognitionService:
             threshold=threshold,
             roi=roi,
             scales=scales,
+            mask_path=mask_path,
         )
 
     def match_templates(
@@ -56,6 +58,11 @@ class RecognitionService:
                     threshold=float(candidate.get("threshold", 0.8)),
                     roi=candidate.get("roi"),
                     scales=candidate.get("scales"),
+                    mask_path=(
+                        str(candidate["mask_path"])
+                        if candidate.get("mask_path") is not None
+                        else None
+                    ),
                 )
             )
         return results
@@ -159,6 +166,7 @@ class RecognitionService:
         threshold: float,
         roi: object = None,
         scales: object = None,
+        mask_path: str | None = None,
     ) -> MatchResult:
         cv, numpy = self._require_opencv()
         template_file = self._resources.resolve_template(template_path)
@@ -170,6 +178,7 @@ class RecognitionService:
                 {"template_path": template_path},
             )
         template_mask = None
+        explicit_mask = mask_path is not None
         if len(template_source.shape) == 3 and template_source.shape[2] == 4:
             alpha = template_source[:, :, 3]
             template_image = template_source[:, :, :3]
@@ -179,6 +188,27 @@ class RecognitionService:
             template_image = cv.cvtColor(template_source, cv.COLOR_GRAY2BGR)
         else:
             template_image = template_source
+
+        if mask_path is not None:
+            mask_file = self._resources.resolve_template(mask_path)
+            template_mask = cv.imread(str(mask_file), cv.IMREAD_GRAYSCALE)
+            if template_mask is None:
+                raise AppError(
+                    ErrorCode.TEMPLATE_LOAD_FAILED,
+                    f"Template mask could not be loaded: {mask_path}",
+                    {"template_path": template_path, "mask_path": mask_path},
+                )
+            if template_mask.shape[:2] != template_image.shape[:2]:
+                raise AppError(
+                    ErrorCode.MATCH_FAILED,
+                    "Template mask dimensions must match the template.",
+                    {
+                        "template_path": template_path,
+                        "mask_path": mask_path,
+                        "template_size": [template_image.shape[1], template_image.shape[0]],
+                        "mask_size": [template_mask.shape[1], template_mask.shape[0]],
+                    },
+                )
 
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
@@ -227,7 +257,7 @@ class RecognitionService:
                 matches = cv.matchTemplate(
                     search_image,
                     scaled_template,
-                    cv.TM_CCORR_NORMED,
+                    cv.TM_CCOEFF_NORMED if explicit_mask else cv.TM_CCORR_NORMED,
                     mask=scaled_mask,
                 )
                 matches = numpy.nan_to_num(

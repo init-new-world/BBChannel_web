@@ -141,6 +141,35 @@ def test_match_template_uses_alpha_channel_as_mask(tmp_path: Path):
     assert result.top_left == [45, 22]
 
 
+def test_match_template_uses_explicit_mask_path(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = Image.new("L", (20, 20), 10)
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((7, 6, 12, 13), fill=220)
+    draw.line((7, 6, 12, 13), fill=90, width=2)
+    template.save(resources.assets_dir / "digit.png")
+    mask = Image.new("L", template.size, 0)
+    ImageDraw.Draw(mask).rectangle((7, 6, 12, 13), fill=255)
+    mask.save(resources.assets_dir / "digit-mask.png")
+
+    screenshot = Image.new("RGB", (80, 60), (80, 120, 160))
+    visible = template.crop((7, 6, 13, 14)).convert("RGB")
+    screenshot.paste(visible, (39, 24))
+
+    result = RecognitionService(resources).match_template(
+        _png_bytes(screenshot),
+        "digit.png",
+        threshold=0.95,
+        mask_path="digit-mask.png",
+    )
+
+    assert result.matched is True
+    assert result.top_left == [32, 18]
+
+
 def test_match_templates_decodes_screenshot_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     cv = pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService
