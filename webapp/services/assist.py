@@ -7,6 +7,7 @@ from webapp.services.resources import ResourceService
 
 
 ASSIST_FACE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 
 
 class AssistRecognizer:
@@ -27,6 +28,32 @@ class AssistRecognizer:
     ) -> dict[str, Any]:
         canonical_name = assist.get("servant_canonical_name")
         templates = self._servant_templates(canonical_name)
+        equip_templates = self._equip_templates(assist.get("equip_names"))
+        equip_matches = {
+            equip_name: [
+                match
+                for template_path in template_paths
+                for match in self._recognition.match_template_all(
+                    screenshot,
+                    template_path,
+                    threshold=threshold,
+                    scales=ASSIST_EQUIP_SCALES,
+                    max_results=20,
+                )
+            ]
+            for equip_name, template_paths in equip_templates.items()
+        }
+        limit_break_matches = (
+            self._recognition.match_template_all(
+                screenshot,
+                "assist/满破标记.png",
+                threshold=threshold,
+                scales=ASSIST_EQUIP_SCALES,
+                max_results=20,
+            )
+            if assist.get("full_limit_break")
+            else []
+        )
         matches = [
             match
             for template_path in templates
@@ -47,9 +74,34 @@ class AssistRecognizer:
                 "confidence": match.confidence,
                 "template_path": match.template_path,
                 "scale": match.scale,
+                "checks": {},
             }
             if any(self._overlaps(candidate["bounds"], found["bounds"]) for found in candidates):
                 continue
+            if equip_templates:
+                equip_match = self._candidate_equip_match(candidate["anchor"], equip_matches)
+                if equip_match is None:
+                    continue
+                equip_name, match = equip_match
+                candidate["checks"] = {
+                    "equip_name": equip_name,
+                    "equip_template": match.template_path,
+                    "equip_confidence": match.confidence,
+                }
+            if assist.get("full_limit_break"):
+                limit_break_match = self._candidate_limit_break_match(
+                    candidate["anchor"],
+                    limit_break_matches,
+                )
+                if limit_break_match is None:
+                    continue
+                candidate["checks"].update(
+                    {
+                        "full_limit_break": True,
+                        "limit_break_template": limit_break_match.template_path,
+                        "limit_break_confidence": limit_break_match.confidence,
+                    }
+                )
             candidates.append(candidate)
 
         candidates.sort(key=lambda candidate: (candidate["anchor"][1], candidate["anchor"][0]))
@@ -76,6 +128,52 @@ class AssistRecognizer:
             for entry in page["entries"]
             if str(entry["path"]).rsplit("/", 1)[-1].startswith(filename_prefix)
         ]
+
+    def _equip_templates(self, equip_names: Any) -> dict[str, list[str]]:
+        if not isinstance(equip_names, list):
+            return {}
+        entries = self._resources.template_index(
+            prefix="assist/assist_equip",
+            limit=1000,
+        )["entries"]
+        templates: dict[str, list[str]] = {}
+        for equip_name in equip_names:
+            if not isinstance(equip_name, str) or not equip_name:
+                continue
+            templates[equip_name] = [
+                str(entry["path"])
+                for entry in entries
+                if str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                == equip_name
+            ]
+        return templates
+
+    @staticmethod
+    def _candidate_equip_match(anchor: list[int], equip_matches: dict[str, list[Any]]):
+        anchor_x, anchor_y = anchor
+        matches = [
+            (equip_name, match)
+            for equip_name, named_matches in equip_matches.items()
+            for match in named_matches
+            if anchor_x - 100 <= match.center[0] <= anchor_x + 70
+            and anchor_y + 25 <= match.center[1] <= anchor_y + 110
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item[1].confidence)
+
+    @staticmethod
+    def _candidate_limit_break_match(anchor: list[int], matches: list[Any]):
+        anchor_x, anchor_y = anchor
+        nearby = [
+            match
+            for match in matches
+            if anchor_x + 40 <= match.center[0] <= anchor_x + 90
+            and anchor_y + 45 <= match.center[1] <= anchor_y + 110
+        ]
+        if not nearby:
+            return None
+        return max(nearby, key=lambda match: match.confidence)
 
     @staticmethod
     def _overlaps(first: list[int], second: list[int]) -> bool:
