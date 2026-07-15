@@ -23,6 +23,7 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
     action_count = 0
     supported_action_count = 0
     tap_count = 0
+    source_types: list[object] = []
 
     for round_plan in plan["rounds"]:
         turns: list[dict[str, Any]] = []
@@ -31,9 +32,16 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
             action_count += len(actions)
             supported_action_count += sum(bool(action["supported"]) for action in actions)
             tap_count += sum(len(action["steps"]) for action in actions)
+            source_types.extend(action["source"].get("type") for action in actions)
             turns.append({"turn": turn["turn"], "actions": actions})
         rounds.append({"round": round_plan["round"], "turns": turns})
 
+    unsupported_action_count = action_count - supported_action_count
+    skill_execution = _skill_execution_status(
+        action_count,
+        unsupported_action_count,
+        source_types,
+    )
     return {
         "name": plan["name"],
         "server": plan["server"],
@@ -42,11 +50,26 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
         "summary": {
             "action_count": action_count,
             "supported_action_count": supported_action_count,
-            "unsupported_action_count": action_count - supported_action_count,
+            "unsupported_action_count": unsupported_action_count,
             "tap_count": tap_count,
         },
+        "execution": {"skills": skill_execution},
         "validation": plan["validation"],
     }
+
+
+def _skill_execution_status(
+    action_count: int,
+    unsupported_action_count: int,
+    source_types: list[object],
+) -> dict[str, Any]:
+    if action_count == 0:
+        return {"ready": False, "reason": "Program contains no actions."}
+    if unsupported_action_count:
+        return {"ready": False, "reason": "Program contains unsupported actions."}
+    if any(action_type != "skill" for action_type in source_types):
+        return {"ready": False, "reason": "Program contains non-skill actions."}
+    return {"ready": True, "reason": None}
 
 
 def _compile_action(action: dict[str, Any]) -> dict[str, Any]:

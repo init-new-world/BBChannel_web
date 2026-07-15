@@ -421,6 +421,10 @@ select:disabled {
   color: var(--danger);
 }
 
+.status-line.warn {
+  color: var(--warn);
+}
+
 .screen-panel {
   min-width: 0;
   min-height: 0;

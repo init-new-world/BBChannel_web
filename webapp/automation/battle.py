@@ -135,8 +135,9 @@ def _execute_skills_handler(
             maximum=10.0,
         )
         program = compile_battle_program(script_data.get_setting_plan(setting_name))
-        if program["summary"]["unsupported_action_count"]:
-            raise ValueError("Skill execution requires a program with no unsupported actions.")
+        execution_status = program["execution"]["skills"]
+        if not execution_status["ready"]:
+            raise ValueError(execution_status["reason"])
 
         actions = [
             action
@@ -144,9 +145,6 @@ def _execute_skills_handler(
             for turn in round_plan["turns"]
             for action in turn["actions"]
         ]
-        if any(action["source"].get("type") != "skill" for action in actions):
-            raise ValueError("battle.execute-skills accepts skill-only programs.")
-
         attack_template = f"battle/{program['server']}/attack.png"
         tap_count = 0
         for action_number, action in enumerate(actions, start=1):

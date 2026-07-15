@@ -44,6 +44,8 @@ def test_operator_console_references_api_controls():
     assert 'id="battle-script-name"' in index
     assert 'id="battle-action-delay"' in index
     assert 'id="start-battle-dry-run"' in index
+    assert 'id="battle-program-status"' in index
+    assert 'id="start-battle-skills"' in index
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
     assert 'id="pause-job"' in index
@@ -66,5 +68,7 @@ def test_operator_console_references_api_controls():
     assert "/api/swipe" in script
     assert "/api/jobs" in script
     assert "battle.dry-run" in script
+    assert "battle.execute-skills" in script
+    assert "/program" in script
     assert "/events/stream" in script
     assert "new EventSource" in script

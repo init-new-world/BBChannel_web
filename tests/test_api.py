@@ -380,6 +380,12 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
         "unsupported_action_count": 0,
         "tap_count": 4,
     }
+    assert payload["execution"] == {
+        "skills": {
+            "ready": False,
+            "reason": "Program contains non-skill actions.",
+        }
+    }
     actions = payload["rounds"][0]["turns"][0]["actions"]
     assert actions[0]["steps"] == [
         {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590},

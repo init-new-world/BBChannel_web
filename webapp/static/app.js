@@ -14,6 +14,7 @@ const state = {
   screenshotNaturalSize: null,
   latestMatch: null,
   selectedSettingPlan: null,
+  selectedSettingProgram: null,
   selectedStrategy: null,
   presetEditor: null,
   jobs: [],
@@ -90,8 +91,10 @@ const els = {
   diagnosticTap: document.querySelector("#diagnostic-tap"),
   startDiagnostic: document.querySelector("#start-diagnostic"),
   battleScriptName: document.querySelector("#battle-script-name"),
+  battleProgramStatus: document.querySelector("#battle-program-status"),
   battleActionDelay: document.querySelector("#battle-action-delay"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
+  startBattleSkills: document.querySelector("#start-battle-skills"),
   jobHistory: document.querySelector("#job-history"),
   jobStatus: document.querySelector("#job-status"),
   jobKind: document.querySelector("#job-kind"),
@@ -188,6 +191,7 @@ function bindEvents() {
   els.screenStage.addEventListener("click", populateTapFromClick);
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
+  els.startBattleSkills.addEventListener("click", startBattleSkills);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -278,16 +282,24 @@ async function loadSelectedSettingPlan() {
   const name = els.settingSelect.value;
   if (!name) {
     state.selectedSettingPlan = null;
+    state.selectedSettingProgram = null;
     renderSettingPlan(null);
+    renderBattleProgram(null);
     return;
   }
 
   try {
-    state.selectedSettingPlan = await api(`/api/settings/${encodeURIComponent(name)}/plan`);
+    [state.selectedSettingPlan, state.selectedSettingProgram] = await Promise.all([
+      api(`/api/settings/${encodeURIComponent(name)}/plan`),
+      api(`/api/settings/${encodeURIComponent(name)}/program`),
+    ]);
     renderSettingPlan(state.selectedSettingPlan);
+    renderBattleProgram(state.selectedSettingProgram);
   } catch (error) {
     state.selectedSettingPlan = null;
+    state.selectedSettingProgram = null;
     renderSettingPlan(null);
+    renderBattleProgram(null);
     showError(error);
   }
 }
@@ -658,6 +670,17 @@ async function startBattleDryRun() {
   });
 }
 
+async function startBattleSkills() {
+  const settingName = els.settingSelect.value;
+  if (!settingName || !state.selectedSettingProgram?.execution?.skills?.ready) {
+    return;
+  }
+  await enqueueJob("battle.execute-skills", {
+    setting_name: settingName,
+    tap_interval_seconds: Number(els.battleActionDelay.value),
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -951,6 +974,23 @@ function renderSettingPlan(plan) {
   els.battleScriptName.textContent = plan.name;
 }
 
+function renderBattleProgram(program) {
+  els.battleProgramStatus.classList.remove("ok", "warn", "error");
+  if (!program) {
+    els.battleProgramStatus.textContent = "No program";
+    return;
+  }
+  const summary = program.summary;
+  const execution = program.execution?.skills;
+  if (execution?.ready) {
+    els.battleProgramStatus.textContent = `Ready · ${summary.supported_action_count} actions · ${summary.tap_count} taps`;
+    els.battleProgramStatus.classList.add("ok");
+    return;
+  }
+  els.battleProgramStatus.textContent = `${summary.supported_action_count}/${summary.action_count} supported · ${execution?.reason || "Not executable"}`;
+  els.battleProgramStatus.classList.add("warn");
+}
+
 function renderStrategyDetail(strategy) {
   if (!strategy) {
     els.strategySummary.textContent = "No strategy selected";
@@ -1013,6 +1053,9 @@ function updateControls() {
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
+  els.startBattleSkills.disabled = !state.connected
+    || !state.selectedSettingProgram?.execution?.skills?.ready
+    || hasRunningJob;
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)

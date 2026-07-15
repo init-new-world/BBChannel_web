@@ -157,5 +157,5 @@ def test_execute_skills_rejects_np_before_snapshot_or_tap(tmp_path: Path):
         result = manager.wait(job.job_id, timeout=2)
 
     assert result.status == JobStatus.FAILED
-    assert result.error["message"] == "battle.execute-skills accepts skill-only programs."
+    assert result.error["message"] == "Program contains non-skill actions."
     assert device_calls == []
