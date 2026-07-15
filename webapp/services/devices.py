@@ -258,6 +258,42 @@ class DeviceService:
             [list(mapped_start), list(mapped_end)],
         )
 
+    def restart_game(self, package_name: str | None = None) -> OperationResult:
+        with self._state_lock:
+            endpoints = [self._control, self._capture]
+        connected = [endpoint for endpoint in endpoints if endpoint is not None]
+        if not connected:
+            raise AppError(ErrorCode.DEVICE_NOT_CONNECTED, "No device is connected.")
+
+        attempted: set[str] = set()
+        for endpoint in connected:
+            key = _endpoint_key(endpoint)
+            if key in attempted:
+                continue
+            attempted.add(key)
+            backend = self._backend_for(endpoint.backend)
+            restart = getattr(backend, "restart_game", None)
+            if not callable(restart):
+                continue
+            with self._lock_for(endpoint):
+                result = restart(endpoint.device_id, package_name)
+            self._event_log.info(
+                "restart_game",
+                result.message,
+                {
+                    "backend": endpoint.backend,
+                    "device_id": endpoint.device_id,
+                    "package": result.data.get("package"),
+                },
+            )
+            return result
+
+        raise AppError(
+            ErrorCode.GAME_RESTART_UNAVAILABLE,
+            "Connected device channels do not support restarting the game.",
+            {"channels": sorted(attempted)},
+        )
+
     def _validate_endpoint(self, backend_name: str, device_id: str) -> DeviceEndpoint:
         backend = self._backend_for(backend_name)
         devices = backend.list_devices()

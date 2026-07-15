@@ -15,6 +15,7 @@ class ErrorCode(str, Enum):
     DEVICE_NOT_FOUND = "device_not_found"
     DEVICE_OFFLINE = "device_offline"
     DEVICE_NOT_CONNECTED = "device_not_connected"
+    GAME_RESTART_UNAVAILABLE = "game_restart_unavailable"
     SCREEN_GEOMETRY_UNAVAILABLE = "screen_geometry_unavailable"
     SNAPSHOT_FAILED = "snapshot_failed"
     TAP_FAILED = "tap_failed"

@@ -113,6 +113,42 @@ def test_device_service_can_use_separate_capture_and_control_channels():
     assert capture.taps == []
 
 
+def test_device_service_restarts_game_through_supported_connected_channel():
+    class RestartBackend(FakeBackend):
+        def __init__(self, name, device_id):
+            super().__init__(name, device_id)
+            self.restarts = []
+
+        def restart_game(self, device_id, package_name=None):
+            self.restarts.append((device_id, package_name))
+            return OperationResult(ok=True, action="restart_game", message="started")
+
+    capture = RestartBackend("adb", "screen-1")
+    control = FakeBackend("mumu", "touch-1")
+    service = DeviceService([capture, control], EventLog())
+    service.connect_channels(
+        capture_backend="adb",
+        capture_device_id="screen-1",
+        control_backend="mumu",
+        control_device_id="touch-1",
+    )
+
+    result = service.restart_game()
+
+    assert result.ok is True
+    assert capture.restarts == [("screen-1", None)]
+
+
+def test_device_service_reports_when_game_restart_is_unavailable():
+    service = DeviceService([FakeBackend()], EventLog())
+    service.connect("fake", "dev1")
+
+    with pytest.raises(AppError) as exc:
+        service.restart_game()
+
+    assert exc.value.code == ErrorCode.GAME_RESTART_UNAVAILABLE
+
+
 def test_same_endpoint_serializes_snapshot_and_tap():
     snapshot_started = threading.Event()
     release_snapshot = threading.Event()

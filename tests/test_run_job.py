@@ -15,11 +15,13 @@ class _ScriptData:
         after: float = 0,
         clear_ap: bool = False,
         first_battle_set: bool = False,
+        game_crash_restart: bool = False,
     ) -> None:
         self.before = before
         self.after = after
         self.clear_ap = clear_ap
         self.first_battle_set = first_battle_set
+        self.game_crash_restart = game_crash_restart
 
     def get_setting_plan(self, _name: str):
         return {
@@ -28,6 +30,7 @@ class _ScriptData:
                 "interval_after_fight": self.after,
                 "clear_ap": self.clear_ap,
                 "first_battle_set": self.first_battle_set,
+                "game_crash_restart": self.game_crash_restart,
             }
         }
 
@@ -258,3 +261,36 @@ def test_full_run_resumes_from_an_active_battle(tmp_path: Path):
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["runs_completed"] == 1
     assert calls == ["detect", "battle", "complete"]
+
+
+def test_full_run_recovers_unknown_initial_stage_when_enabled(tmp_path: Path):
+    calls: list[str] = []
+
+    def stage(name: str, result=None):
+        def execute(_context, _payload):
+            calls.append(name)
+            return dict(result or {})
+
+        return execute
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(game_crash_restart=True),
+            stage("assist"),
+            stage("prepare", {"ready": True}),
+            stage("battle"),
+            stage("complete", {"complete": True, "drop_count": 0}),
+            detect_stage=stage("detect", {"stage": "unknown"}),
+            recover_game=stage("recover", {"recovered": True, "stage": "battle"}),
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {"setting_name": "demo", "max_runs": 1},
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 1
+    assert calls == ["detect", "recover", "battle", "complete"]

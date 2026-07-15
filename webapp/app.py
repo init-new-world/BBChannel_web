@@ -18,6 +18,7 @@ from webapp.automation import (
     create_battle_entry_handler,
     create_battle_execute_plan_handler,
     create_completion_handler,
+    create_recovery_handler,
     create_stage_handler,
     register_assist_job,
     register_battle_entry_job,
@@ -25,6 +26,7 @@ from webapp.automation import (
     register_completion_job,
     register_diagnostic_job,
     register_full_run_job,
+    register_recovery_job,
     register_stage_job,
 )
 from webapp.core.errors import AppError, ErrorCode
@@ -164,11 +166,27 @@ def create_app(
         recognition,
         card_recognizer,
     )
+    stage_handler = create_stage_handler(
+        script_data,
+        device_service,
+        recognition,
+    )
+    recovery_handler = create_recovery_handler(
+        script_data,
+        device_service,
+        stage_handler,
+    )
     register_stage_job(
         job_manager,
         script_data,
         device_service,
         recognition,
+    )
+    register_recovery_job(
+        job_manager,
+        script_data,
+        device_service,
+        stage_handler,
     )
     register_full_run_job(
         job_manager,
@@ -187,11 +205,8 @@ def create_app(
             recognition,
             resources,
         ),
-        detect_stage=create_stage_handler(
-            script_data,
-            device_service,
-            recognition,
-        ),
+        detect_stage=stage_handler,
+        recover_game=recovery_handler,
     )
 
     def active_device_key() -> str | None:

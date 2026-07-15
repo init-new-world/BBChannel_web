@@ -155,6 +155,75 @@ def test_connect_endpoint_runs_adb_connect_and_returns_matching_device(tmp_path:
     assert calls == [["connect", "172.25.208.1:16384"], ["devices", "-l"]]
 
 
+def test_restart_game_discovers_and_launches_installed_fgo_package(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        calls.append(command[1:])
+        args = command[1:]
+        if args[-4:] == ["shell", "pm", "list", "packages"]:
+            return CompletedProcess(
+                command,
+                0,
+                stdout="package:com.android.settings\npackage:com.bilibili.fatego\n",
+                stderr="",
+            )
+        if "monkey" in args:
+            return CompletedProcess(command, 0, stdout="Events injected: 1\n", stderr="")
+        raise AssertionError(f"unexpected command: {args}")
+
+    backend = AdbBackend(adb_candidates=[candidate], run_command=run_command)
+
+    result = backend.restart_game("emulator-5554")
+
+    assert result.ok is True
+    assert result.action == "restart_game"
+    assert result.data["package"] == "com.bilibili.fatego"
+    assert calls == [
+        ["-s", "emulator-5554", "shell", "pm", "list", "packages"],
+        [
+            "-s",
+            "emulator-5554",
+            "shell",
+            "monkey",
+            "-p",
+            "com.bilibili.fatego",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            "1",
+        ],
+    ]
+
+
+def test_restart_game_rejects_ambiguous_fgo_packages(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+
+    def run_command(command: list[str], _text: bool, _timeout_seconds: float):
+        return CompletedProcess(
+            command,
+            0,
+            stdout=(
+                "package:com.bilibili.fatego\n"
+                "package:com.aniplex.fategrandorder\n"
+            ),
+            stderr="",
+        )
+
+    backend = AdbBackend(adb_candidates=[candidate], run_command=run_command)
+
+    with pytest.raises(AppError) as exc:
+        backend.restart_game("emulator-5554")
+
+    assert exc.value.code == ErrorCode.ADB_COMMAND_FAILED
+    assert exc.value.details["packages"] == [
+        "com.aniplex.fategrandorder",
+        "com.bilibili.fatego",
+    ]
+
+
 def test_list_devices_auto_connects_open_candidate_once(tmp_path: Path):
     candidate = tmp_path / "adb"
     candidate.write_text("", encoding="utf-8")

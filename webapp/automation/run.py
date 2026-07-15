@@ -18,6 +18,7 @@ def create_full_run_handler(
     execute_battle: StageHandler,
     complete_battle: StageHandler,
     detect_stage: StageHandler | None = None,
+    recover_game: StageHandler | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -51,9 +52,10 @@ def create_full_run_handler(
         )
         clear_ap = bool(run_options.get("clear_ap"))
         first_battle_set = bool(run_options.get("first_battle_set"))
+        game_crash_restart = bool(run_options.get("game_crash_restart"))
         stage_options = {
             name: _stage_options(payload, name)
-            for name in ("assist", "prepare", "battle", "completion")
+            for name in ("assist", "prepare", "battle", "completion", "recovery")
         }
         drop_count = 0
         run_results: list[dict[str, Any]] = []
@@ -70,6 +72,19 @@ def create_full_run_handler(
         if resume and detect_stage is not None:
             detected = detect_stage(context, {"setting_name": normalized_name}) or {}
             initial_stage = str(detected.get("stage") or "unknown")
+            if (
+                initial_stage == "unknown"
+                and game_crash_restart
+                and recover_game is not None
+            ):
+                recovered = recover_game(
+                    context,
+                    {
+                        **stage_options["recovery"],
+                        "setting_name": normalized_name,
+                    },
+                ) or {}
+                initial_stage = str(recovered.get("stage") or "unknown")
             if initial_stage not in {"assist", "prepare", "battle", "completion"}:
                 raise RuntimeError("Current battle flow stage was not recognized.")
 
@@ -205,6 +220,7 @@ def register_full_run_job(
     execute_battle: StageHandler,
     complete_battle: StageHandler,
     detect_stage: StageHandler | None = None,
+    recover_game: StageHandler | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
         return
@@ -217,6 +233,7 @@ def register_full_run_job(
             execute_battle,
             complete_battle,
             detect_stage,
+            recover_game,
         ),
         requires_device=True,
     )

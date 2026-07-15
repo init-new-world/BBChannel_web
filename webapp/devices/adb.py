@@ -427,6 +427,54 @@ class AdbBackend:
             data={"attempts": attempts},
         )
 
+    def restart_game(
+        self,
+        device_id: str,
+        package_name: str | None = None,
+    ) -> OperationResult:
+        package = package_name.strip() if isinstance(package_name, str) else ""
+        if not package:
+            result, _attempts = self._run_with_retry(
+                ["-s", device_id, "shell", "pm", "list", "packages"],
+                text=True,
+                attempts=self.retry_config.control_attempts,
+            )
+            packages = sorted(
+                line.partition(":")[2].strip()
+                for line in result.stdout.splitlines()
+                if line.startswith("package:")
+                and _looks_like_fgo_package(line.partition(":")[2].strip())
+            )
+            if len(packages) != 1:
+                raise AppError(
+                    ErrorCode.ADB_COMMAND_FAILED,
+                    "Unable to identify one installed FGO package.",
+                    {"device_id": device_id, "packages": packages},
+                )
+            package = packages[0]
+
+        _result, attempts = self._run_with_retry(
+            [
+                "-s",
+                device_id,
+                "shell",
+                "monkey",
+                "-p",
+                package,
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "1",
+            ],
+            text=True,
+            attempts=self.retry_config.control_attempts,
+        )
+        return OperationResult(
+            ok=True,
+            action="restart_game",
+            message=f"Started {package}",
+            data={"package": package, "attempts": attempts},
+        )
+
     def _run_with_retry(
         self,
         args: list[str],
@@ -600,6 +648,11 @@ def _dedupe_devices(devices: list[DeviceInfo]) -> list[DeviceInfo]:
     for device in devices:
         deduped[device.device_id] = device
     return list(deduped.values())
+
+
+def _looks_like_fgo_package(package: str) -> bool:
+    normalized = package.casefold()
+    return "fategrandorder" in normalized or normalized.endswith(".fatego")
 
 
 def _dedupe_device_aliases(devices: list[DeviceInfo]) -> list[DeviceInfo]:
