@@ -15,6 +15,7 @@ const state = {
   latestMatch: null,
   selectedSettingPlan: null,
   selectedStrategy: null,
+  presetEditor: null,
   jobs: [],
   activeJob: null,
   jobEvents: [],
@@ -33,8 +34,23 @@ const els = {
   settingSelect: document.querySelector("#setting-select"),
   settingValidation: document.querySelector("#setting-validation"),
   settingPlan: document.querySelector("#setting-plan"),
+  newSetting: document.querySelector("#new-setting"),
+  editSetting: document.querySelector("#edit-setting"),
+  deleteSetting: document.querySelector("#delete-setting"),
   strategySelect: document.querySelector("#strategy-select"),
   strategySummary: document.querySelector("#strategy-summary"),
+  newStrategy: document.querySelector("#new-strategy"),
+  editStrategy: document.querySelector("#edit-strategy"),
+  deleteStrategy: document.querySelector("#delete-strategy"),
+  presetDialog: document.querySelector("#preset-dialog"),
+  presetForm: document.querySelector("#preset-form"),
+  presetDialogTitle: document.querySelector("#preset-dialog-title"),
+  presetName: document.querySelector("#preset-name"),
+  presetJson: document.querySelector("#preset-json"),
+  presetError: document.querySelector("#preset-error"),
+  closePreset: document.querySelector("#close-preset"),
+  cancelPreset: document.querySelector("#cancel-preset"),
+  savePreset: document.querySelector("#save-preset"),
   snapshotButton: document.querySelector("#snapshot-button"),
   clearScreenshot: document.querySelector("#clear-screenshot"),
   templateSelect: document.querySelector("#template-select"),
@@ -143,6 +159,15 @@ function bindEvents() {
   els.disconnectDevice.addEventListener("click", disconnect);
   els.settingSelect.addEventListener("change", loadSelectedSettingPlan);
   els.strategySelect.addEventListener("change", loadSelectedStrategy);
+  els.newSetting.addEventListener("click", () => openPresetEditor("settings", false));
+  els.editSetting.addEventListener("click", () => openPresetEditor("settings", true));
+  els.deleteSetting.addEventListener("click", () => deletePreset("settings"));
+  els.newStrategy.addEventListener("click", () => openPresetEditor("strategies", false));
+  els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
+  els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
+  els.presetForm.addEventListener("submit", savePreset);
+  els.closePreset.addEventListener("click", closePresetEditor);
+  els.cancelPreset.addEventListener("click", closePresetEditor);
   els.snapshotButton.addEventListener("click", captureScreenshot);
   els.clearScreenshot.addEventListener("click", clearScreenshot);
   els.matchButton.addEventListener("click", matchTemplate);
@@ -220,8 +245,9 @@ async function loadTemplates() {
   }
 }
 
-async function loadSettings() {
+async function loadSettings(preferredName = "") {
   try {
+    const selectedName = preferredName || els.settingSelect.value;
     const payload = await api("/api/settings");
     state.settings = payload.settings || [];
     els.settingSelect.replaceChildren(
@@ -232,7 +258,11 @@ async function loadSettings() {
         return option;
       }),
     );
+    if (state.settings.some((setting) => setting.name === selectedName)) {
+      els.settingSelect.value = selectedName;
+    }
     await loadSelectedSettingPlan();
+    updateControls();
   } catch (error) {
     els.settingValidation.textContent = "Settings unavailable";
     els.settingValidation.classList.add("error");
@@ -258,8 +288,9 @@ async function loadSelectedSettingPlan() {
   }
 }
 
-async function loadStrategies() {
+async function loadStrategies(preferredName = "") {
   try {
+    const selectedName = preferredName || els.strategySelect.value;
     const payload = await api("/api/strategies");
     state.strategies = payload.strategies || [];
     els.strategySelect.replaceChildren(
@@ -270,7 +301,11 @@ async function loadStrategies() {
         return option;
       }),
     );
+    if (state.strategies.some((strategy) => strategy.name === selectedName)) {
+      els.strategySelect.value = selectedName;
+    }
     await loadSelectedStrategy();
+    updateControls();
   } catch (error) {
     els.strategySummary.textContent = "Strategies unavailable";
     showError(error);
@@ -293,6 +328,102 @@ async function loadSelectedStrategy() {
     renderStrategyDetail(null);
     showError(error);
   }
+}
+
+async function openPresetEditor(kind, editing) {
+  const isSetting = kind === "settings";
+  const selectedName = isSetting ? els.settingSelect.value : els.strategySelect.value;
+  if (editing && !selectedName) {
+    return;
+  }
+  try {
+    let value = isSetting ? { server: "CH", round1_turns: 0 } : [];
+    if (editing) {
+      const detail = await api(`/api/${kind}/${encodeURIComponent(selectedName)}`);
+      value = isSetting ? detail.config : detail.entries;
+    }
+    state.presetEditor = {
+      kind,
+      originalName: editing ? selectedName : "",
+    };
+    els.presetDialogTitle.textContent = `${editing ? "Edit" : "New"} ${isSetting ? "Script" : "Strategy"}`;
+    els.presetDialog.showModal();
+    els.presetName.value = editing ? selectedName : "";
+    els.presetJson.value = JSON.stringify(value, null, 2);
+    setPresetError("");
+    els.presetName.focus();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function closePresetEditor() {
+  els.presetDialog.close();
+  state.presetEditor = null;
+  setPresetError("");
+}
+
+async function savePreset(event) {
+  event.preventDefault();
+  const editor = state.presetEditor;
+  if (!editor) {
+    return;
+  }
+  const name = els.presetName.value.trim();
+  if (!name) {
+    setPresetError("Name is required.");
+    return;
+  }
+  let value;
+  try {
+    value = JSON.parse(els.presetJson.value);
+  } catch (error) {
+    setPresetError(`Invalid JSON: ${error.message}`);
+    return;
+  }
+  const isSetting = editor.kind === "settings";
+  const request = isSetting ? { config: value } : { entries: value };
+  request.overwrite = Boolean(editor.originalName && editor.originalName === name);
+  els.savePreset.disabled = true;
+  try {
+    await api(`/api/${editor.kind}/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(request),
+    });
+    closePresetEditor();
+    if (isSetting) {
+      await loadSettings(name);
+    } else {
+      await loadStrategies(name);
+    }
+  } catch (error) {
+    setPresetError(error?.payload?.error?.message || error.message || "Save failed.");
+  } finally {
+    els.savePreset.disabled = false;
+  }
+}
+
+async function deletePreset(kind) {
+  const isSetting = kind === "settings";
+  const name = isSetting ? els.settingSelect.value : els.strategySelect.value;
+  if (!name || !window.confirm(`Delete ${name}?`)) {
+    return;
+  }
+  try {
+    await api(`/api/${kind}/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (isSetting) {
+      await loadSettings();
+    } else {
+      await loadStrategies();
+    }
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function setPresetError(message) {
+  els.presetError.textContent = message;
+  els.presetError.hidden = !message;
 }
 
 async function loadDevices(preferredDeviceId = "") {
@@ -864,6 +995,10 @@ function updateControls() {
   els.resumeJob.disabled = selectedJobStatus !== "paused";
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)
     || selectedJobStatus === "cancelling";
+  els.editSetting.disabled = !els.settingSelect.value;
+  els.deleteSetting.disabled = !els.settingSelect.value;
+  els.editStrategy.disabled = !els.strategySelect.value;
+  els.deleteStrategy.disabled = !els.strategySelect.value;
 }
 
 function mergeDevice(device) {

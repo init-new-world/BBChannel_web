@@ -30,6 +30,11 @@
           <section class="panel-section">
             <div class="section-label">Script</div>
             <select id="setting-select" class="field" aria-label="Script setting"></select>
+            <div class="preset-actions">
+              <button id="new-setting" class="ghost-button" type="button">New</button>
+              <button id="edit-setting" class="ghost-button" type="button">Edit</button>
+              <button id="delete-setting" class="danger-button" type="button">Delete</button>
+            </div>
             <div id="setting-validation" class="status-line">No setting</div>
             <div id="setting-plan" class="result-box detail-box">No script selected</div>
           </section>
@@ -37,6 +42,11 @@
           <section class="panel-section">
             <div class="section-label">Strategy</div>
             <select id="strategy-select" class="field" aria-label="Strategy preset"></select>
+            <div class="preset-actions">
+              <button id="new-strategy" class="ghost-button" type="button">New</button>
+              <button id="edit-strategy" class="ghost-button" type="button">Edit</button>
+              <button id="delete-strategy" class="danger-button" type="button">Delete</button>
+            </div>
             <div id="strategy-summary" class="result-box detail-box">No strategy selected</div>
           </section>
 
@@ -180,6 +190,31 @@
         <div id="event-log" class="event-log" aria-live="polite"></div>
       </section>
     </main>
+
+    <dialog id="preset-dialog" class="preset-dialog">
+      <form id="preset-form" class="preset-form" method="dialog">
+        <div class="preset-dialog-header">
+          <div>
+            <div class="section-label">Preset Editor</div>
+            <h2 id="preset-dialog-title">Edit Preset</h2>
+          </div>
+          <button id="close-preset" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <label class="field-stack">
+          <span>Name</span>
+          <input id="preset-name" class="field" type="text" autocomplete="off" required>
+        </label>
+        <label class="field-stack preset-json-field">
+          <span>JSON</span>
+          <textarea id="preset-json" class="field preset-json" spellcheck="false" required></textarea>
+        </label>
+        <div id="preset-error" class="preset-error" role="alert" hidden></div>
+        <div class="preset-dialog-actions">
+          <button id="cancel-preset" class="ghost-button" type="button">Cancel</button>
+          <button id="save-preset" class="primary-button" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

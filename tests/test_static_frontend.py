@@ -19,7 +19,17 @@ def test_operator_console_references_api_controls():
     assert 'id="manual-adb-endpoint"' in index
     assert 'id="setting-select"' in index
     assert 'id="setting-plan"' in index
+    assert 'id="new-setting"' in index
+    assert 'id="edit-setting"' in index
+    assert 'id="delete-setting"' in index
     assert 'id="strategy-select"' in index
+    assert 'id="new-strategy"' in index
+    assert 'id="edit-strategy"' in index
+    assert 'id="delete-strategy"' in index
+    assert 'id="preset-dialog"' in index
+    assert 'id="preset-name"' in index
+    assert 'id="preset-json"' in index
+    assert 'id="save-preset"' in index
     assert 'id="template-select"' in index
     assert 'id="recognition-scales"' in index
     assert 'id="recognition-roi-enabled"' in index
@@ -41,6 +51,9 @@ def test_operator_console_references_api_controls():
     assert "/api/adb/connect-endpoint" in script
     assert "/api/settings" in script
     assert "/api/strategies" in script
+    assert 'method: "PUT"' in script
+    assert 'method: "DELETE"' in script
+    assert "JSON.parse" in script
     assert "/plan" in script
     assert "/api/snapshot" in script
     assert "/api/match" in script
