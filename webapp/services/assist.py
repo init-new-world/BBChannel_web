@@ -75,21 +75,20 @@ class AssistRecognizer:
             else []
         )
         required_skill_levels = assist.get("skill_levels")
-        required_level_ten_count = (
-            sum(level == 10 for level in required_skill_levels)
+        normalized_skill_levels = (
+            required_skill_levels[:3]
             if isinstance(required_skill_levels, list)
-            and all(level in {0, 10} for level in required_skill_levels)
-            else 0
-        )
-        level_ten_matches = (
-            self._recognition.match_template_all(
-                screenshot,
-                "assist/full_skill/10.png",
-                threshold=threshold,
-                scales=ASSIST_EQUIP_SCALES,
-                max_results=50,
+            and len(required_skill_levels) >= 3
+            and all(
+                isinstance(level, int) and not isinstance(level, bool)
+                for level in required_skill_levels[:3]
             )
-            if required_level_ten_count
+            and any(level > 0 for level in required_skill_levels[:3])
+            else []
+        )
+        skill_level_matches = (
+            self._skill_level_matches(screenshot, threshold)
+            if normalized_skill_levels
             else []
         )
         matches = [
@@ -169,22 +168,31 @@ class AssistRecognizer:
                         "np_level_confidence": match.confidence,
                     }
                 )
-            if required_level_ten_count:
-                skill_matches = self._candidate_skill_matches(
+            if normalized_skill_levels:
+                recognized_skills = self._candidate_skill_levels(
                     candidate["anchor"],
-                    level_ten_matches,
+                    skill_level_matches,
                 )
-                if len(skill_matches) < required_level_ten_count:
+                if len(recognized_skills) < len(normalized_skill_levels):
                     continue
-                skill_matches = skill_matches[:required_level_ten_count]
+                recognized_skills = recognized_skills[: len(normalized_skill_levels)]
+                if any(
+                    actual_level < required_level
+                    for (actual_level, _), required_level in zip(
+                        recognized_skills,
+                        normalized_skill_levels,
+                        strict=True,
+                    )
+                ):
+                    continue
                 candidate["checks"].update(
                     {
-                        "skill_levels": [10] * required_level_ten_count,
+                        "skill_levels": [level for level, _ in recognized_skills],
                         "skill_templates": [
-                            match.template_path for match in skill_matches
+                            match.template_path for _, match in recognized_skills
                         ],
                         "skill_confidences": [
-                            match.confidence for match in skill_matches
+                            match.confidence for _, match in recognized_skills
                         ],
                     }
                 )
@@ -263,6 +271,44 @@ class AssistRecognizer:
             )
         return matches
 
+    def _skill_level_matches(
+        self,
+        screenshot: bytes,
+        threshold: float,
+    ) -> list[tuple[int, Any]]:
+        entries = self._resources.template_index(
+            prefix="assist/full_skill",
+            limit=1000,
+        )["entries"]
+        paths_by_stem = {
+            str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]: str(entry["path"])
+            for entry in entries
+        }
+        matches: list[tuple[int, Any]] = []
+        for stem, template_path in paths_by_stem.items():
+            if stem == "10":
+                level = 10
+            elif stem.startswith("num") and stem[3:].isdigit() and "mask" not in stem:
+                number = int(stem[3:])
+                if not 0 <= number <= 9:
+                    continue
+                level = 10 if number == 0 else number
+            else:
+                continue
+            mask_path = paths_by_stem.get(f"{stem}mask")
+            matches.extend(
+                (level, match)
+                for match in self._recognition.match_template_all(
+                    screenshot,
+                    template_path,
+                    threshold=threshold,
+                    scales=ASSIST_EQUIP_SCALES,
+                    mask_path=mask_path,
+                    max_results=50,
+                )
+            )
+        return matches
+
     @staticmethod
     def _candidate_equip_match(anchor: list[int], equip_matches: dict[str, list[Any]]):
         anchor_x, anchor_y = anchor
@@ -319,17 +365,30 @@ class AssistRecognizer:
         return max(nearby, key=lambda item: item[1].confidence)
 
     @staticmethod
-    def _candidate_skill_matches(anchor: list[int], matches: list[Any]) -> list[Any]:
+    def _candidate_skill_levels(
+        anchor: list[int],
+        matches: list[tuple[int, Any]],
+    ) -> list[tuple[int, Any]]:
         anchor_x, anchor_y = anchor
-        return sorted(
+        nearby = sorted(
             (
-                match
-                for match in matches
+                (level, match)
+                for level, match in matches
                 if match.center[0] >= anchor_x + 80
                 and anchor_y + 10 <= match.center[1] <= anchor_y + 110
             ),
-            key=lambda match: match.center[0],
+            key=lambda item: item[1].center[0],
         )
+        groups: list[list[tuple[int, Any]]] = []
+        for item in nearby:
+            if not groups or abs(item[1].center[0] - groups[-1][0][1].center[0]) > 20:
+                groups.append([item])
+            else:
+                groups[-1].append(item)
+        return [
+            max(group, key=lambda item: item[1].confidence)
+            for group in groups
+        ]
 
     @staticmethod
     def _overlaps(first: list[int], second: list[int]) -> bool:

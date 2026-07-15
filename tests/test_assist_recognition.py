@@ -314,3 +314,58 @@ def test_assist_recognizer_requires_all_requested_level_ten_skills(tmp_path: Pat
     assert result["candidates"][0]["anchor"] == [100, 265]
     assert result["candidates"][0]["checks"]["skill_levels"] == [10, 10, 10]
     assert len(result["candidates"][0]["checks"]["skill_templates"]) == 3
+
+
+def test_assist_recognizer_compares_arbitrary_skill_levels(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    skill_assets = assets / "assist" / "full_skill"
+    servant_faces.mkdir(parents=True)
+    skill_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (40, 70, 100))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((7, 7, 52, 52), fill=(205, 90, 175))
+    portrait_draw.line((5, 53, 54, 6), fill=(45, 225, 190), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+
+    level_templates: dict[int, Image.Image] = {}
+    colors = {6: (180, 65, 90), 7: (65, 150, 90), 9: (70, 90, 190), 10: (155, 80, 180)}
+    for level, color in colors.items():
+        image = Image.new("RGB", (26, 18), color)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((2, 2, 23, 15), outline=(245, 220, 70), width=2)
+        draw.line((3 + level % 4, 14, 22, 3 + level % 5), fill=(40, 220, 235), width=2)
+        filename = "10.png" if level == 10 else f"num{level}.png"
+        image.save(skill_assets / filename)
+        level_templates[level] = image
+
+    screenshot = Image.new("RGB", (700, 400), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    screenshot.paste(portrait, (70, 235))
+    for x, level in zip((250, 310, 370), (6, 7, 10), strict=True):
+        screenshot.paste(level_templates[level], (x, 125))
+    for x, level in zip((250, 310, 370), (6, 9, 10), strict=True):
+        screenshot.paste(level_templates[level], (x, 295))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "skill_levels": [6, 8, 10],
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 265]
+    assert result["candidates"][0]["checks"]["skill_levels"] == [6, 9, 10]
