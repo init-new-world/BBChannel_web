@@ -216,6 +216,19 @@ def test_save_setting_rejects_invalid_config_without_creating_file(tmp_path: Pat
     assert not (tmp_path / "settings" / "invalid.json").exists()
 
 
+def test_delete_setting_removes_only_resolved_json_file(tmp_path: Path):
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CH"})
+    service = ScriptDataService(tmp_path)
+
+    result = service.delete_setting("demo")
+
+    assert result == {"name": "demo", "path": "settings/demo.json", "deleted": True}
+    assert not (tmp_path / "settings" / "demo.json").exists()
+    with pytest.raises(AppError) as excinfo:
+        service.delete_setting("demo")
+    assert excinfo.value.code == ErrorCode.DATA_FILE_NOT_FOUND
+
+
 def test_get_strategy_returns_entries_summary_and_validation(tmp_path: Path):
     _write_json(
         tmp_path / "strategy" / "brave.json",
@@ -273,6 +286,16 @@ def test_save_strategy_rejects_invalid_entries_without_creating_file(tmp_path: P
 
     assert excinfo.value.code == ErrorCode.DATA_FILE_INVALID
     assert not (tmp_path / "strategy" / "invalid.json").exists()
+
+
+def test_delete_strategy_removes_resolved_json_file(tmp_path: Path):
+    _write_json(tmp_path / "strategy" / "brave.json", [])
+    service = ScriptDataService(tmp_path)
+
+    result = service.delete_strategy("brave.json")
+
+    assert result == {"name": "brave", "path": "strategy/brave.json", "deleted": True}
+    assert not (tmp_path / "strategy" / "brave.json").exists()
 
 
 def test_get_setting_rejects_path_traversal(tmp_path: Path):

@@ -406,6 +406,23 @@ def test_put_strategy_creates_validated_preset(tmp_path: Path):
     assert invalid.json()["error"]["code"] == "data_file_invalid"
 
 
+def test_delete_setting_and_strategy_routes(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "settings" / "demo.json", {"server": "CH"})
+    _write_json(data / "strategy" / "brave.json", [])
+
+    setting = client.delete("/api/settings/demo")
+    strategy = client.delete("/api/strategies/brave")
+    missing = client.delete("/api/settings/demo")
+
+    assert setting.status_code == 200
+    assert setting.json()["deleted"] is True
+    assert strategy.status_code == 200
+    assert strategy.json()["deleted"] is True
+    assert missing.status_code == 404
+
+
 def test_servant_and_master_routes_expose_catalogs(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

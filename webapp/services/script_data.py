@@ -75,6 +75,9 @@ class ScriptDataService:
         )
         return self.get_setting(path.stem)
 
+    def delete_setting(self, name: str) -> dict[str, Any]:
+        return self._delete_named_json(self.settings_dir, name, "settings")
+
     def get_setting_plan(self, name: str) -> dict[str, Any]:
         detail = self.get_setting(name)
         config = detail["config"]
@@ -139,6 +142,9 @@ class ScriptDataService:
             overwrite=overwrite,
         )
         return self.get_strategy(path.stem)
+
+    def delete_strategy(self, name: str) -> dict[str, Any]:
+        return self._delete_named_json(self.strategy_dir, name, "strategy")
 
     def list_servants(self, server: str) -> dict[str, Any]:
         server = self._normalize_server(server)
@@ -248,6 +254,16 @@ class ScriptDataService:
             )
         self._write_json_atomic(path, payload)
         return path
+
+    def _delete_named_json(self, directory: Path, name: str, kind: str) -> dict[str, Any]:
+        path = self._resolve_named_json(directory, name, kind)
+        result = {
+            "name": path.stem,
+            "path": self._relative_path(path),
+            "deleted": True,
+        }
+        path.unlink()
+        return result
 
     def _load_json(self, path: Path) -> Any:
         try:

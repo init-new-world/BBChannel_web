@@ -258,6 +258,10 @@ def create_app(
             overwrite=request.overwrite,
         )
 
+    @app.delete("/api/settings/{name}")
+    def delete_setting(name: str) -> dict:
+        return script_data.delete_setting(name)
+
     @app.get("/api/strategies")
     def strategies() -> dict[str, list[dict[str, str]]]:
         return {"strategies": script_data.list_strategies()}
@@ -273,6 +277,10 @@ def create_app(
             request.entries,
             overwrite=request.overwrite,
         )
+
+    @app.delete("/api/strategies/{name}")
+    def delete_strategy(name: str) -> dict:
+        return script_data.delete_strategy(name)
 
     @app.get("/api/servants")
     def servants(server: str = "CH") -> dict:
