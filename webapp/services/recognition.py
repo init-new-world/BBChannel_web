@@ -67,6 +67,27 @@ class RecognitionService:
             )
         return results
 
+    def match_template_all(
+        self,
+        screenshot: bytes,
+        template_path: str,
+        threshold: float = 0.8,
+        roi: Sequence[int] | None = None,
+        scales: Sequence[float] | None = None,
+        mask_path: str | None = None,
+        max_results: int = 20,
+    ) -> list[MatchResult]:
+        screenshot_image = self._decode_screenshot(screenshot, template_path)
+        return self._match_all_decoded(
+            screenshot_image,
+            template_path,
+            threshold=threshold,
+            roi=roi,
+            scales=scales,
+            mask_path=mask_path,
+            max_results=max_results,
+        )
+
     def match_template_debug(
         self,
         screenshot: bytes,
@@ -169,6 +190,155 @@ class RecognitionService:
         mask_path: str | None = None,
     ) -> MatchResult:
         cv, numpy = self._require_opencv()
+        template_image, template_mask, explicit_mask = self._load_template(
+            template_path,
+            mask_path,
+        )
+        screenshot_height, screenshot_width = screenshot_image.shape[:2]
+        normalized_roi = self._normalize_roi(
+            roi,
+            screenshot_width,
+            screenshot_height,
+            template_path,
+        )
+        roi_x, roi_y, roi_width, roi_height = normalized_roi
+        search_image = screenshot_image[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
+        normalized_scales = self._normalize_scales(scales, template_path)
+
+        best: tuple[float, tuple[int, int], int, int, float] | None = None
+        template_height, template_width = template_image.shape[:2]
+        for scale in normalized_scales:
+            scaled_width = max(round(template_width * scale), 1)
+            scaled_height = max(round(template_height * scale), 1)
+            if scaled_width > roi_width or scaled_height > roi_height:
+                continue
+            scaled_template, scaled_mask = self._scale_template(
+                template_image,
+                template_mask,
+                scaled_width,
+                scaled_height,
+                scale,
+            )
+            matches = self._template_matches(
+                search_image,
+                scaled_template,
+                scaled_mask,
+                explicit_mask,
+            )
+            _, confidence, _, max_location = cv.minMaxLoc(matches)
+            candidate = (
+                float(confidence),
+                max_location,
+                scaled_width,
+                scaled_height,
+                scale,
+            )
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+
+        if best is None:
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Template is larger than the selected screenshot region at every scale.",
+                {
+                    "template_path": template_path,
+                    "roi": normalized_roi,
+                    "scales": normalized_scales,
+                },
+            )
+
+        confidence, max_location, matched_width, matched_height, best_scale = best
+        top_left = [roi_x + int(max_location[0]), roi_y + int(max_location[1])]
+        result_roi = normalized_roi if roi is not None else None
+        return MatchResult(
+            template_path=template_path,
+            matched=confidence >= threshold,
+            confidence=confidence,
+            threshold=threshold,
+            top_left=top_left,
+            size=[matched_width, matched_height],
+            center=[top_left[0] + matched_width // 2, top_left[1] + matched_height // 2],
+            scale=best_scale,
+            roi=result_roi,
+        )
+
+    def _match_all_decoded(
+        self,
+        screenshot_image,
+        template_path: str,
+        *,
+        threshold: float,
+        roi: object = None,
+        scales: object = None,
+        mask_path: str | None = None,
+        max_results: int,
+    ) -> list[MatchResult]:
+        cv, numpy = self._require_opencv()
+        template_image, template_mask, explicit_mask = self._load_template(
+            template_path,
+            mask_path,
+        )
+        screenshot_height, screenshot_width = screenshot_image.shape[:2]
+        normalized_roi = self._normalize_roi(
+            roi,
+            screenshot_width,
+            screenshot_height,
+            template_path,
+        )
+        roi_x, roi_y, roi_width, roi_height = normalized_roi
+        search_image = screenshot_image[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
+        normalized_scales = self._normalize_scales(scales, template_path)
+        result_roi = normalized_roi if roi is not None else None
+        candidates: list[MatchResult] = []
+        template_height, template_width = template_image.shape[:2]
+
+        for scale in normalized_scales:
+            scaled_width = max(round(template_width * scale), 1)
+            scaled_height = max(round(template_height * scale), 1)
+            if scaled_width > roi_width or scaled_height > roi_height:
+                continue
+            scaled_template, scaled_mask = self._scale_template(
+                template_image,
+                template_mask,
+                scaled_width,
+                scaled_height,
+                scale,
+            )
+            matches = self._template_matches(
+                search_image,
+                scaled_template,
+                scaled_mask,
+                explicit_mask,
+            )
+            local_maxima = matches == cv.dilate(matches, numpy.ones((3, 3), dtype=numpy.uint8))
+            match_y, match_x = numpy.where((matches >= threshold) & local_maxima)
+            for x, y in zip(match_x.tolist(), match_y.tolist(), strict=True):
+                top_left = [roi_x + x, roi_y + y]
+                candidates.append(
+                    MatchResult(
+                        template_path=template_path,
+                        matched=True,
+                        confidence=float(matches[y, x]),
+                        threshold=threshold,
+                        top_left=top_left,
+                        size=[scaled_width, scaled_height],
+                        center=[top_left[0] + scaled_width // 2, top_left[1] + scaled_height // 2],
+                        scale=scale,
+                        roi=result_roi,
+                    )
+                )
+
+        selected: list[MatchResult] = []
+        for candidate in sorted(candidates, key=lambda result: result.confidence, reverse=True):
+            if any(self._intersection_over_union(candidate, other) >= 0.3 for other in selected):
+                continue
+            selected.append(candidate)
+            if len(selected) >= max(max_results, 1):
+                break
+        return sorted(selected, key=lambda result: (result.top_left[1], result.top_left[0]))
+
+    def _load_template(self, template_path: str, mask_path: str | None):
+        cv, _ = self._require_opencv()
         template_file = self._resources.resolve_template(template_path)
         template_source = cv.imread(str(template_file), cv.IMREAD_UNCHANGED)
         if template_source is None:
@@ -209,99 +379,68 @@ class RecognitionService:
                         "mask_size": [template_mask.shape[1], template_mask.shape[0]],
                     },
                 )
+        return template_image, template_mask, explicit_mask
 
-        screenshot_height, screenshot_width = screenshot_image.shape[:2]
-        normalized_roi = self._normalize_roi(
-            roi,
-            screenshot_width,
-            screenshot_height,
-            template_path,
-        )
-        roi_x, roi_y, roi_width, roi_height = normalized_roi
-        search_image = screenshot_image[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
-        normalized_scales = self._normalize_scales(scales, template_path)
-
-        best: tuple[float, tuple[int, int], int, int, float] | None = None
+    def _scale_template(
+        self,
+        template_image,
+        template_mask,
+        width: int,
+        height: int,
+        scale: float,
+    ):
+        cv, _ = self._require_opencv()
         template_height, template_width = template_image.shape[:2]
-        for scale in normalized_scales:
-            scaled_width = max(round(template_width * scale), 1)
-            scaled_height = max(round(template_height * scale), 1)
-            if scaled_width > roi_width or scaled_height > roi_height:
-                continue
-            if scaled_width == template_width and scaled_height == template_height:
-                scaled_template = template_image
-                scaled_mask = template_mask
-            else:
-                interpolation = cv.INTER_AREA if scale < 1 else cv.INTER_LINEAR
-                scaled_template = cv.resize(
-                    template_image,
-                    (scaled_width, scaled_height),
-                    interpolation=interpolation,
-                )
-                scaled_mask = (
-                    cv.resize(
-                        template_mask,
-                        (scaled_width, scaled_height),
-                        interpolation=cv.INTER_NEAREST,
-                    )
-                    if template_mask is not None
-                    else None
-                )
-            if scaled_mask is None:
-                matches = cv.matchTemplate(
-                    search_image,
-                    scaled_template,
-                    cv.TM_CCOEFF_NORMED,
-                )
-            else:
-                matches = cv.matchTemplate(
-                    search_image,
-                    scaled_template,
-                    cv.TM_CCOEFF_NORMED if explicit_mask else cv.TM_CCORR_NORMED,
-                    mask=scaled_mask,
-                )
-                matches = numpy.nan_to_num(
-                    matches,
-                    nan=-1.0,
-                    posinf=-1.0,
-                    neginf=-1.0,
-                )
-            _, confidence, _, max_location = cv.minMaxLoc(matches)
-            candidate = (
-                float(confidence),
-                max_location,
-                scaled_width,
-                scaled_height,
-                scale,
-            )
-            if best is None or candidate[0] > best[0]:
-                best = candidate
-
-        if best is None:
-            raise AppError(
-                ErrorCode.MATCH_FAILED,
-                "Template is larger than the selected screenshot region at every scale.",
-                {
-                    "template_path": template_path,
-                    "roi": normalized_roi,
-                    "scales": normalized_scales,
-                },
-            )
-
-        confidence, max_location, matched_width, matched_height, best_scale = best
-        top_left = [roi_x + int(max_location[0]), roi_y + int(max_location[1])]
-        result_roi = normalized_roi if roi is not None else None
-        return MatchResult(
-            template_path=template_path,
-            matched=confidence >= threshold,
-            confidence=confidence,
-            threshold=threshold,
-            top_left=top_left,
-            size=[matched_width, matched_height],
-            center=[top_left[0] + matched_width // 2, top_left[1] + matched_height // 2],
-            scale=best_scale,
-            roi=result_roi,
+        if width == template_width and height == template_height:
+            return template_image, template_mask
+        interpolation = cv.INTER_AREA if scale < 1 else cv.INTER_LINEAR
+        scaled_template = cv.resize(
+            template_image,
+            (width, height),
+            interpolation=interpolation,
         )
+        scaled_mask = (
+            cv.resize(
+                template_mask,
+                (width, height),
+                interpolation=cv.INTER_NEAREST,
+            )
+            if template_mask is not None
+            else None
+        )
+        return scaled_template, scaled_mask
+
+    def _template_matches(self, search_image, template_image, template_mask, explicit_mask: bool):
+        cv, numpy = self._require_opencv()
+        if template_mask is None:
+            return cv.matchTemplate(search_image, template_image, cv.TM_CCOEFF_NORMED)
+        matches = cv.matchTemplate(
+            search_image,
+            template_image,
+            cv.TM_CCOEFF_NORMED if explicit_mask else cv.TM_CCORR_NORMED,
+            mask=template_mask,
+        )
+        return numpy.nan_to_num(matches, nan=-1.0, posinf=-1.0, neginf=-1.0)
+
+    @staticmethod
+    def _intersection_over_union(first: MatchResult, second: MatchResult) -> float:
+        first_x, first_y = first.top_left
+        second_x, second_y = second.top_left
+        first_width, first_height = first.size
+        second_width, second_height = second.size
+        overlap_width = max(
+            0,
+            min(first_x + first_width, second_x + second_width) - max(first_x, second_x),
+        )
+        overlap_height = max(
+            0,
+            min(first_y + first_height, second_y + second_height) - max(first_y, second_y),
+        )
+        overlap_area = overlap_width * overlap_height
+        if overlap_area == 0:
+            return 0.0
+        union_area = first_width * first_height + second_width * second_height - overlap_area
+        return overlap_area / union_area
 
     @staticmethod
     def _normalize_roi(

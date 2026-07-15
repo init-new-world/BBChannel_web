@@ -204,6 +204,29 @@ def test_match_templates_decodes_screenshot_once(tmp_path: Path, monkeypatch: py
     assert all(result.matched for result in results)
 
 
+def test_match_template_all_returns_distinct_occurrences(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = _pattern()
+    template.save(resources.assets_dir / "target.png")
+    screenshot = Image.new("RGB", (100, 70), "black")
+    screenshot.paste(template, (12, 9))
+    screenshot.paste(template, (67, 43))
+
+    results = RecognitionService(resources).match_template_all(
+        _png_bytes(screenshot),
+        "target.png",
+        threshold=0.99,
+        max_results=5,
+    )
+
+    assert [result.top_left for result in results] == [[12, 9], [67, 43]]
+    assert all(result.matched for result in results)
+    assert all(result.confidence >= 0.99 for result in results)
+
+
 def test_match_template_rejects_roi_outside_screenshot(tmp_path: Path):
     pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService
