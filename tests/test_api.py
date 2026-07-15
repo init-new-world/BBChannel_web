@@ -355,6 +355,44 @@ def test_setting_plan_route_exposes_normalized_actions(tmp_path: Path):
     assert payload["summary"]["action_count"] == 2
 
 
+def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [1, [5, 2]],
+            "round1_turn0_np": [3],
+        },
+    )
+
+    response = client.get("/api/settings/demo/program")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {
+        "action_count": 3,
+        "supported_action_count": 3,
+        "unsupported_action_count": 0,
+        "tap_count": 4,
+    }
+    actions = payload["rounds"][0]["turns"][0]["actions"]
+    assert actions[0]["steps"] == [
+        {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590},
+    ]
+    assert actions[1]["steps"] == [
+        {"type": "tap", "role": "servant_skill_5", "x": 474, "y": 590},
+        {"type": "tap", "role": "skill_target_2", "x": 640, "y": 420},
+    ]
+    assert actions[2]["steps"] == [
+        {"type": "tap", "role": "np_3", "x": 960, "y": 300},
+    ]
+
+
 def test_strategy_routes_expose_data_dir_presets(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

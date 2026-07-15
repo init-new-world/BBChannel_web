@@ -12,7 +12,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from webapp.api import create_job_router
-from webapp.automation import register_battle_jobs, register_diagnostic_job
+from webapp.automation import (
+    compile_battle_program,
+    register_battle_jobs,
+    register_diagnostic_job,
+)
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
 from webapp.devices.mumu import MumuBackend
@@ -250,6 +254,10 @@ def create_app(
     @app.get("/api/settings/{name}/plan")
     def setting_plan(name: str) -> dict:
         return script_data.get_setting_plan(name)
+
+    @app.get("/api/settings/{name}/program")
+    def setting_program(name: str) -> dict:
+        return compile_battle_program(script_data.get_setting_plan(name))
 
     @app.put("/api/settings/{name}")
     def save_setting(name: str, request: SaveSettingRequest) -> dict:
