@@ -26,7 +26,12 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
             completed = manager.wait(job_id, timeout=2)
 
             assert client.get("/api/job-kinds").json() == {
-                "kinds": ["battle.dry-run", "diagnostic.template-tap", "echo"]
+                "kinds": [
+                    "battle.dry-run",
+                    "battle.execute-skills",
+                    "diagnostic.template-tap",
+                    "echo",
+                ]
             }
             assert client.get(f"/api/jobs/{job_id}").json()["job"]["status"] == "succeeded"
             assert client.get("/api/jobs").json()["jobs"][0]["job_id"] == job_id

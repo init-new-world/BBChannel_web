@@ -124,7 +124,7 @@ def create_app(
         )
         job_manager = JobManager(JobDatabase(runtime_db_path or default_db_path))
     register_diagnostic_job(job_manager, device_service, recognition)
-    register_battle_jobs(job_manager, script_data)
+    register_battle_jobs(job_manager, script_data, device_service, recognition)
 
     def active_device_key() -> str | None:
         return device_service.session_key()
