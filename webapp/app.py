@@ -15,6 +15,7 @@ from webapp.api import create_job_router
 from webapp.automation import (
     compile_battle_program,
     register_assist_job,
+    register_battle_entry_job,
     register_battle_jobs,
     register_diagnostic_job,
 )
@@ -134,6 +135,12 @@ def create_app(
         script_data,
         device_service,
         assist_recognizer,
+    )
+    register_battle_entry_job(
+        job_manager,
+        script_data,
+        device_service,
+        recognition,
     )
     register_battle_jobs(
         job_manager,

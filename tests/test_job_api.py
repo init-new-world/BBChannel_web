@@ -31,6 +31,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "battle.dry-run",
                     "battle.execute-plan",
                     "battle.execute-skills",
+                    "battle.prepare",
                     "diagnostic.template-tap",
                     "echo",
                 ]
