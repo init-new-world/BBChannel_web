@@ -8,7 +8,11 @@ cv2 = pytest.importorskip("cv2")
 np = pytest.importorskip("numpy")
 
 from webapp.app import create_app
-from webapp.automation.battle import register_battle_jobs
+from webapp.automation.battle import (
+    _apply_servant_replacements,
+    _frontline_servants,
+    register_battle_jobs,
+)
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
@@ -22,6 +26,29 @@ from webapp.services.script_data import ScriptDataService
 
 def _write_image(path: Path, image) -> None:
     assert cv2.imwrite(str(path), image)
+
+
+def test_servant_replacements_update_slots_from_same_pre_turn_snapshot():
+    servants = [
+        {"slot": slot, "name": name, "sn": str(100 + slot)}
+        for slot, name in enumerate(("One", "Two", "Three", "Four", "Five", "Six"))
+    ]
+
+    _apply_servant_replacements(servants, {"1": 4, "4": None})
+
+    assert [servant["name"] if servant else None for servant in servants] == [
+        "Four",
+        "Two",
+        "Three",
+        None,
+        "Five",
+        "Six",
+    ]
+    assert [servant["battle_position"] for servant in _frontline_servants(servants)] == [
+        1,
+        2,
+        3,
+    ]
 
 
 def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Path):

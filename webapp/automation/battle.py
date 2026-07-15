@@ -165,6 +165,7 @@ def _execute_plan_handler(
         ]
         action_count = 0
         tap_count = 0
+        servant_positions = _servant_positions(plan["servants"])
 
         for turn_number, (round_number, turn) in enumerate(turns, start=1):
             skill_actions = [
@@ -239,7 +240,7 @@ def _execute_plan_handler(
                         card_recognizer,
                         command_screenshot,
                         program["server"],
-                        plan["servants"],
+                        _frontline_servants(servant_positions),
                         step,
                         threshold,
                         tap_interval,
@@ -247,6 +248,21 @@ def _execute_plan_handler(
             action_count += sum(
                 1 for action in turn["actions"] if action["source"].get("type") == "np"
             )
+            for action in turn["actions"]:
+                if action["source"].get("type") != "replace":
+                    continue
+                _apply_servant_replacements(
+                    servant_positions,
+                    action["source"]["replacements"],
+                )
+                context.emit(
+                    "servant_replacement",
+                    "Post-turn servant positions were updated.",
+                    data={
+                        "replacements": action["source"]["replacements"],
+                        "frontline": _frontline_servants(servant_positions),
+                    },
+                )
 
         context.checkpoint("complete", progress=1.0, message="Battle execution completed.")
         return {
@@ -257,6 +273,49 @@ def _execute_plan_handler(
         }
 
     return execute
+
+
+def _servant_positions(servants: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
+    positions: list[dict[str, Any] | None] = [None] * 6
+    for servant in servants:
+        slot = servant.get("slot")
+        if (
+            isinstance(slot, int)
+            and not isinstance(slot, bool)
+            and 0 <= slot < len(positions)
+            and servant.get("name")
+        ):
+            positions[slot] = dict(servant)
+    return positions
+
+
+def _frontline_servants(
+    servant_positions: list[dict[str, Any] | None],
+) -> list[dict[str, Any]]:
+    frontline = []
+    for battle_position, servant in enumerate(servant_positions[:3], start=1):
+        if servant is None:
+            continue
+        frontline.append(
+            {
+                **servant,
+                "active": True,
+                "battle_position": battle_position,
+            }
+        )
+    return frontline
+
+
+def _apply_servant_replacements(
+    servant_positions: list[dict[str, Any] | None],
+    replacements: dict[str, int | None],
+) -> None:
+    previous = list(servant_positions)
+    for destination, source in replacements.items():
+        destination_index = int(destination) - 1
+        servant_positions[destination_index] = (
+            previous[source - 1] if source is not None else None
+        )
 
 
 def _execute_strategy_step(

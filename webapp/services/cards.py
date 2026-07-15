@@ -51,7 +51,14 @@ class CommandCardRecognizer:
         active_servants = active_servants[:3]
 
         servant_templates: list[tuple[int, dict[str, Any], str]] = []
-        for position, servant in enumerate(active_servants, start=1):
+        for default_position, servant in enumerate(active_servants, start=1):
+            position = servant.get("battle_position", default_position)
+            if (
+                isinstance(position, bool)
+                or not isinstance(position, int)
+                or not 1 <= position <= 3
+            ):
+                position = default_position
             prefix = f"commands_{normalized_server}/{servant['sn']}"
             page = self._resources.template_index(prefix=prefix, limit=1000)
             for entry in page["entries"]:

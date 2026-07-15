@@ -346,11 +346,6 @@ class ScriptDataService:
         return count
 
     def _plan_servants(self, config: dict[str, Any]) -> list[dict[str, Any]]:
-        active_slots = {
-            slot
-            for slot in config.get("usedServant", [])
-            if isinstance(slot, int)
-        }
         catalog_by_name: dict[str, dict[str, Any]] = {}
         server = config.get("server")
         if isinstance(server, str) and server.upper() in VALID_SERVERS:
@@ -383,7 +378,7 @@ class ScriptDataService:
                 {
                     "slot": slot,
                     "name": name,
-                    "active": slot in active_slots,
+                    "active": slot < 3 and bool(name),
                     "sn": sn,
                     "np_color": np_color,
                 }

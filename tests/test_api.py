@@ -469,6 +469,33 @@ def test_setting_program_compiles_strategy_that_requires_critical_stars(tmp_path
     assert command_phase["steps"][1]["strategies"][0]["card2"]["criticalStar"] == 5
 
 
+def test_setting_program_compiles_post_turn_servant_replacements(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "replace.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_replace": {"1": 4, "4": None},
+        },
+    )
+
+    payload = client.get("/api/settings/replace/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    action = payload["rounds"][0]["turns"][0]["actions"][0]
+    assert action == {
+        "source": {"type": "replace", "replacements": {"1": 4, "4": None}},
+        "supported": True,
+        "steps": [],
+        "reason": None,
+    }
+    assert payload["summary"]["execution_tap_count"] == 4
+
+
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

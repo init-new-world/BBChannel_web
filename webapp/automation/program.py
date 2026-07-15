@@ -111,7 +111,10 @@ def _battle_execution_status(
         return {"ready": False, "reason": "Program contains no turns."}
     if unsupported_action_count or any(not phase["supported"] for phase in command_phases):
         return {"ready": False, "reason": "Program contains unsupported actions."}
-    if any(action_type not in {"skill", "np", "strategy"} for action_type in source_types):
+    if any(
+        action_type not in {"skill", "np", "strategy", "replace"}
+        for action_type in source_types
+    ):
         return {"ready": False, "reason": "Program contains unsupported action types."}
     return {"ready": True, "reason": None}
 
@@ -165,7 +168,27 @@ def _compile_action(action: dict[str, Any]) -> dict[str, Any]:
         return _compile_np(action)
     if action_type == "strategy":
         return _supported(action, [])
+    if action_type == "replace":
+        return _compile_replace(action)
     return _unsupported(action, f"{action_type or 'Unknown'} actions are not compiled yet.")
+
+
+def _compile_replace(action: dict[str, Any]) -> dict[str, Any]:
+    replacements = action.get("replacements")
+    if not isinstance(replacements, dict) or not replacements:
+        return _unsupported(action, "Replacement mappings must be a non-empty object.")
+    for destination, source in replacements.items():
+        try:
+            destination_position = int(destination)
+        except (TypeError, ValueError):
+            return _unsupported(action, "Replacement positions must be numbered 1 through 6.")
+        if isinstance(destination, bool) or not 1 <= destination_position <= 6:
+            return _unsupported(action, "Replacement positions must be numbered 1 through 6.")
+        if source is None:
+            continue
+        if isinstance(source, bool) or not isinstance(source, int) or not 1 <= source <= 6:
+            return _unsupported(action, "Replacement sources must be numbered 1 through 6 or null.")
+    return _supported(action, [])
 
 
 def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
