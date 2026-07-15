@@ -33,6 +33,9 @@ class _Recognition:
     ("template", "stage"),
     [
         ("run_again", "completion"),
+        ("friend_apply", "completion"),
+        ("friend_apply_1", "completion"),
+        ("jblevel10", "completion"),
         ("attack", "battle"),
         ("teamDecide", "prepare"),
         ("listupdatebtn", "assist"),

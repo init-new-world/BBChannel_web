@@ -27,7 +27,17 @@ def create_stage_handler(
         stage_templates = (
             (
                 "completion",
-                ("run_again", "next", "relationship_up", "battleFinish", "battleFinish1", "fight_end"),
+                (
+                    "run_again",
+                    "next",
+                    "relationship_up",
+                    "friend_apply",
+                    "friend_apply_1",
+                    "jblevel10",
+                    "battleFinish",
+                    "battleFinish1",
+                    "fight_end",
+                ),
             ),
             ("battle", ("attack", "phase_1", "phase_2", "phase_3")),
             (
