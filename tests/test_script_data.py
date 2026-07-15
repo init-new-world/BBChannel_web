@@ -191,6 +191,39 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
     }
 
 
+def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "clearAP": 1,
+            "allowOtherApple": 0,
+            "firstBattleSet": 1,
+            "intervalBF": 0.2,
+            "intervalAF": 0.3,
+            "fullFriendshipStop": 1,
+            "dropStopNum": 2,
+            "dropImage": "assets/drop/item.png",
+            "gameCrushRestart": 1,
+        },
+    )
+
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+
+    assert plan["run"] == {
+        "clear_ap": True,
+        "allow_other_apple": False,
+        "first_battle_set": True,
+        "interval_before_fight": 0.2,
+        "interval_after_fight": 0.3,
+        "full_friendship_stop": True,
+        "drop_stop_num": 2,
+        "drop_image": "assets/drop/item.png",
+        "game_crash_restart": True,
+    }
+
+
 def test_get_setting_reports_unknown_servants(tmp_path: Path):
     _write_json(tmp_path / "servant_info_CH.json", {"Known": {"other_name": []}})
     _write_json(

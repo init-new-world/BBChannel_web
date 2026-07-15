@@ -93,6 +93,7 @@ class ScriptDataService:
             "server": config.get("server"),
             "servants": self._plan_servants(config),
             "assist": self._plan_assist(config),
+            "run": self._plan_run(config),
             "master": {
                 "equip": config.get("master_equip"),
                 "sex": config.get("master_sex"),
@@ -426,6 +427,20 @@ class ScriptDataService:
             "np_level": config.get("NPlevel"),
             "skill_levels": skill_levels[:3] if isinstance(skill_levels, list) else [],
             "scroll_limit": config.get("scrollLimit"),
+        }
+
+    @staticmethod
+    def _plan_run(config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "clear_ap": bool(config.get("clearAP")),
+            "allow_other_apple": bool(config.get("allowOtherApple")),
+            "first_battle_set": bool(config.get("firstBattleSet")),
+            "interval_before_fight": config.get("intervalBF", 0),
+            "interval_after_fight": config.get("intervalAF", 0),
+            "full_friendship_stop": bool(config.get("fullFriendshipStop")),
+            "drop_stop_num": config.get("dropStopNum", 0),
+            "drop_image": config.get("dropImage"),
+            "game_crash_restart": bool(config.get("gameCrushRestart")),
         }
 
     def _build_rounds(self, config: dict[str, Any]) -> list[dict[str, Any]]:

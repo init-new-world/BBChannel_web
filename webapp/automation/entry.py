@@ -34,6 +34,8 @@ def register_battle_entry_job(
         template_roles = (
             ("battle_ready", f"battle/{server}/attack.png"),
             ("battle_ready", f"battle/{server}/phase_1.png"),
+            ("apple_decide", f"battle/{server}/apple_decide.png"),
+            ("apple_close", f"battle/{server}/apple_close.png"),
             ("team_decide", f"battle/{server}/teamDecide.png"),
             ("start_task", f"battle/{server}/start_task.png"),
             ("start_battle", f"battle/{server}/start_battle.png"),
@@ -82,6 +84,36 @@ def register_battle_entry_job(
                     "actions": actions,
                     "attempts": attempts,
                 }
+            if matched_role == "apple_close" and matched_result is not None:
+                if not plan["run"]["clear_ap"]:
+                    operation = device_service.tap(*matched_result.center)
+                    actions.append("apple_close")
+                    context.emit(
+                        "device_action",
+                        "Closed AP recovery dialog.",
+                        data={"role": "apple_close", "operation": operation.to_dict()},
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "ready": False,
+                        "reason": "ap_recovery_disabled",
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+                apple_match = _available_apple(recognition, screenshot, server)
+                if apple_match is None:
+                    raise RuntimeError("No available AP recovery item was recognized.")
+                apple_name, apple_result = apple_match
+                operation = device_service.tap(*apple_result.center)
+                action = f"apple_{apple_name}"
+                actions.append(action)
+                context.emit(
+                    "device_action",
+                    "Selected AP recovery item.",
+                    data={"role": action, "operation": operation.to_dict()},
+                )
+                context.sleep(action_wait_seconds)
+                continue
             if matched_role is not None and matched_result is not None:
                 operation = device_service.tap(*matched_result.center)
                 actions.append(matched_role)
@@ -120,3 +152,31 @@ def _number(
     if not minimum <= result <= maximum:
         raise ValueError(f"{key} must be between {minimum} and {maximum}.")
     return result
+
+
+def _available_apple(
+    recognition: RecognitionService,
+    screenshot: bytes,
+    server: str,
+):
+    templates = (
+        ("gold", f"battle/{server}/gold.png"),
+        ("silver", f"battle/{server}/silver.png"),
+        ("blue", "battle/public/blue.png"),
+        ("copper", f"battle/{server}/copper.png"),
+    )
+    for apple_name, template_path in templates:
+        try:
+            result = recognition.match_template(
+                screenshot,
+                template_path,
+                threshold=0.85,
+                scales=(1.0, 0.75, 2 / 3, 0.5),
+            )
+        except AppError as exc:
+            if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+                continue
+            raise
+        if result.matched:
+            return apple_name, result
+    return None
