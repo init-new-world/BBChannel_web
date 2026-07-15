@@ -3,8 +3,14 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any
 
-from webapp.automation.program import compile_battle_program
+from webapp.automation.program import (
+    FACE_CARD_POINTS,
+    NP_POINTS,
+    compile_battle_program,
+)
+from webapp.automation.strategy import select_command_cards
 from webapp.runtime import JobManager, RunContext
+from webapp.services.cards import CommandCardRecognizer
 from webapp.services.devices import DeviceService
 from webapp.services.recognition import RecognitionService
 from webapp.services.script_data import ScriptDataService
@@ -20,6 +26,7 @@ def register_battle_jobs(
     script_data: ScriptDataService,
     device_service: DeviceService | None = None,
     recognition: RecognitionService | None = None,
+    card_recognizer: CommandCardRecognizer | None = None,
 ) -> None:
     def dry_run(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
@@ -111,7 +118,12 @@ def register_battle_jobs(
     ):
         job_manager.register(
             BATTLE_EXECUTE_PLAN_JOB_KIND,
-            _execute_plan_handler(script_data, device_service, recognition),
+            _execute_plan_handler(
+                script_data,
+                device_service,
+                recognition,
+                card_recognizer,
+            ),
             requires_device=True,
         )
 
@@ -120,16 +132,26 @@ def _execute_plan_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None,
 ):
     def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
         threshold, timeout_seconds, poll_interval, tap_interval = _execution_options(
             payload
         )
-        program = compile_battle_program(script_data.get_setting_plan(setting_name))
+        plan = script_data.get_setting_plan(setting_name)
+        program = compile_battle_program(plan)
         execution_status = program["execution"]["battle"]
         if not execution_status["ready"]:
             raise ValueError(execution_status["reason"])
+        has_strategy_steps = any(
+            step.get("type") == "strategy"
+            for round_plan in program["rounds"]
+            for turn in round_plan["turns"]
+            for step in turn["command_phase"]["steps"]
+        )
+        if has_strategy_steps and card_recognizer is None:
+            raise ValueError("Command card recognition is not configured.")
 
         turns = [
             (round_plan["round"], turn)
@@ -192,7 +214,7 @@ def _execute_plan_handler(
                 command_steps[:1],
                 tap_interval,
             )
-            _wait_for_command_cards(
+            command_screenshot = _wait_for_command_cards(
                 context,
                 device_service,
                 recognition,
@@ -201,12 +223,27 @@ def _execute_plan_handler(
                 timeout_seconds,
                 poll_interval,
             )
-            tap_count += _execute_steps(
-                context,
-                device_service,
-                command_steps[1:],
-                tap_interval,
-            )
+            for step in command_steps[1:]:
+                if step.get("type") == "tap":
+                    tap_count += _execute_steps(
+                        context,
+                        device_service,
+                        [step],
+                        tap_interval,
+                    )
+                    continue
+                if step.get("type") == "strategy":
+                    tap_count += _execute_strategy_step(
+                        context,
+                        device_service,
+                        card_recognizer,
+                        command_screenshot,
+                        program["server"],
+                        plan["servants"],
+                        step,
+                        threshold,
+                        tap_interval,
+                    )
             action_count += sum(
                 1 for action in turn["actions"] if action["source"].get("type") == "np"
             )
@@ -215,11 +252,66 @@ def _execute_plan_handler(
         return {
             "setting_name": setting_name,
             "turn_count": len(turns),
-            "action_count": action_count,
+            "action_count": program["summary"]["action_count"],
             "tap_count": tap_count,
         }
 
     return execute
+
+
+def _execute_strategy_step(
+    context: RunContext,
+    device_service: DeviceService,
+    card_recognizer: CommandCardRecognizer | None,
+    screenshot: bytes,
+    server: str,
+    servants: list[dict[str, Any]],
+    step: dict[str, Any],
+    threshold: float,
+    tap_interval: float,
+) -> int:
+    if card_recognizer is None:
+        raise ValueError("Command card recognition is not configured.")
+    recognized = card_recognizer.recognize(
+        screenshot,
+        server,
+        servants,
+        threshold=threshold,
+    )
+    context.emit(
+        "card_recognition",
+        "Command cards were classified.",
+        data=recognized,
+    )
+    if not recognized["complete"]:
+        raise ValueError(
+            f"Recognized {recognized['recognized_count']} of 5 command cards."
+        )
+    selected = select_command_cards(
+        step["strategies"],
+        recognized["cards"],
+        preselected_nps=step.get("preselected_nps", []),
+    )
+    context.emit(
+        "strategy_selection",
+        "Command card strategy was resolved.",
+        data={"selected": selected},
+    )
+    tap_steps = []
+    for selection in selected:
+        if selection["type"] == "np":
+            servant = int(selection["servant"])
+            x, y = NP_POINTS[servant - 1]
+            tap_steps.append(
+                {"type": "tap", "role": f"np_{servant}", "x": x, "y": y}
+            )
+        else:
+            slot = int(selection["slot"])
+            x, y = FACE_CARD_POINTS[slot - 1]
+            tap_steps.append(
+                {"type": "tap", "role": f"face_card_{slot}", "x": x, "y": y}
+            )
+    return _execute_steps(context, device_service, tap_steps, tap_interval)
 
 
 def _execute_skills_handler(
@@ -353,7 +445,7 @@ def _wait_for_command_cards(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
-) -> None:
+) -> bytes:
     started = monotonic()
     attempts = 0
     candidates = [
@@ -374,7 +466,7 @@ def _wait_for_command_cards(
             },
         )
         if any(match.matched for match in matches):
-            return
+            return screenshot
         if monotonic() - started >= timeout_seconds:
             raise TimeoutError(
                 f"Command cards did not become ready within {timeout_seconds:.2f} seconds."

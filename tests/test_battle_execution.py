@@ -14,6 +14,7 @@ from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
+from webapp.services.cards import CommandCardRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
@@ -261,4 +262,142 @@ def test_execute_battle_job_runs_skill_and_command_phase(tmp_path: Path):
         "np_1",
         "face_card_1",
         "face_card_2",
+    ]
+
+
+def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    session = tmp_path / "replays" / "strategy"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    (data / "settings").mkdir(parents=True)
+    session.mkdir(parents=True)
+
+    def pattern(width, height, color, marker):
+        image = np.zeros((height, width, 4), dtype=np.uint8)
+        image[2:-2, 2:-2, :3] = color
+        image[2:-2, 2:-2, 3] = 255
+        image[marker : marker + 2, 3:-3, :3] = 255
+        image[marker : marker + 2, 3:-3, 3] = 255
+        return image
+
+    attack = pattern(34, 28, (30, 180, 240), 8)
+    colors = {
+        "Buster": pattern(34, 20, (40, 40, 210), 4),
+        "Arts": pattern(34, 20, (220, 80, 40), 8),
+        "Quick": pattern(34, 20, (80, 190, 40), 12),
+    }
+    portraits = {
+        1: pattern(48, 48, (130, 40, 50), 5),
+        2: pattern(48, 48, (100, 40, 100), 10),
+        3: pattern(48, 48, (70, 40, 150), 15),
+    }
+    _write_image(assets / "battle" / "CH" / "attack.png", attack)
+    for name, image in colors.items():
+        _write_image(assets / "battle" / "CH" / f"{name}.png", image)
+    for position, image in portraits.items():
+        directory = assets / "commands_CH" / str(100 + position)
+        directory.mkdir(parents=True)
+        _write_image(directory / "card_servant_1.png", image)
+
+    battle_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    battle_frame[560:588, 1100:1134] = attack[:, :, :3]
+    command_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    expected_cards = [(1, "Buster"), (2, "Arts"), (1, "Arts"), (3, "Quick"), (2, "Buster")]
+    for slot, (position, color_name) in enumerate(expected_cards):
+        x = slot * 256
+        color = colors[color_name]
+        portrait = portraits[position]
+        command_frame[420:440, x + 20 : x + 54] = color[:, :, :3]
+        command_frame[500:548, x + 100 : x + 148] = portrait[:, :, :3]
+
+    expectations = [
+        (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
+        (command_frame, {"type": "tap", "x": 500, "y": 110}),
+        (command_frame, {"type": "tap", "x": 650, "y": 500}),
+        (command_frame, {"type": "tap", "x": 1175, "y": 500}),
+        (command_frame, None),
+    ]
+    frames = []
+    for index, (image, expect) in enumerate(expectations):
+        filename = f"{index}.png"
+        _write_image(session / filename, image)
+        frame = {"file": filename}
+        if expect is not None:
+            frame["expect"] = expect
+        frames.append(frame)
+    (session / "manifest.json").write_text(
+        json.dumps({"version": 1, "device_id": "strategy", "frames": frames}),
+        encoding="utf-8",
+    )
+    servants = {
+        "One": {"other_name": [], "SN": "101"},
+        "Two": {"other_name": [], "SN": "102"},
+        "Three": {"other_name": [], "SN": "103"},
+    }
+    (data / "servant_info_CH.json").write_text(json.dumps(servants), encoding="utf-8")
+    strategy = {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 1, "cards": ["1A"], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 1, "cards": ["2B"], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, False],
+        "colorFirst": True,
+    }
+    (data / "settings" / "strategy.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "One",
+                "servant_1_name": "Two",
+                "servant_2_name": "Three",
+                "usedServant": [0, 1, 2],
+                "round1_turns": 1,
+                "round1_turn0_strategy": [strategy],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resources = ResourceService(assets, data)
+    recognition = RecognitionService(resources)
+    cards = CommandCardRecognizer(resources, recognition)
+    devices = DeviceService(
+        [ReplayBackend(tmp_path / "replays")],
+        EventLog(),
+        frame_normalizer=FrameNormalizer(),
+    )
+    devices.connect("replay", "strategy")
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            devices,
+            recognition,
+            cards,
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "strategy",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="replay:strategy",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result == {
+        "setting_name": "strategy",
+        "turn_count": 1,
+        "action_count": 1,
+        "tap_count": 4,
+    }
+    events = manager.database.list_events(job.job_id)
+    assert [event.data["role"] for event in events if event.event_type == "device_action"] == [
+        "attack",
+        "np_1",
+        "face_card_3",
+        "face_card_5",
     ]
