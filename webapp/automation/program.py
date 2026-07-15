@@ -55,6 +55,9 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
     supported_action_count = 0
     tap_count = 0
     execution_tap_count = 0
+    extra_action_count = 0
+    extra_tap_count = 0
+    extra_unsupported_action_count = 0
     source_types: list[object] = []
     command_phases: list[dict[str, Any]] = []
 
@@ -84,17 +87,59 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
                     "condition": turn.get("condition"),
                 }
             )
-        rounds.append({"round": round_plan["round"], "turns": turns})
+        extra_source_actions = [
+            {"type": "skill", "command": command}
+            for command in round_plan.get("extra_skill", [])
+        ]
+        if round_plan.get("extra_strategy"):
+            extra_source_actions.append(
+                {
+                    "type": "strategy",
+                    "strategies": round_plan["extra_strategy"],
+                }
+            )
+        extra_actions = [_compile_action(action) for action in extra_source_actions]
+        extra_command_phase = _compile_command_phase(
+            {
+                "strategy": round_plan.get("extra_strategy"),
+                "nps": [],
+            }
+        )
+        extra_action_count += len(extra_actions)
+        extra_unsupported_action_count += sum(
+            not bool(action["supported"]) for action in extra_actions
+        )
+        extra_tap_count += sum(len(action["steps"]) for action in extra_actions)
+        extra_tap_count += sum(
+            int(step.get("selection_count", 1))
+            for step in extra_command_phase["steps"]
+        )
+        source_types.extend(action["source"].get("type") for action in extra_actions)
+        command_phases.append(extra_command_phase)
+        rounds.append(
+            {
+                "round": round_plan["round"],
+                "turns": turns,
+                "extra_turn": {
+                    "actions": extra_actions,
+                    "command_phase": extra_command_phase,
+                    "condition": None,
+                },
+            }
+        )
 
     unsupported_action_count = action_count - supported_action_count
+    total_unsupported_action_count = (
+        unsupported_action_count + extra_unsupported_action_count
+    )
     skill_execution = _skill_execution_status(
-        action_count,
-        unsupported_action_count,
+        action_count + extra_action_count,
+        total_unsupported_action_count,
         source_types,
     )
     battle_execution = _battle_execution_status(
         len(command_phases),
-        unsupported_action_count,
+        total_unsupported_action_count,
         source_types,
         command_phases,
     )
@@ -109,6 +154,8 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
             "unsupported_action_count": unsupported_action_count,
             "tap_count": tap_count,
             "execution_tap_count": execution_tap_count,
+            "extra_action_count": extra_action_count,
+            "extra_tap_count": extra_tap_count,
         },
         "execution": {"skills": skill_execution, "battle": battle_execution},
         "validation": plan["validation"],

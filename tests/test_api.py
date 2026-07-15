@@ -380,6 +380,8 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
         "unsupported_action_count": 0,
         "tap_count": 4,
         "execution_tap_count": 7,
+        "extra_action_count": 0,
+        "extra_tap_count": 4,
     }
     assert payload["execution"] == {
         "skills": {
@@ -825,6 +827,51 @@ def test_setting_program_compiles_dynamic_hakuno_skill(
     assert action["supported"] is True
     assert action["steps"] == expected_steps
     assert action.get("runtime") == expected_runtime
+
+
+def test_setting_program_compiles_extra_turn_template(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    strategy = [_strategy_payload()]
+    _write_json(
+        data / "settings" / "extra-turn.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [1],
+            "round1_extraSkill": [7, [-2, 2], [11, 1]],
+            "round1_extraStrategy": strategy,
+        },
+    )
+
+    payload = client.get("/api/settings/extra-turn/program").json()
+
+    extra_turn = payload["rounds"][0]["extra_turn"]
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    skill_actions = [
+        action
+        for action in extra_turn["actions"]
+        if action["source"]["type"] == "skill"
+    ]
+    assert [action["source"]["command"] for action in skill_actions] == [
+        7,
+        [-2, 2],
+        [11, 1],
+    ]
+    assert all(action["supported"] for action in extra_turn["actions"])
+    assert extra_turn["command_phase"]["steps"] == [
+        {"type": "tap", "role": "attack", "x": 1150, "y": 600},
+        {
+            "type": "strategy",
+            "role": "command_card_strategy",
+            "strategies": strategy,
+            "preselected_nps": [],
+            "selection_count": 3,
+        },
+    ]
+    assert payload["summary"]["extra_action_count"] == 4
 
 
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
