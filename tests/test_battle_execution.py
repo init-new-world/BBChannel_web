@@ -10,6 +10,7 @@ np = pytest.importorskip("numpy")
 
 from webapp.app import create_app
 from webapp.automation.battle import (
+    _apply_servant_exchange,
     _apply_servant_replacements,
     _evaluate_card_condition,
     _frontline_servants,
@@ -50,6 +51,24 @@ def test_servant_replacements_update_slots_from_same_pre_turn_snapshot():
         1,
         2,
         3,
+    ]
+
+
+def test_servant_exchange_swaps_runtime_positions_immediately():
+    servants = [
+        {"slot": slot, "name": name}
+        for slot, name in enumerate(("One", "Two", "Three", "Four", "Five", "Six"))
+    ]
+
+    _apply_servant_exchange(servants, [1, 4])
+
+    assert [servant["name"] for servant in servants] == [
+        "Four",
+        "Two",
+        "Three",
+        "One",
+        "Five",
+        "Six",
     ]
 
 

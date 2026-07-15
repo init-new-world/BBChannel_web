@@ -245,6 +245,20 @@ def _execute_plan_handler(
                     action["steps"],
                     tap_interval,
                 )
+                state_change = action.get("state_change")
+                if state_change and state_change["type"] == "servant_exchange":
+                    _apply_servant_exchange(
+                        servant_positions,
+                        state_change["positions"],
+                    )
+                    context.emit(
+                        "servant_exchange",
+                        "Runtime servant positions were exchanged.",
+                        data={
+                            "positions": state_change["positions"],
+                            "frontline": _frontline_servants(servant_positions),
+                        },
+                    )
 
             context.checkpoint(
                 f"round_{round_number}.turn_{turn['turn']}.command_phase",
@@ -367,6 +381,17 @@ def _apply_servant_replacements(
         servant_positions[destination_index] = (
             previous[source - 1] if source is not None else None
         )
+
+
+def _apply_servant_exchange(
+    servant_positions: list[dict[str, Any] | None],
+    positions: list[int],
+) -> None:
+    left, right = positions
+    servant_positions[left - 1], servant_positions[right - 1] = (
+        servant_positions[right - 1],
+        servant_positions[left - 1],
+    )
 
 
 def _execute_strategy_step(

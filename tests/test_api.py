@@ -578,6 +578,36 @@ def test_setting_program_compiles_conditional_skill_block_controls(tmp_path: Pat
     ]
 
 
+def test_setting_program_compiles_master_order_change(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "order-change.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [[12, 1, 4]],
+        },
+    )
+
+    payload = client.get("/api/settings/order-change/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    action = payload["rounds"][0]["turns"][0]["actions"][0]
+    assert action["state_change"] == {"type": "servant_exchange", "positions": [1, 4]}
+    assert action["steps"] == [
+        {"type": "tap", "role": "master_skill_menu", "x": 1131, "y": 320, "wait_after_seconds": 1.5},
+        {"type": "tap", "role": "master_skill_12", "x": 1020, "y": 310, "wait_after_seconds": 1.0},
+        {"type": "tap", "role": "exchange_position_1", "x": 137, "y": 352},
+        {"type": "tap", "role": "exchange_position_4", "x": 737, "y": 352},
+        {"type": "tap", "role": "exchange_confirm_1", "x": 607, "y": 625},
+        {"type": "tap", "role": "exchange_confirm_2", "x": 607, "y": 625},
+        {"type": "tap", "role": "exchange_confirm_3", "x": 607, "y": 625},
+    ]
+
+
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

@@ -26,6 +26,8 @@ EMIYA_CHOICE_POINTS = ((483, 433), (795, 433))
 COMMAND_SPELL_MENU_POINT = (1060, 82)
 COMMAND_SPELL_NP_CHARGE_POINT = (637, 343)
 COMMAND_SPELL_CONFIRM_POINT = (793, 430)
+EXCHANGE_POINTS = tuple((137 + 200 * position, 352) for position in range(6))
+EXCHANGE_CONFIRM_POINT = (607, 625)
 
 
 def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
@@ -200,6 +202,9 @@ def _compile_replace(action: dict[str, Any]) -> dict[str, Any]:
 
 def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
     command = action.get("command")
+    exchange = _compile_servant_exchange(action, command)
+    if exchange is not None:
+        return exchange
     control = _compile_skill_control(action, command)
     if control is not None:
         return control
@@ -236,6 +241,48 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
         target_x, target_y = SKILL_TARGET_POINTS[target - 1]
         steps.append(_tap(f"skill_target_{target}", target_x, target_y))
     return _supported(action, steps)
+
+
+def _compile_servant_exchange(
+    action: dict[str, Any],
+    command: Any,
+) -> dict[str, Any] | None:
+    if (
+        not isinstance(command, list)
+        or len(command) != 3
+        or isinstance(command[0], bool)
+        or not isinstance(command[0], int)
+    ):
+        return None
+    skill, left, right = command
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in (left, right)):
+        return _unsupported(action, "Order change commands require three numeric positions.")
+    if not 10 <= skill <= 12:
+        return _unsupported(action, "Order change must use master skill 10 through 12.")
+    if not 1 <= left <= 6 or not 1 <= right <= 6 or left == right:
+        return _unsupported(action, "Order change positions must be distinct positions 1 through 6.")
+    skill_x, skill_y = MASTER_SKILL_POINTS[skill - 10]
+    left_x, left_y = EXCHANGE_POINTS[left - 1]
+    right_x, right_y = EXCHANGE_POINTS[right - 1]
+    confirm_x, confirm_y = EXCHANGE_CONFIRM_POINT
+    result = _supported(
+        action,
+        [
+            _tap("master_skill_menu", *MASTER_SKILL_MENU_POINT, wait_after_seconds=1.5),
+            _tap(f"master_skill_{skill}", skill_x, skill_y, wait_after_seconds=1.0),
+            _tap(f"exchange_position_{left}", left_x, left_y),
+            _tap(f"exchange_position_{right}", right_x, right_y),
+            *[
+                _tap(f"exchange_confirm_{attempt}", confirm_x, confirm_y)
+                for attempt in range(1, 4)
+            ],
+        ],
+    )
+    result["state_change"] = {
+        "type": "servant_exchange",
+        "positions": [left, right],
+    }
+    return result
 
 
 def _compile_skill_control(
