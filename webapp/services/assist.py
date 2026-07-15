@@ -208,6 +208,34 @@ class AssistRecognizer:
             "candidate_count": len(candidates),
         }
 
+    def match_refresh_button(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/listupdatebtn.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
+    def match_refresh_confirmation(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/listupdate.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
     def _servant_templates(self, canonical_name: Any) -> list[str]:
         if not isinstance(canonical_name, str) or not canonical_name:
             return []

@@ -31,25 +31,103 @@ def register_assist_job(
             or not 0 <= tap_wait_seconds <= 10
         ):
             raise ValueError("tap_wait_seconds must be between 0 and 10.")
+        scroll_wait_seconds = payload.get("scroll_wait_seconds", 0.5)
+        if (
+            isinstance(scroll_wait_seconds, bool)
+            or not isinstance(scroll_wait_seconds, (int, float))
+            or not 0 <= scroll_wait_seconds <= 10
+        ):
+            raise ValueError("scroll_wait_seconds must be between 0 and 10.")
+        max_scrolls = payload.get("max_scrolls", 8)
+        if (
+            isinstance(max_scrolls, bool)
+            or not isinstance(max_scrolls, int)
+            or not 0 <= max_scrolls <= 100
+        ):
+            raise ValueError("max_scrolls must be between 0 and 100.")
+        max_refreshes = payload.get("max_refreshes", 1)
+        if (
+            isinstance(max_refreshes, bool)
+            or not isinstance(max_refreshes, int)
+            or not 0 <= max_refreshes <= 100
+        ):
+            raise ValueError("max_refreshes must be between 0 and 100.")
+        refresh_wait_seconds = payload.get("refresh_wait_seconds", 1.0)
+        if (
+            isinstance(refresh_wait_seconds, bool)
+            or not isinstance(refresh_wait_seconds, (int, float))
+            or not 0 <= refresh_wait_seconds <= 10
+        ):
+            raise ValueError("refresh_wait_seconds must be between 0 and 10.")
 
         plan = script_data.get_setting_plan(setting_name.strip())
-        context.checkpoint("recognize_assist", progress=0.25)
-        recognition = assist_recognizer.recognize(
-            device_service.snapshot(),
-            plan["assist"],
-            server=plan["server"],
-        )
-        context.emit(
-            "recognition",
-            "Assist candidate recognition completed.",
-            data={
-                "attempt": 1,
-                "candidate_count": recognition["candidate_count"],
-                "servant_name": recognition["servant_name"],
-            },
-        )
-        if not recognition["candidates"]:
-            raise RuntimeError("No matching assist candidate was found.")
+        attempts = 0
+        scrolls = 0
+        scrolls_since_refresh = 0
+        refreshes = 0
+        while True:
+            progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
+            context.checkpoint("recognize_assist", progress=progress)
+            recognition = assist_recognizer.recognize(
+                device_service.snapshot(),
+                plan["assist"],
+                server=plan["server"],
+            )
+            attempts += 1
+            context.emit(
+                "recognition",
+                "Assist candidate recognition completed.",
+                data={
+                    "attempt": attempts,
+                    "candidate_count": recognition["candidate_count"],
+                    "servant_name": recognition["servant_name"],
+                },
+            )
+            if recognition["candidates"]:
+                break
+            if scrolls_since_refresh < max_scrolls:
+                context.checkpoint("scroll_assist", progress=progress)
+                operation = device_service.swipe(1120, 620, 1120, 250, 500)
+                scrolls += 1
+                scrolls_since_refresh += 1
+                context.emit(
+                    "device_action",
+                    "Scrolled assist list.",
+                    data={
+                        "role": "assist_scroll",
+                        "scroll": scrolls,
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(float(scroll_wait_seconds))
+                continue
+            if refreshes >= max_refreshes:
+                raise RuntimeError("No matching assist candidate was found.")
+
+            context.checkpoint("refresh_assist", progress=progress)
+            refresh_button = assist_recognizer.match_refresh_button(
+                device_service.snapshot(),
+                plan["server"],
+            )
+            if not refresh_button.matched:
+                raise RuntimeError("Assist list refresh button was not recognized.")
+            device_service.tap(*refresh_button.center)
+            context.sleep(float(refresh_wait_seconds))
+            refresh_confirmation = assist_recognizer.match_refresh_confirmation(
+                device_service.snapshot(),
+                plan["server"],
+            )
+            if not refresh_confirmation.matched:
+                raise RuntimeError("Assist list refresh confirmation was not recognized.")
+            device_service.tap(*refresh_confirmation.center)
+            refreshes += 1
+            scrolls_since_refresh = 0
+            context.emit(
+                "device_action",
+                "Refreshed assist list.",
+                data={"role": "assist_refresh", "refresh": refreshes},
+            )
+            context.sleep(float(refresh_wait_seconds))
 
         selected = dict(recognition["candidates"][0])
         scale = float(selected["scale"])
@@ -69,8 +147,9 @@ def register_assist_job(
         context.checkpoint("complete", progress=1.0, message="Assist selected.")
         return {
             "setting_name": setting_name.strip(),
-            "attempts": 1,
-            "scrolls": 0,
+            "attempts": attempts,
+            "scrolls": scrolls,
+            "refreshes": refreshes,
             "selected": selected,
             "tap": operation.to_dict(),
         }
