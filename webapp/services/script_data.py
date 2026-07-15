@@ -437,6 +437,8 @@ class ScriptDataService:
             "first_battle_set": bool(config.get("firstBattleSet")),
             "interval_before_fight": config.get("intervalBF", 0),
             "interval_after_fight": config.get("intervalAF", 0),
+            "random_time": config.get("randomTime", 0),
+            "random_touch": bool(config.get("randomTouch")),
             "full_friendship_stop": bool(config.get("fullFriendshipStop")),
             "drop_stop_num": config.get("dropStopNum", 0),
             "drop_image": config.get("dropImage"),

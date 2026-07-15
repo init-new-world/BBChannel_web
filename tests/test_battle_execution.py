@@ -14,6 +14,7 @@ from webapp.automation.battle import (
     _apply_servant_replacements,
     _execute_hakuno_reroll,
     _evaluate_card_condition,
+    _execute_steps,
     _frontline_servants,
     _matches_hakuno_needs,
     _wait_for_battle_transition,
@@ -86,6 +87,44 @@ def test_hakuno_card_needs_match_unordered_alternatives_with_duplicate_counts():
 
     assert _matches_hakuno_needs(cards, [["2B"], ["2A", "1B", "1B"]]) is True
     assert _matches_hakuno_needs(cards, [["1B", "1B", "1B"]]) is False
+
+
+def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
+    sleeps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def tap(self, _x, _y):
+            return Operation()
+
+    class Context:
+        def emit(self, *_args, **_kwargs):
+            pass
+
+        def sleep(self, seconds):
+            sleeps.append(seconds)
+
+    random_values = iter((0.25, 0.75))
+    monkeypatch.setattr(
+        "webapp.automation.battle.random.random",
+        lambda: next(random_values),
+    )
+
+    _execute_steps(
+        Context(),
+        Device(),
+        [
+            {"type": "tap", "role": "first", "x": 1, "y": 2},
+            {"type": "tap", "role": "second", "x": 3, "y": 4},
+        ],
+        0.1,
+        random_time=0.4,
+    )
+
+    assert sleeps == pytest.approx([0.2, 0.4])
 
 
 @pytest.mark.parametrize(

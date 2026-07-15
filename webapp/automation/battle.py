@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import random
 from collections import Counter
+from dataclasses import dataclass
 from time import monotonic
 from typing import Any
 
@@ -22,6 +24,12 @@ from webapp.services.script_data import ScriptDataService
 BATTLE_DRY_RUN_JOB_KIND = "battle.dry-run"
 BATTLE_EXECUTE_PLAN_JOB_KIND = "battle.execute-plan"
 BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
+
+
+@dataclass(frozen=True)
+class _TapTiming:
+    interval: float
+    random_time: float = 0.0
 
 
 def initialize_battle_settings(
@@ -438,6 +446,10 @@ def create_battle_execute_plan_handler(
             payload
         )
         plan = script_data.get_setting_plan(setting_name)
+        tap_interval = _TapTiming(
+            tap_interval,
+            _configured_random_time(plan["run"].get("random_time", 0)),
+        )
         initialize_settings = payload.get(
             "initialize_settings",
             bool(plan["run"]["first_battle_set"]),
@@ -480,7 +492,7 @@ def create_battle_execute_plan_handler(
                 device_service,
                 recognition,
                 program["server"],
-                action_wait_seconds=tap_interval,
+                action_wait_seconds=tap_interval.interval,
             )
 
         turns = [
@@ -1042,6 +1054,10 @@ def _execute_skills_handler(
             payload
         )
         plan = script_data.get_setting_plan(setting_name)
+        tap_interval = _TapTiming(
+            tap_interval,
+            _configured_random_time(plan["run"].get("random_time", 0)),
+        )
         program = compile_battle_program(plan)
         execution_status = program["execution"]["skills"]
         if not execution_status["ready"]:
@@ -1132,8 +1148,15 @@ def _execute_steps(
     context: RunContext,
     device_service: DeviceService,
     steps: list[dict[str, Any]],
-    tap_interval: float,
+    tap_interval: float | _TapTiming,
+    *,
+    random_time: float = 0.0,
 ) -> int:
+    timing = (
+        tap_interval
+        if isinstance(tap_interval, _TapTiming)
+        else _TapTiming(float(tap_interval), _configured_random_time(random_time))
+    )
     for step in steps:
         operation = device_service.tap(step["x"], step["y"])
         context.emit(
@@ -1142,12 +1165,21 @@ def _execute_steps(
             data={"role": step["role"], "operation": operation.to_dict()},
         )
         wait_after = max(
-            tap_interval,
+            timing.interval + timing.random_time * random.random(),
             float(step.get("wait_after_seconds", 0.0)),
         )
         if wait_after:
             context.sleep(wait_after)
     return len(steps)
+
+
+def _configured_random_time(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("random_time must be a number.")
+    result = float(value)
+    if not 0 <= result <= 10:
+        raise ValueError("random_time must be between 0 and 10.")
+    return result
 
 
 def _wait_for_battle_ready(
