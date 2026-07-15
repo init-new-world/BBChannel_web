@@ -72,6 +72,25 @@ def test_strategy_fallback_prefers_different_servants():
     ]
 
 
+def test_strategy_selects_face_card_by_custom_special_key():
+    strategy = {
+        "card1": _spec(1, ["S0"]),
+        "card2": _spec(2, []),
+        "card3": _spec(2, []),
+        "breakpoint": [False, False],
+        "colorFirst": True,
+    }
+    cards = [_card(slot, code) for slot, code in enumerate(
+        ("1B", "2A", "1Q", "3B", "2Q"),
+        start=1,
+    )]
+    cards[3]["special_keys"] = ["S0"]
+
+    selected = select_command_cards([strategy], cards)
+
+    assert selected[0] == {"type": "face", "slot": 4, "code": "3B", "stars": 0}
+
+
 def test_strategy_rejects_unknown_star_requirement():
     strategy = {
         "card1": _spec(1, ["1B"], stars=5),

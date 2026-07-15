@@ -60,6 +60,11 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
         template.save(directory / "card_servant_1.png")
         servant_templates[position] = template
 
+    special_directory = assets / "special_keys"
+    special_directory.mkdir()
+    special_template = _pattern((24, 24), (220, 170, 30), 7)
+    special_template.save(special_directory / "special.png")
+
     screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
     expected = [(1, "B"), (2, "A"), (3, "Q"), (1, "A"), (2, "B")]
     expected_stars = [5, 0, 10, 2, 9]
@@ -73,6 +78,8 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
         if stars:
             template_number = 0 if stars == 10 else stars
             screenshot.paste(star_templates[template_number].convert("RGB"), star_rois[slot])
+        if slot == 1:
+            screenshot.paste(special_template, (x + 180, 620), special_template)
 
     resources = ResourceService(assets, data)
     result = CommandCardRecognizer(
@@ -87,6 +94,13 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
             {"slot": 2, "name": "Three", "active": True, "sn": "102"},
         ],
         threshold=0.85,
+        special_keys=[
+            {
+                "code": "S0",
+                "template_path": "special_keys/special.png",
+                "threshold": 0.99,
+            }
+        ],
     )
 
     assert result["complete"] is True
@@ -94,6 +108,13 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
     assert [card["code"] for card in result["cards"]] == ["1B", "2A", "3Q", "1A", "2B"]
     assert [card["slot"] for card in result["cards"]] == [1, 2, 3, 4, 5]
     assert [card["stars"] for card in result["cards"]] == expected_stars
+    assert [card["special_keys"] for card in result["cards"]] == [
+        [],
+        ["S0"],
+        [],
+        [],
+        [],
+    ]
     assert result["cards"][1]["star_confidence"] is None
     assert all(
         card["star_confidence"] >= 0.99

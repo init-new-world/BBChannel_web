@@ -13,6 +13,7 @@ from webapp.automation.battle import (
     _apply_servant_exchange,
     _apply_servant_replacements,
     _execute_hakuno_reroll,
+    _execute_strategy_step,
     _evaluate_card_condition,
     _execute_steps,
     _frontline_servants,
@@ -563,6 +564,100 @@ def test_card_condition_opens_command_cards_and_returns_to_battle():
     assert tap_count == 2
     assert taps == [(1150, 600), (1250, 683)]
     assert events[-1][0] == "skill_condition"
+
+
+def test_strategy_execution_passes_special_keys_to_card_recognition():
+    received_special_keys = []
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Cards:
+        def recognize(
+            self,
+            _screenshot,
+            _server,
+            _servants,
+            *,
+            threshold,
+            special_keys,
+        ):
+            assert threshold == 0.75
+            received_special_keys.extend(special_keys)
+            return {
+                "complete": True,
+                "recognized_count": 5,
+                "cards": [
+                    {
+                        "slot": slot,
+                        "code": f"{slot}B",
+                        "servant_position": ((slot - 1) % 3) + 1,
+                        "stars": 0,
+                        "special_keys": ["S0"] if slot == 2 else [],
+                    }
+                    for slot in range(1, 6)
+                ],
+            }
+
+    class Context:
+        def emit(self, _event_type, _message, *, data):
+            assert data
+
+        def sleep(self, _seconds):
+            pass
+
+    special_keys = [
+        {
+            "code": "S0",
+            "template_path": "special_keys/custom.png",
+            "threshold": 0.85,
+        }
+    ]
+    strategy = {
+        "card1": {
+            "type": 1,
+            "cards": ["S0"],
+            "criticalStar": 0,
+            "more_or_less": True,
+        },
+        "card2": {
+            "type": 2,
+            "cards": [],
+            "criticalStar": 0,
+            "more_or_less": True,
+        },
+        "card3": {
+            "type": 2,
+            "cards": [],
+            "criticalStar": 0,
+            "more_or_less": True,
+        },
+        "colorFirst": True,
+    }
+
+    tap_count = _execute_strategy_step(
+        Context(),
+        Device(),
+        Cards(),
+        b"frame",
+        "CH",
+        [],
+        {"strategies": [strategy]},
+        0.75,
+        0,
+        special_keys=special_keys,
+    )
+
+    assert tap_count == 3
+    assert received_special_keys == special_keys
+    assert taps[0] == (375, 500)
 
 
 def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Path):

@@ -38,6 +38,7 @@ class CommandCardRecognizer:
         servants: list[dict[str, Any]],
         *,
         threshold: float = 0.7,
+        special_keys: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         normalized_server = server.upper()
         if normalized_server not in {"CH", "CNTW", "JP"}:
@@ -100,6 +101,27 @@ class CommandCardRecognizer:
                         },
                     )
                 )
+            for special_key in special_keys or []:
+                template_path = special_key.get("template_path")
+                code = special_key.get("code")
+                special_threshold = special_key.get("threshold", threshold)
+                if not isinstance(template_path, str) or not isinstance(code, str):
+                    raise ValueError("Special key template_path and code must be strings.")
+                if (
+                    isinstance(special_threshold, bool)
+                    or not isinstance(special_threshold, (int, float))
+                    or not 0 <= special_threshold <= 1
+                ):
+                    raise ValueError("Special key threshold must be between 0 and 1.")
+                candidates.append(
+                    {
+                        "template_path": template_path,
+                        "threshold": float(special_threshold),
+                        "roi": roi,
+                        "scales": CARD_TEMPLATE_SCALES,
+                    }
+                )
+                candidate_meta.append(("special", slot_index, code))
             star_roi = STAR_SLOT_ROIS[slot_index]
             for template_number in range(10):
                 candidates.append(
@@ -116,7 +138,8 @@ class CommandCardRecognizer:
 
         matches = self._recognition.match_templates(screenshot, candidates)
         grouped: list[dict[str, list[tuple[Any, Any]]]] = [
-            {"color": [], "servant": [], "star": []} for _ in CARD_SLOT_ROIS
+            {"color": [], "servant": [], "star": [], "special": []}
+            for _ in CARD_SLOT_ROIS
         ]
         for meta, match in zip(candidate_meta, matches, strict=True):
             kind, slot_index, value = meta
@@ -127,6 +150,11 @@ class CommandCardRecognizer:
             color_value, color_match = _best_match(groups["color"])
             servant_value, servant_match = _best_match(groups["servant"])
             star_value, star_match = _best_match(groups["star"])
+            special_matches = [
+                (value, match)
+                for value, match in groups["special"]
+                if match.matched
+            ]
             recognized = color_match is not None and servant_match is not None
             cards.append(
                 {
@@ -143,6 +171,10 @@ class CommandCardRecognizer:
                     ),
                     "servant_sn": servant_value["sn"] if servant_match is not None else None,
                     "stars": star_value if star_match is not None else 0,
+                    "special_keys": [value for value, _match in special_matches],
+                    "special_key_confidences": {
+                        value: match.confidence for value, match in special_matches
+                    },
                     "color_confidence": (
                         color_match.confidence if color_match is not None else None
                     ),

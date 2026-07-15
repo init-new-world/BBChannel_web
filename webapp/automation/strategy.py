@@ -126,7 +126,10 @@ def _select_preferred_face(
     ranked = []
     for preference_index, preference in enumerate(preferences):
         for card in eligible:
-            if card.get("code") == preference:
+            special_keys = card.get("special_keys")
+            if card.get("code") == preference or (
+                isinstance(special_keys, list) and preference in special_keys
+            ):
                 ranked.append((preference_index, card))
     if not ranked:
         return None

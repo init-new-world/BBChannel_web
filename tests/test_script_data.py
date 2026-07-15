@@ -110,6 +110,11 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
             "round1_turn0_np": [1],
             "round1_turn0_strategy": [strategy],
             "round1_turn0_condition": {"card": "1B"},
+            "specialKeys": [
+                [
+                    r"D:\old\[Quick]W1920H1080DXL100DXR300DYT200DYB500CON85.png"
+                ]
+            ],
             "round1_turn1_skill": [],
             "round1_turn1_np": [],
             "round2_turns": 0,
@@ -151,6 +156,20 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
     }
     assert plan["summary"]["round_count"] == 1
     assert plan["summary"]["action_count"] == 5
+    assert plan["special_keys"] == [
+        {
+            "code": "S0",
+            "template_name": "[Quick]W1920H1080DXL100DXR300DYT200DYB500CON85.png",
+            "template_path": "special_keys/[Quick]W1920H1080DXL100DXR300DYT200DYB500CON85.png",
+            "threshold": 0.85,
+            "source_width": 1920,
+            "source_height": 1080,
+            "left": 100,
+            "right": 300,
+            "top": 200,
+            "bottom": 500,
+        }
+    ]
 
 
 def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):

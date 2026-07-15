@@ -15,6 +15,11 @@ VALID_SERVERS = {"CH", "CNTW", "JP"}
 TURN_FIELD_RE = re.compile(r"^round(?P<round>\d+)_turn(?P<turn>\d+)_(skill|np|strategy|condition|replace)$")
 SETTING_STRATEGY_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_strategy|extraStrategy)$")
 ROUND_NUMBER_RE = re.compile(r"^round(?P<round>\d+)_")
+SPECIAL_KEY_NAME_RE = re.compile(
+    r"^W(?P<W>-?\d+)H(?P<H>-?\d+)"
+    r"DXL(?P<DXL>-?\d+)DXR(?P<DXR>-?\d+)"
+    r"DYT(?P<DYT>-?\d+)DYB(?P<DYB>-?\d+)CON(?P<CON>\d+)$"
+)
 
 
 class ScriptDataService:
@@ -94,6 +99,7 @@ class ScriptDataService:
             "servants": self._plan_servants(config),
             "assist": self._plan_assist(config),
             "run": self._plan_run(config),
+            "special_keys": self._plan_special_keys(config),
             "master": {
                 "equip": config.get("master_equip"),
                 "sex": config.get("master_sex"),
@@ -449,6 +455,54 @@ class ScriptDataService:
             "drop_image": config.get("dropImage"),
             "game_crash_restart": bool(config.get("gameCrushRestart")),
         }
+
+    @staticmethod
+    def _plan_special_keys(config: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_entries = config.get("specialKeys", [])
+        if raw_entries is None:
+            return []
+        if not isinstance(raw_entries, list):
+            raise ValueError("specialKeys must be a list.")
+
+        result = []
+        for index, entry in enumerate(raw_entries):
+            raw_path = entry[0] if isinstance(entry, list) and entry else entry
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ValueError(f"specialKeys[{index}] must contain an image path.")
+            normalized_path = raw_path.strip().replace("\\", "/")
+            template_name = normalized_path.rsplit("/", 1)[-1]
+            stem = template_name.rsplit(".", 1)[0].split("]")[-1]
+            match = SPECIAL_KEY_NAME_RE.fullmatch(stem)
+            if match is None:
+                raise ValueError(f"specialKeys[{index}] has an invalid filename.")
+            values = {name: int(value) for name, value in match.groupdict().items()}
+            threshold = float(f"0.{values['CON']}")
+            if not 0 <= threshold <= 1:
+                raise ValueError(f"specialKeys[{index}] has an invalid threshold.")
+            assets_marker = "/assets/"
+            if assets_marker in normalized_path:
+                template_path = normalized_path.split(assets_marker, 1)[1]
+            elif normalized_path.startswith("assets/"):
+                template_path = normalized_path[7:]
+            elif normalized_path.startswith("special_keys/"):
+                template_path = normalized_path
+            else:
+                template_path = f"special_keys/{template_name}"
+            result.append(
+                {
+                    "code": f"S{index}",
+                    "template_name": template_name,
+                    "template_path": template_path,
+                    "threshold": threshold,
+                    "source_width": values["W"],
+                    "source_height": values["H"],
+                    "left": values["DXL"],
+                    "right": values["DXR"],
+                    "top": values["DYT"],
+                    "bottom": values["DYB"],
+                }
+            )
+        return result
 
     def _build_rounds(self, config: dict[str, Any]) -> list[dict[str, Any]]:
         rounds: list[dict[str, Any]] = []
