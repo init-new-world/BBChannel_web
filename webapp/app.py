@@ -17,6 +17,7 @@ from webapp.automation import (
     register_assist_job,
     register_battle_entry_job,
     register_battle_jobs,
+    register_completion_job,
     register_diagnostic_job,
 )
 from webapp.core.errors import AppError, ErrorCode
@@ -141,6 +142,13 @@ def create_app(
         script_data,
         device_service,
         recognition,
+    )
+    register_completion_job(
+        job_manager,
+        script_data,
+        device_service,
+        recognition,
+        resources,
     )
     register_battle_jobs(
         job_manager,

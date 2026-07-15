@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+import hashlib
+from time import monotonic
+from typing import Any
+
+from webapp.core.errors import AppError, ErrorCode
+from webapp.runtime import JobManager, RunContext
+from webapp.services.devices import DeviceService
+from webapp.services.recognition import RecognitionService
+from webapp.services.resources import ResourceService
+from webapp.services.script_data import ScriptDataService
+
+
+BATTLE_COMPLETE_JOB_KIND = "battle.complete"
+
+
+def register_completion_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    resources: ResourceService,
+) -> None:
+    if job_manager.has_kind(BATTLE_COMPLETE_JOB_KIND):
+        return
+
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        repeat = payload.get("repeat", False)
+        if not isinstance(repeat, bool):
+            raise ValueError("repeat must be a boolean.")
+        timeout_seconds = _number(payload, "timeout_seconds", 180, 0.1, 600)
+        poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
+        action_wait_seconds = _number(payload, "action_wait_seconds", 0.5, 0, 10)
+        plan = script_data.get_setting_plan(setting_name.strip())
+        server = str(plan["server"]).upper()
+        drop_limit = int(plan["run"]["drop_stop_num"])
+        drop_template = _resolve_drop_template(
+            resources,
+            plan["run"]["drop_image"],
+        )
+        started = monotonic()
+        attempts = 0
+        actions: list[str] = []
+        drop_count = 0
+        observed_drop_frames: set[str] = set()
+
+        while monotonic() - started <= timeout_seconds:
+            elapsed = monotonic() - started
+            context.checkpoint(
+                "complete_battle",
+                progress=min(elapsed / timeout_seconds, 0.95),
+            )
+            screenshot = device_service.snapshot()
+            attempts += 1
+            screenshot_digest = hashlib.sha256(screenshot).hexdigest()
+            if (
+                drop_limit > 0
+                and drop_template is not None
+                and screenshot_digest not in observed_drop_frames
+            ):
+                observed_drop_frames.add(screenshot_digest)
+                drop_matches = recognition.match_template_all(
+                    screenshot,
+                    drop_template,
+                    threshold=0.85,
+                    scales=(1.0, 0.75, 2 / 3, 0.5),
+                    max_results=100,
+                )
+                drop_count += len(drop_matches)
+                context.emit(
+                    "recognition",
+                    "Configured battle drops counted.",
+                    data={
+                        "frame_drop_count": len(drop_matches),
+                        "drop_count": drop_count,
+                        "drop_limit": drop_limit,
+                    },
+                )
+                if drop_count >= drop_limit:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Stopped after reaching the configured drop limit.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": False,
+                        "stopped": True,
+                        "reason": "drop_limit",
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+            if plan["run"]["full_friendship_stop"]:
+                friendship_max = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/jblevel10.png",
+                )
+                if friendship_max is not None and friendship_max.matched:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Stopped after reaching full friendship.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": False,
+                        "stopped": True,
+                        "reason": "full_friendship",
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+            run_again = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/run_again.png",
+            )
+            if run_again is not None and run_again.matched:
+                if repeat:
+                    operation = device_service.tap(*run_again.center)
+                    actions.append("run_again")
+                    context.emit(
+                        "device_action",
+                        "Started the next run.",
+                        data={"role": "run_again", "operation": operation.to_dict()},
+                    )
+                context.checkpoint(
+                    "complete",
+                    progress=1.0,
+                    message="Battle settlement completed.",
+                )
+                return {
+                    "setting_name": setting_name.strip(),
+                    "complete": True,
+                    "repeated": repeat,
+                    "drop_count": drop_count,
+                    "actions": actions,
+                    "attempts": attempts,
+                }
+
+            next_button = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/next.png",
+            )
+            if next_button is not None and next_button.matched:
+                operation = device_service.tap(*next_button.center)
+                actions.append("next")
+                context.emit(
+                    "device_action",
+                    "Advanced battle settlement.",
+                    data={"role": "next", "operation": operation.to_dict()},
+                )
+                context.sleep(action_wait_seconds)
+                continue
+
+            context.emit(
+                "recognition",
+                "Battle settlement state checked.",
+                data={"attempt": attempts, "state": None},
+            )
+            context.sleep(poll_interval)
+
+        raise TimeoutError(
+            f"Battle settlement did not complete within {timeout_seconds:.2f} seconds."
+        )
+
+    job_manager.register(BATTLE_COMPLETE_JOB_KIND, handler, requires_device=True)
+
+
+def _match_optional(
+    recognition: RecognitionService,
+    screenshot: bytes,
+    template_path: str,
+):
+    try:
+        return recognition.match_template(
+            screenshot,
+            template_path,
+            threshold=0.85,
+            scales=(1.0, 0.75, 2 / 3, 0.5),
+        )
+    except AppError as exc:
+        if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+            return None
+        raise
+
+
+def _number(
+    payload: dict[str, Any],
+    key: str,
+    default: float,
+    minimum: float,
+    maximum: float,
+) -> float:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key} must be a number.")
+    result = float(value)
+    if not minimum <= result <= maximum:
+        raise ValueError(f"{key} must be between {minimum} and {maximum}.")
+    return result
+
+
+def _resolve_drop_template(
+    resources: ResourceService,
+    configured_path: object,
+) -> str | None:
+    if not isinstance(configured_path, str) or not configured_path.strip():
+        return None
+    filename = configured_path.strip().replace("\\", "/").rsplit("/", 1)[-1]
+    if not filename:
+        return None
+    index = resources.template_index(prefix="drop", query=filename, limit=200)
+    matches = [
+        str(entry["path"])
+        for entry in index["entries"]
+        if str(entry["path"]).rsplit("/", 1)[-1].casefold() == filename.casefold()
+    ]
+    return matches[0] if matches else None

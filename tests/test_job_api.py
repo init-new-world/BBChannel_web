@@ -28,6 +28,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
             assert client.get("/api/job-kinds").json() == {
                 "kinds": [
                     "assist.select",
+                    "battle.complete",
                     "battle.dry-run",
                     "battle.execute-plan",
                     "battle.execute-skills",
