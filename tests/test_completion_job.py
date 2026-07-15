@@ -47,6 +47,7 @@ def _run_completion(
     friendship_up = _pattern((160, 80), (115, 85, 145))
     finish_without_friend = _pattern((174, 52), (75, 135, 65))
     apply_for_friend = _pattern((308, 69), (165, 65, 105))
+    reconnect = _pattern((114, 53), (125, 45, 165))
     drop_item = _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
@@ -54,6 +55,7 @@ def _run_completion(
     friendship_up.save(battle_assets / "relationship_up.png")
     finish_without_friend.save(battle_assets / "friend_apply.png")
     apply_for_friend.save(battle_assets / "friend_apply_1.png")
+    reconnect.save(battle_assets / "reconnect.png")
     drop_item.save(drop_assets / "item.png")
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
@@ -226,6 +228,26 @@ def test_completion_handles_friend_request_page(
 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["actions"] == [expected_action]
+
+
+def test_completion_recovers_from_network_reconnect_prompt(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    reconnect_frame = base.copy()
+    reconnect_frame.paste(_pattern((114, 53), (125, 45, 165)), (580, 380))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (reconnect_frame, {"type": "tap", "x": 637, "y": 406}),
+            (repeat_frame, None),
+        ],
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["actions"] == ["reconnect"]
 
 
 def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):

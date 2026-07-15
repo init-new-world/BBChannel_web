@@ -8,6 +8,7 @@ from webapp.automation.interaction import (
     match_touch_point,
     randomized_wait_seconds,
 )
+from webapp.automation.network import reconnect_if_present
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
@@ -62,6 +63,18 @@ def create_battle_entry_handler(
             )
             screenshot = device_service.snapshot()
             attempts += 1
+            if reconnect_if_present(
+                context,
+                device_service,
+                recognition,
+                screenshot,
+                server,
+                action_wait_seconds=action_wait_seconds,
+                random_time=random_time,
+                random_touch=random_touch,
+            ):
+                actions.append("reconnect")
+                continue
             matched_role = None
             matched_result = None
             for role, template_path in template_roles:

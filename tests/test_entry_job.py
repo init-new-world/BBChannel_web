@@ -80,17 +80,27 @@ def test_battle_prepare_job_confirms_team_starts_quest_and_waits_for_battle(tmp_
     team_decide = pattern((80, 40), (80, 65, 150))
     start_task = pattern((120, 45), (35, 120, 170))
     attack = pattern((90, 45), (150, 55, 80))
+    reconnect = Image.new("RGB", (114, 53), (25, 35, 45))
+    reconnect_draw = ImageDraw.Draw(reconnect)
+    reconnect_draw.ellipse((8, 5, 48, 45), outline=(235, 195, 55), width=4)
+    reconnect_draw.ellipse((65, 5, 105, 45), outline=(55, 205, 235), width=4)
+    reconnect_draw.line((30, 26, 84, 26), fill=(230, 75, 125), width=5)
     team_decide.save(battle_assets / "teamDecide.png")
     start_task.save(battle_assets / "start_task.png")
     attack.save(battle_assets / "attack.png")
+    reconnect.save(battle_assets / "reconnect.png")
     base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    reconnect_frame = base.copy()
+    reconnect_frame.paste(reconnect, (580, 380))
     team_frame = base.copy()
     team_frame.paste(team_decide, (600, 500))
     start_frame = base.copy()
     start_frame.paste(start_task, (1050, 620))
     battle_frame = base.copy()
     battle_frame.paste(attack, (1100, 600))
-    for index, frame in enumerate((team_frame, start_frame, battle_frame)):
+    for index, frame in enumerate(
+        (reconnect_frame, team_frame, start_frame, battle_frame)
+    ):
         frame.save(session / f"{index}.png")
     (session / "manifest.json").write_text(
         json.dumps(
@@ -100,13 +110,17 @@ def test_battle_prepare_job_confirms_team_starts_quest_and_waits_for_battle(tmp_
                 "frames": [
                     {
                         "file": "0.png",
-                        "expect": {"type": "tap", "x": 640, "y": 520},
+                        "expect": {"type": "tap", "x": 637, "y": 406},
                     },
                     {
                         "file": "1.png",
+                        "expect": {"type": "tap", "x": 640, "y": 520},
+                    },
+                    {
+                        "file": "2.png",
                         "expect": {"type": "tap", "x": 1110, "y": 642},
                     },
-                    {"file": "2.png"},
+                    {"file": "3.png"},
                 ],
             }
         ),
@@ -137,19 +151,19 @@ def test_battle_prepare_job_confirms_team_starts_quest_and_waits_for_battle(tmp_
             BATTLE_PREPARE_JOB_KIND,
             {
                 "setting_name": "prepare",
-                "timeout_seconds": 2,
+                "timeout_seconds": 5,
                 "poll_interval": 0,
                 "action_wait_seconds": 0,
             },
             device_key="replay:prepare",
         )
-        result = manager.wait(job.job_id, timeout=3)
+        result = manager.wait(job.job_id, timeout=8)
 
-    assert result.status == JobStatus.SUCCEEDED
+    assert result.status == JobStatus.SUCCEEDED, result.error
     assert result.result["setting_name"] == "prepare"
     assert result.result["ready"] is True
-    assert result.result["actions"] == ["team_decide", "start_task"]
-    assert result.result["attempts"] == 3
+    assert result.result["actions"] == ["reconnect", "team_decide", "start_task"]
+    assert result.result["attempts"] == 4
 
 
 def test_battle_prepare_job_consumes_available_apple_when_ap_is_empty(tmp_path: Path):
