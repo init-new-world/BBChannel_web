@@ -608,6 +608,69 @@ def test_setting_program_compiles_master_order_change(tmp_path: Path):
     ]
 
 
+@pytest.mark.parametrize(
+    ("command", "expected_steps"),
+    [
+        ([13, 5], [{"type": "tap", "role": "enemy_target_5", "x": 341, "y": 138}]),
+        (
+            ["令咒·灵基修复", 2],
+            [
+                {"type": "tap", "role": "command_spell_menu", "x": 1060, "y": 82, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "command_spell_heal", "x": 637, "y": 523, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "command_spell_confirm", "x": 793, "y": 430, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "command_spell_target_2", "x": 640, "y": 440},
+            ],
+        ),
+    ],
+)
+def test_setting_program_compiles_target_and_command_spell_heal(
+    tmp_path: Path,
+    command: list,
+    expected_steps: list[dict],
+):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "utility.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [command],
+        },
+    )
+
+    payload = client.get("/api/settings/utility/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    assert payload["rounds"][0]["turns"][0]["actions"][0]["steps"] == expected_steps
+
+
+def test_setting_program_rejects_unhashable_skill_command_without_server_error(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "malformed.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [[["nested"], 1]],
+        },
+    )
+
+    response = client.get("/api/settings/malformed/program")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution"]["battle"] == {
+        "ready": False,
+        "reason": "Program contains unsupported actions.",
+    }
+
+
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

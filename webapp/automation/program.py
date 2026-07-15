@@ -25,9 +25,14 @@ SPACE_ISHTAR_CHOICE_POINTS = ((327, 433), (639, 433), (951, 433))
 EMIYA_CHOICE_POINTS = ((483, 433), (795, 433))
 COMMAND_SPELL_MENU_POINT = (1060, 82)
 COMMAND_SPELL_NP_CHARGE_POINT = (637, 343)
+COMMAND_SPELL_HEAL_POINT = (637, 523)
 COMMAND_SPELL_CONFIRM_POINT = (793, 430)
 EXCHANGE_POINTS = tuple((137 + 200 * position, 352) for position in range(6))
 EXCHANGE_CONFIRM_POINT = (607, 625)
+ENEMY_POINTS = tuple(
+    (141 + 200 * (position % 3), 39 + 99 * (position // 3))
+    for position in range(6)
+)
 
 
 def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
@@ -202,6 +207,9 @@ def _compile_replace(action: dict[str, Any]) -> dict[str, Any]:
 
 def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
     command = action.get("command")
+    enemy_target = _compile_enemy_target(action, command)
+    if enemy_target is not None:
+        return enemy_target
     exchange = _compile_servant_exchange(action, command)
     if exchange is not None:
         return exchange
@@ -241,6 +249,23 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
         target_x, target_y = SKILL_TARGET_POINTS[target - 1]
         steps.append(_tap(f"skill_target_{target}", target_x, target_y))
     return _supported(action, steps)
+
+
+def _compile_enemy_target(
+    action: dict[str, Any],
+    command: Any,
+) -> dict[str, Any] | None:
+    if not (
+        isinstance(command, list)
+        and len(command) == 2
+        and command[0] == 13
+    ):
+        return None
+    target = command[1]
+    if isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 6:
+        return _unsupported(action, "Enemy targets must be numbered 1 through 6.")
+    x, y = ENEMY_POINTS[target - 1]
+    return _supported(action, [_tap(f"enemy_target_{target}", x, y)])
 
 
 def _compile_servant_exchange(
@@ -315,23 +340,31 @@ def _compile_command_spell(
     action: dict[str, Any],
     command: Any,
 ) -> dict[str, Any] | None:
-    if not (
-        isinstance(command, list)
-        and len(command) == 2
-        and command[0] == "令咒·宝具解放"
+    if (
+        not isinstance(command, list)
+        or len(command) != 2
+        or not isinstance(command[0], str)
     ):
+        return None
+    spell_options = {
+        "令咒·宝具解放": ("command_spell_np_charge", COMMAND_SPELL_NP_CHARGE_POINT),
+        "令咒·灵基修复": ("command_spell_heal", COMMAND_SPELL_HEAL_POINT),
+    }
+    spell = spell_options.get(command[0])
+    if spell is None:
         return None
     target = command[1]
     if isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 3:
         return _unsupported(action, "Command spell targets must be servant positions 1 through 3.")
     target_x, target_y = SKILL_TARGET_POINTS[target - 1]
+    spell_role, spell_point = spell
     return _supported(
         action,
         [
             _tap("command_spell_menu", *COMMAND_SPELL_MENU_POINT, wait_after_seconds=1.0),
             _tap(
-                "command_spell_np_charge",
-                *COMMAND_SPELL_NP_CHARGE_POINT,
+                spell_role,
+                *spell_point,
                 wait_after_seconds=1.0,
             ),
             _tap(
