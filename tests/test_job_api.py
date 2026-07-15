@@ -1,3 +1,4 @@
+import json
 import threading
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
             completed = manager.wait(job_id, timeout=2)
 
             assert client.get("/api/job-kinds").json() == {
-                "kinds": ["diagnostic.template-tap", "echo"]
+                "kinds": ["battle.dry-run", "diagnostic.template-tap", "echo"]
             }
             assert client.get(f"/api/jobs/{job_id}").json()["job"]["status"] == "succeeded"
             assert client.get("/api/jobs").json()["jobs"][0]["job_id"] == job_id
@@ -94,3 +95,64 @@ def test_job_event_stream_replays_terminal_job_and_closes(tmp_path: Path):
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: job_event" in response.text
     assert '\"event_type\":\"note\"' in response.text
+
+
+def test_battle_dry_run_executes_normalized_setting_actions(tmp_path: Path):
+    strategy = {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, False],
+        "colorFirst": True,
+    }
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        app = _app(tmp_path, manager)
+        data = Path(app.state.resources.data_dir)
+        (data / "servant_info_CH.json").write_text(
+            json.dumps({"Servant A": {"other_name": []}}),
+            encoding="utf-8",
+        )
+        settings = data / "settings"
+        settings.mkdir()
+        (settings / "demo.json").write_text(
+            json.dumps(
+                {
+                    "server": "CH",
+                    "servant_0_name": "Servant A",
+                    "round1_turns": 1,
+                    "round1_turn0_skill": [1],
+                    "round1_turn0_np": [1],
+                    "round1_turn0_strategy": [strategy],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/jobs",
+                json={
+                    "kind": "battle.dry-run",
+                    "payload": {"setting_name": "demo"},
+                },
+            )
+            assert response.status_code == 202
+            job_id = response.json()["job"]["job_id"]
+            result = manager.wait(job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result == {
+        "setting_name": "demo",
+        "round_count": 1,
+        "turn_count": 1,
+        "action_count": 3,
+    }
+    battle_events = [
+        event
+        for event in manager.database.list_events(job_id)
+        if event.event_type == "battle_action"
+    ]
+    assert [event.data["action"]["type"] for event in battle_events] == [
+        "skill",
+        "np",
+        "strategy",
+    ]
