@@ -4,11 +4,13 @@ from time import monotonic
 from typing import Any
 
 from webapp.automation.program import (
+    ATTACK_POINT,
+    COMMAND_CARD_BACK_POINT,
     FACE_CARD_POINTS,
     NP_POINTS,
     compile_battle_program,
 )
-from webapp.automation.strategy import select_command_cards
+from webapp.automation.strategy import StrategySelectionError, select_command_cards
 from webapp.runtime import JobManager, RunContext
 from webapp.services.cards import CommandCardRecognizer
 from webapp.services.devices import DeviceService
@@ -144,13 +146,18 @@ def _execute_plan_handler(
         execution_status = program["execution"]["battle"]
         if not execution_status["ready"]:
             raise ValueError(execution_status["reason"])
-        has_strategy_steps = any(
+        needs_card_recognition = any(
             step.get("type") == "strategy"
             for round_plan in program["rounds"]
             for turn in round_plan["turns"]
             for step in turn["command_phase"]["steps"]
+        ) or any(
+            action.get("control", {}).get("check_cards")
+            for round_plan in program["rounds"]
+            for turn in round_plan["turns"]
+            for action in turn["actions"]
         )
-        if has_strategy_steps and card_recognizer is None:
+        if needs_card_recognition and card_recognizer is None:
             raise ValueError("Command card recognition is not configured.")
 
         turns = [
@@ -173,10 +180,54 @@ def _execute_plan_handler(
                 for action in turn["actions"]
                 if action["source"].get("type") == "skill"
             ]
-            for action in skill_actions:
+            execute_conditional_skills = True
+            for skill_number, action in enumerate(skill_actions, start=1):
+                control = action.get("control")
+                if control and control["type"] == "condition_start":
+                    matched = True
+                    if control["check_cards"]:
+                        condition = turn.get("condition")
+                        if not isinstance(condition, list) or not condition:
+                            raise ValueError("Conditional skill block has no card condition.")
+                        _wait_for_battle_ready(
+                            context,
+                            device_service,
+                            recognition,
+                            attack_template,
+                            threshold,
+                            timeout_seconds,
+                            poll_interval,
+                        )
+                        matched, condition_taps = _evaluate_card_condition(
+                            context,
+                            device_service,
+                            recognition,
+                            card_recognizer,
+                            program["server"],
+                            _frontline_servants(servant_positions),
+                            condition,
+                            card_templates,
+                            threshold,
+                            timeout_seconds,
+                            poll_interval,
+                            tap_interval,
+                        )
+                        tap_count += condition_taps
+                    execute_conditional_skills = matched == control["execute_when_matched"]
+                    continue
+                if control and control["type"] == "condition_end":
+                    execute_conditional_skills = True
+                    continue
+                if not execute_conditional_skills:
+                    context.emit(
+                        "skill_skipped",
+                        "Skill was skipped because its condition did not match.",
+                        data={"action": action["source"]},
+                    )
+                    continue
                 action_count += 1
                 context.checkpoint(
-                    f"round_{round_number}.turn_{turn['turn']}.skill_{action_count}",
+                    f"round_{round_number}.turn_{turn['turn']}.skill_{skill_number}",
                     progress=(turn_number - 1) / max(len(turns), 1),
                 )
                 _wait_for_battle_ready(
@@ -371,6 +422,70 @@ def _execute_strategy_step(
                 {"type": "tap", "role": f"face_card_{slot}", "x": x, "y": y}
             )
     return _execute_steps(context, device_service, tap_steps, tap_interval)
+
+
+def _evaluate_card_condition(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None,
+    server: str,
+    servants: list[dict[str, Any]],
+    condition: list[dict[str, Any]],
+    card_templates: list[str],
+    threshold: float,
+    timeout_seconds: float,
+    poll_interval: float,
+    tap_interval: float,
+) -> tuple[bool, int]:
+    if card_recognizer is None:
+        raise ValueError("Command card recognition is not configured.")
+    attack_x, attack_y = ATTACK_POINT
+    tap_count = _execute_steps(
+        context,
+        device_service,
+        [{"type": "tap", "role": "condition_attack", "x": attack_x, "y": attack_y}],
+        tap_interval,
+    )
+    screenshot = _wait_for_command_cards(
+        context,
+        device_service,
+        recognition,
+        card_templates,
+        threshold,
+        timeout_seconds,
+        poll_interval,
+    )
+    recognized = card_recognizer.recognize(
+        screenshot,
+        server,
+        servants,
+        threshold=threshold,
+    )
+    if not recognized["complete"]:
+        raise ValueError(
+            f"Recognized {recognized['recognized_count']} of 5 command cards."
+        )
+    try:
+        select_command_cards(condition, recognized["cards"])
+        matched = True
+        reason = None
+    except StrategySelectionError as exc:
+        matched = False
+        reason = str(exc)
+    back_x, back_y = COMMAND_CARD_BACK_POINT
+    tap_count += _execute_steps(
+        context,
+        device_service,
+        [{"type": "tap", "role": "condition_back", "x": back_x, "y": back_y}],
+        tap_interval,
+    )
+    context.emit(
+        "skill_condition",
+        "Conditional skill card check completed.",
+        data={"matched": matched, "reason": reason, "recognition": recognized},
+    )
+    return matched, tap_count
 
 
 def _execute_skills_handler(

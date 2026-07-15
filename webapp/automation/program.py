@@ -19,7 +19,13 @@ MASTER_SKILL_MENU_POINT = (1131, 320)
 MASTER_SKILL_POINTS = ((850, 310), (940, 310), (1020, 310))
 NP_POINTS = ((500, 110), (650, 200), (870, 200))
 ATTACK_POINT = (1150, 600)
+COMMAND_CARD_BACK_POINT = (1250, 683)
 FACE_CARD_POINTS = ((150, 500), (375, 500), (650, 500), (900, 500), (1175, 500))
+SPACE_ISHTAR_CHOICE_POINTS = ((327, 433), (639, 433), (951, 433))
+EMIYA_CHOICE_POINTS = ((483, 433), (795, 433))
+COMMAND_SPELL_MENU_POINT = (1060, 82)
+COMMAND_SPELL_NP_CHARGE_POINT = (637, 343)
+COMMAND_SPELL_CONFIRM_POINT = (793, 430)
 
 
 def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
@@ -54,6 +60,7 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
                     "turn": turn["turn"],
                     "actions": actions,
                     "command_phase": command_phase,
+                    "condition": turn.get("condition"),
                 }
             )
         rounds.append({"round": round_plan["round"], "turns": turns})
@@ -193,6 +200,16 @@ def _compile_replace(action: dict[str, Any]) -> dict[str, Any]:
 
 def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
     command = action.get("command")
+    control = _compile_skill_control(action, command)
+    if control is not None:
+        return control
+    command_spell = _compile_command_spell(action, command)
+    if command_spell is not None:
+        return command_spell
+    special_skill = _compile_special_skill(action, command)
+    if special_skill is not None:
+        return special_skill
+
     target: int | None = None
     if isinstance(command, list) and len(command) == 2:
         skill, target = command
@@ -219,6 +236,100 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
         target_x, target_y = SKILL_TARGET_POINTS[target - 1]
         steps.append(_tap(f"skill_target_{target}", target_x, target_y))
     return _supported(action, steps)
+
+
+def _compile_skill_control(
+    action: dict[str, Any],
+    command: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(command, list) or not command:
+        return None
+    if command[0] == "End":
+        result = _supported(action, [])
+        result["control"] = {"type": "condition_end"}
+        return result
+    if command[0] != "Start":
+        return None
+    if len(command) != 3 or not isinstance(command[1], (bool, int)):
+        return _unsupported(action, "Conditional skill blocks require Start, mode, and checks.")
+    checks = command[2]
+    if not isinstance(checks, (list, tuple)):
+        return _unsupported(action, "Conditional skill checks must be a list.")
+    result = _supported(action, [])
+    result["control"] = {
+        "type": "condition_start",
+        "execute_when_matched": bool(command[1]),
+        "check_cards": bool(checks) and any(checks),
+    }
+    return result
+
+
+def _compile_command_spell(
+    action: dict[str, Any],
+    command: Any,
+) -> dict[str, Any] | None:
+    if not (
+        isinstance(command, list)
+        and len(command) == 2
+        and command[0] == "令咒·宝具解放"
+    ):
+        return None
+    target = command[1]
+    if isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 3:
+        return _unsupported(action, "Command spell targets must be servant positions 1 through 3.")
+    target_x, target_y = SKILL_TARGET_POINTS[target - 1]
+    return _supported(
+        action,
+        [
+            _tap("command_spell_menu", *COMMAND_SPELL_MENU_POINT, wait_after_seconds=1.0),
+            _tap(
+                "command_spell_np_charge",
+                *COMMAND_SPELL_NP_CHARGE_POINT,
+                wait_after_seconds=1.0,
+            ),
+            _tap(
+                "command_spell_confirm",
+                *COMMAND_SPELL_CONFIRM_POINT,
+                wait_after_seconds=1.0,
+            ),
+            _tap(f"command_spell_target_{target}", target_x, target_y),
+        ],
+    )
+
+
+def _compile_special_skill(
+    action: dict[str, Any],
+    command: Any,
+) -> dict[str, Any] | None:
+    if not (
+        isinstance(command, list)
+        and len(command) == 2
+        and isinstance(command[0], int)
+        and not isinstance(command[0], bool)
+        and command[0] < 0
+    ):
+        return None
+    skill = abs(command[0])
+    option = command[1]
+    if not 1 <= skill <= 9:
+        return _unsupported(action, "Special servant skills must be numbered -1 through -9.")
+    choice_points = SPACE_ISHTAR_CHOICE_POINTS if command[0] % 3 else EMIYA_CHOICE_POINTS
+    if isinstance(option, bool) or not isinstance(option, int) or not 1 <= option <= len(choice_points):
+        return _unsupported(action, "Special skill option is outside the available range.")
+    skill_x, skill_y = SERVANT_SKILL_POINTS[skill - 1]
+    option_x, option_y = choice_points[option - 1]
+    return _supported(
+        action,
+        [
+            _tap(
+                f"servant_skill_{skill}",
+                skill_x,
+                skill_y,
+                wait_after_seconds=1.0,
+            ),
+            _tap(f"special_skill_option_{option}", option_x, option_y),
+        ],
+    )
 
 
 def _compile_np(action: dict[str, Any]) -> dict[str, Any]:

@@ -496,6 +496,88 @@ def test_setting_program_compiles_post_turn_servant_replacements(tmp_path: Path)
     assert payload["summary"]["execution_tap_count"] == 4
 
 
+def test_setting_program_compiles_servant_special_skill_choice(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Space": {"other_name": []}})
+    _write_json(
+        data / "settings" / "special.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Space",
+            "round1_turns": 1,
+            "round1_turn0_skill": [[-2, 2]],
+        },
+    )
+
+    payload = client.get("/api/settings/special/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    assert payload["rounds"][0]["turns"][0]["actions"][0]["steps"] == [
+        {
+            "type": "tap",
+            "role": "servant_skill_2",
+            "x": 163,
+            "y": 590,
+            "wait_after_seconds": 1.0,
+        },
+        {"type": "tap", "role": "special_skill_option_2", "x": 639, "y": 433},
+    ]
+
+
+def test_setting_program_compiles_command_spell_np_charge(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "command-spell.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [["令咒·宝具解放", 1]],
+        },
+    )
+
+    payload = client.get("/api/settings/command-spell/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    assert payload["rounds"][0]["turns"][0]["actions"][0]["steps"] == [
+        {"type": "tap", "role": "command_spell_menu", "x": 1060, "y": 82, "wait_after_seconds": 1.0},
+        {"type": "tap", "role": "command_spell_np_charge", "x": 637, "y": 343, "wait_after_seconds": 1.0},
+        {"type": "tap", "role": "command_spell_confirm", "x": 793, "y": 430, "wait_after_seconds": 1.0},
+        {"type": "tap", "role": "command_spell_target_1", "x": 350, "y": 440},
+    ]
+
+
+def test_setting_program_compiles_conditional_skill_block_controls(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    condition = [_strategy_payload()]
+    _write_json(
+        data / "settings" / "condition.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [["Start", 1, [1]], 1, ["End"]],
+            "round1_turn0_condition": condition,
+        },
+    )
+
+    payload = client.get("/api/settings/condition/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    turn = payload["rounds"][0]["turns"][0]
+    assert turn["condition"] == condition
+    assert [action.get("control") for action in turn["actions"]] == [
+        {"type": "condition_start", "execute_when_matched": True, "check_cards": True},
+        None,
+        {"type": "condition_end"},
+    ]
+
+
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

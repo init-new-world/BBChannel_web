@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ np = pytest.importorskip("numpy")
 from webapp.app import create_app
 from webapp.automation.battle import (
     _apply_servant_replacements,
+    _evaluate_card_condition,
     _frontline_servants,
     register_battle_jobs,
 )
@@ -49,6 +51,83 @@ def test_servant_replacements_update_slots_from_same_pre_turn_snapshot():
         2,
         3,
     ]
+
+
+def test_card_condition_opens_command_cards_and_returns_to_battle():
+    taps = []
+    events = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [
+                SimpleNamespace(
+                    matched=True,
+                    confidence=1.0,
+                    to_dict=lambda: {"matched": True, "confidence": 1.0},
+                )
+                for _ in candidates
+            ]
+
+    class Cards:
+        def recognize(self, _screenshot, _server, _servants, *, threshold):
+            assert threshold == 0.75
+            return {
+                "complete": True,
+                "recognized_count": 5,
+                "cards": [
+                    {"slot": 1, "code": "1B", "servant_position": 1, "stars": 0},
+                    {"slot": 2, "code": "2A", "servant_position": 2, "stars": 0},
+                    {"slot": 3, "code": "3Q", "servant_position": 3, "stars": 0},
+                    {"slot": 4, "code": "1A", "servant_position": 1, "stars": 0},
+                    {"slot": 5, "code": "2B", "servant_position": 2, "stars": 0},
+                ],
+            }
+
+    class Context:
+        def emit(self, event_type, message, *, data):
+            events.append((event_type, message, data))
+
+        def sleep(self, _seconds):
+            pass
+
+    condition = [{
+        "card1": {"type": 1, "cards": ["1B"], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "colorFirst": True,
+    }]
+
+    matched, tap_count = _evaluate_card_condition(
+        Context(),
+        Device(),
+        Recognition(),
+        Cards(),
+        "CH",
+        [{"slot": 0, "name": "One", "active": True, "sn": "100"}],
+        condition,
+        ["battle/CH/Arts.png", "battle/CH/Buster.png", "battle/CH/Quick.png"],
+        0.75,
+        1.0,
+        0.01,
+        0,
+    )
+
+    assert matched is True
+    assert tap_count == 2
+    assert taps == [(1150, 600), (1250, 683)]
+    assert events[-1][0] == "skill_condition"
 
 
 def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Path):
