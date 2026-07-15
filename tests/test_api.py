@@ -388,6 +388,24 @@ def test_put_setting_creates_and_explicitly_overwrites_preset(tmp_path: Path):
     assert overwritten.json()["config"]["round1_turns"] == 1
 
 
+def test_put_strategy_creates_validated_preset(tmp_path: Path):
+    client = _client(tmp_path)
+    entries = [{"tag": "brave", "strategy": _strategy_payload()}]
+
+    created = client.put("/api/strategies/brave", json={"entries": entries})
+    conflict = client.put("/api/strategies/brave", json={"entries": entries})
+    invalid = client.put(
+        "/api/strategies/broken",
+        json={"entries": [{"tag": "broken", "strategy": {}}]},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["entries"] == entries
+    assert conflict.status_code == 409
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "data_file_invalid"
+
+
 def test_servant_and_master_routes_expose_catalogs(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

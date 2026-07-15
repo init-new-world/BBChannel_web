@@ -66,14 +66,13 @@ class ScriptDataService:
                 {"name": name, "validation": validation},
             )
 
-        path = self._named_json_path(self.settings_dir, name, "settings")
-        if path.exists() and not overwrite:
-            raise AppError(
-                ErrorCode.DATA_FILE_CONFLICT,
-                f"Setting data file already exists: {name}",
-                {"name": name, "path": self._relative_path(path)},
-            )
-        self._write_json_atomic(path, config)
+        path = self._save_named_json(
+            self.settings_dir,
+            name,
+            "settings",
+            config,
+            overwrite=overwrite,
+        )
         return self.get_setting(path.stem)
 
     def get_setting_plan(self, name: str) -> dict[str, Any]:
@@ -117,6 +116,29 @@ class ScriptDataService:
             "summary": {"entry_count": len(entries) if isinstance(entries, list) else 0},
             "validation": validation,
         }
+
+    def save_strategy(
+        self,
+        name: str,
+        entries: list[dict[str, Any]],
+        *,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        validation = self._validate_strategy_file(entries)
+        if not validation["ok"]:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                f"Strategy data is invalid: {name}",
+                {"name": name, "validation": validation},
+            )
+        path = self._save_named_json(
+            self.strategy_dir,
+            name,
+            "strategy",
+            entries,
+            overwrite=overwrite,
+        )
+        return self.get_strategy(path.stem)
 
     def list_servants(self, server: str) -> dict[str, Any]:
         server = self._normalize_server(server)
@@ -207,6 +229,25 @@ class ScriptDataService:
         finally:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+
+    def _save_named_json(
+        self,
+        directory: Path,
+        name: str,
+        kind: str,
+        payload: Any,
+        *,
+        overwrite: bool,
+    ) -> Path:
+        path = self._named_json_path(directory, name, kind)
+        if path.exists() and not overwrite:
+            raise AppError(
+                ErrorCode.DATA_FILE_CONFLICT,
+                f"{kind.title()} data file already exists: {name}",
+                {"name": name, "path": self._relative_path(path)},
+            )
+        self._write_json_atomic(path, payload)
+        return path
 
     def _load_json(self, path: Path) -> Any:
         try:

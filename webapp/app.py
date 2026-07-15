@@ -83,6 +83,11 @@ class SaveSettingRequest(BaseModel):
     overwrite: bool = False
 
 
+class SaveStrategyRequest(BaseModel):
+    entries: list[dict]
+    overwrite: bool = False
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -260,6 +265,14 @@ def create_app(
     @app.get("/api/strategies/{name}")
     def strategy_detail(name: str) -> dict:
         return script_data.get_strategy(name)
+
+    @app.put("/api/strategies/{name}")
+    def save_strategy(name: str, request: SaveStrategyRequest) -> dict:
+        return script_data.save_strategy(
+            name,
+            request.entries,
+            overwrite=request.overwrite,
+        )
 
     @app.get("/api/servants")
     def servants(server: str = "CH") -> dict:

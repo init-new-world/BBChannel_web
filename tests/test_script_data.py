@@ -246,6 +246,35 @@ def test_get_strategy_reports_missing_card_fields(tmp_path: Path):
     } in detail["validation"]["errors"]
 
 
+def test_save_strategy_validates_and_requires_explicit_overwrite(tmp_path: Path):
+    service = ScriptDataService(tmp_path)
+    entries = [{"tag": "宝具补刀", "strategy": _strategy_payload()}]
+
+    created = service.save_strategy("宝具补刀", entries)
+
+    assert created["name"] == "宝具补刀"
+    assert created["entries"] == entries
+    assert "宝具补刀" in (tmp_path / "strategy" / "宝具补刀.json").read_text(encoding="utf-8")
+
+    with pytest.raises(AppError) as excinfo:
+        service.save_strategy("宝具补刀", entries)
+
+    assert excinfo.value.code == ErrorCode.DATA_FILE_CONFLICT
+    changed = [{"tag": "宝具补刀2", "strategy": _strategy_payload()}]
+    overwritten = service.save_strategy("宝具补刀", changed, overwrite=True)
+    assert overwritten["entries"] == changed
+
+
+def test_save_strategy_rejects_invalid_entries_without_creating_file(tmp_path: Path):
+    service = ScriptDataService(tmp_path)
+
+    with pytest.raises(AppError) as excinfo:
+        service.save_strategy("invalid", [{"tag": "broken", "strategy": {}}])
+
+    assert excinfo.value.code == ErrorCode.DATA_FILE_INVALID
+    assert not (tmp_path / "strategy" / "invalid.json").exists()
+
+
 def test_get_setting_rejects_path_traversal(tmp_path: Path):
     service = ScriptDataService(tmp_path)
 
