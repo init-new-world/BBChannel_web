@@ -11,6 +11,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 BATTLE_DRY_RUN_JOB_KIND = "battle.dry-run"
+BATTLE_EXECUTE_PLAN_JOB_KIND = "battle.execute-plan"
 BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
 
 
@@ -103,6 +104,122 @@ def register_battle_jobs(
             _execute_skills_handler(script_data, device_service, recognition),
             requires_device=True,
         )
+    if (
+        device_service is not None
+        and recognition is not None
+        and not job_manager.has_kind(BATTLE_EXECUTE_PLAN_JOB_KIND)
+    ):
+        job_manager.register(
+            BATTLE_EXECUTE_PLAN_JOB_KIND,
+            _execute_plan_handler(script_data, device_service, recognition),
+            requires_device=True,
+        )
+
+
+def _execute_plan_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+):
+    def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = _required_setting_name(payload)
+        threshold, timeout_seconds, poll_interval, tap_interval = _execution_options(
+            payload
+        )
+        program = compile_battle_program(script_data.get_setting_plan(setting_name))
+        execution_status = program["execution"]["battle"]
+        if not execution_status["ready"]:
+            raise ValueError(execution_status["reason"])
+
+        turns = [
+            (round_plan["round"], turn)
+            for round_plan in program["rounds"]
+            for turn in round_plan["turns"]
+        ]
+        attack_template = f"battle/{program['server']}/attack.png"
+        card_templates = [
+            f"battle/{program['server']}/{card_type}.png"
+            for card_type in ("Arts", "Buster", "Quick")
+        ]
+        action_count = 0
+        tap_count = 0
+
+        for turn_number, (round_number, turn) in enumerate(turns, start=1):
+            skill_actions = [
+                action
+                for action in turn["actions"]
+                if action["source"].get("type") == "skill"
+            ]
+            for action in skill_actions:
+                action_count += 1
+                context.checkpoint(
+                    f"round_{round_number}.turn_{turn['turn']}.skill_{action_count}",
+                    progress=(turn_number - 1) / max(len(turns), 1),
+                )
+                _wait_for_battle_ready(
+                    context,
+                    device_service,
+                    recognition,
+                    attack_template,
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                )
+                tap_count += _execute_steps(
+                    context,
+                    device_service,
+                    action["steps"],
+                    tap_interval,
+                )
+
+            context.checkpoint(
+                f"round_{round_number}.turn_{turn['turn']}.command_phase",
+                progress=(turn_number - 0.5) / max(len(turns), 1),
+            )
+            _wait_for_battle_ready(
+                context,
+                device_service,
+                recognition,
+                attack_template,
+                threshold,
+                timeout_seconds,
+                poll_interval,
+            )
+            command_steps = turn["command_phase"]["steps"]
+            tap_count += _execute_steps(
+                context,
+                device_service,
+                command_steps[:1],
+                tap_interval,
+            )
+            _wait_for_command_cards(
+                context,
+                device_service,
+                recognition,
+                card_templates,
+                threshold,
+                timeout_seconds,
+                poll_interval,
+            )
+            tap_count += _execute_steps(
+                context,
+                device_service,
+                command_steps[1:],
+                tap_interval,
+            )
+            action_count += sum(
+                1 for action in turn["actions"] if action["source"].get("type") == "np"
+            )
+
+        context.checkpoint("complete", progress=1.0, message="Battle execution completed.")
+        return {
+            "setting_name": setting_name,
+            "turn_count": len(turns),
+            "action_count": action_count,
+            "tap_count": tap_count,
+        }
+
+    return execute
 
 
 def _execute_skills_handler(
@@ -112,27 +229,8 @@ def _execute_skills_handler(
 ):
     def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
-        threshold = _number(payload, "threshold", 0.75, minimum=0.0, maximum=1.0)
-        timeout_seconds = _number(
-            payload,
-            "timeout_seconds",
-            15.0,
-            minimum=0.1,
-            maximum=300.0,
-        )
-        poll_interval = _number(
-            payload,
-            "poll_interval",
-            0.25,
-            minimum=0.01,
-            maximum=10.0,
-        )
-        tap_interval = _number(
-            payload,
-            "tap_interval_seconds",
-            0.15,
-            minimum=0.0,
-            maximum=10.0,
+        threshold, timeout_seconds, poll_interval, tap_interval = _execution_options(
+            payload
         )
         program = compile_battle_program(script_data.get_setting_plan(setting_name))
         execution_status = program["execution"]["skills"]
@@ -161,20 +259,12 @@ def _execute_skills_handler(
                 timeout_seconds,
                 poll_interval,
             )
-            for step in action["steps"]:
-                operation = device_service.tap(step["x"], step["y"])
-                tap_count += 1
-                context.emit(
-                    "device_action",
-                    f"Tapped {step['role']}.",
-                    data={"role": step["role"], "operation": operation.to_dict()},
-                )
-                wait_after = max(
-                    tap_interval,
-                    float(step.get("wait_after_seconds", 0.0)),
-                )
-                if wait_after:
-                    context.sleep(wait_after)
+            tap_count += _execute_steps(
+                context,
+                device_service,
+                action["steps"],
+                tap_interval,
+            )
 
         context.checkpoint(
             "complete",
@@ -188,6 +278,37 @@ def _execute_skills_handler(
         }
 
     return execute
+
+
+def _execution_options(payload: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        _number(payload, "threshold", 0.75, minimum=0.0, maximum=1.0),
+        _number(payload, "timeout_seconds", 15.0, minimum=0.1, maximum=300.0),
+        _number(payload, "poll_interval", 0.25, minimum=0.01, maximum=10.0),
+        _number(payload, "tap_interval_seconds", 0.15, minimum=0.0, maximum=10.0),
+    )
+
+
+def _execute_steps(
+    context: RunContext,
+    device_service: DeviceService,
+    steps: list[dict[str, Any]],
+    tap_interval: float,
+) -> int:
+    for step in steps:
+        operation = device_service.tap(step["x"], step["y"])
+        context.emit(
+            "device_action",
+            f"Tapped {step['role']}.",
+            data={"role": step["role"], "operation": operation.to_dict()},
+        )
+        wait_after = max(
+            tap_interval,
+            float(step.get("wait_after_seconds", 0.0)),
+        )
+        if wait_after:
+            context.sleep(wait_after)
+    return len(steps)
 
 
 def _wait_for_battle_ready(
@@ -220,6 +341,43 @@ def _wait_for_battle_ready(
         if monotonic() - started >= timeout_seconds:
             raise TimeoutError(
                 f"Battle controls did not become ready within {timeout_seconds:.2f} seconds."
+            )
+        context.sleep(poll_interval)
+
+
+def _wait_for_command_cards(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    template_paths: list[str],
+    threshold: float,
+    timeout_seconds: float,
+    poll_interval: float,
+) -> None:
+    started = monotonic()
+    attempts = 0
+    candidates = [
+        {"template_path": template_path, "threshold": threshold}
+        for template_path in template_paths
+    ]
+    while True:
+        screenshot = device_service.snapshot()
+        matches = recognition.match_templates(screenshot, candidates)
+        attempts += 1
+        context.emit(
+            "recognition",
+            "Command card recognition completed.",
+            data={
+                "matched": any(match.matched for match in matches),
+                "attempt": attempts,
+                "matches": [match.to_dict() for match in matches],
+            },
+        )
+        if any(match.matched for match in matches):
+            return
+        if monotonic() - started >= timeout_seconds:
+            raise TimeoutError(
+                f"Command cards did not become ready within {timeout_seconds:.2f} seconds."
             )
         context.sleep(poll_interval)
 

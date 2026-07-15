@@ -14,6 +14,8 @@ from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
+from webapp.services.recognition import RecognitionService
+from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
 
 
@@ -159,3 +161,104 @@ def test_execute_skills_rejects_np_before_snapshot_or_tap(tmp_path: Path):
     assert result.status == JobStatus.FAILED
     assert result.error["message"] == "Program contains non-skill actions."
     assert device_calls == []
+
+
+def test_execute_battle_job_runs_skill_and_command_phase(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    session = tmp_path / "replays" / "battle"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    (data / "settings").mkdir(parents=True)
+    session.mkdir(parents=True)
+
+    attack = np.zeros((28, 34, 3), dtype=np.uint8)
+    attack[2:26, 2:32] = (30, 180, 240)
+    attack[8:20, 12:22] = (255, 255, 255)
+    arts = np.zeros((30, 46, 3), dtype=np.uint8)
+    arts[2:28, 2:44] = (200, 80, 30)
+    arts[9:21, 10:36] = (255, 255, 255)
+    battle_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    battle_frame[560:588, 1100:1134] = attack
+    command_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    command_frame[470:500, 130:176] = arts
+    _write_image(assets / "battle" / "CH" / "attack.png", attack)
+    for card_type in ("Arts", "Buster", "Quick"):
+        _write_image(assets / "battle" / "CH" / f"{card_type}.png", arts)
+    expectations = [
+        (battle_frame, {"type": "tap", "x": 70, "y": 590}),
+        (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
+        (command_frame, {"type": "tap", "x": 500, "y": 110}),
+        (command_frame, {"type": "tap", "x": 150, "y": 500}),
+        (command_frame, {"type": "tap", "x": 375, "y": 500}),
+        (command_frame, None),
+    ]
+    frames = []
+    for index, (image, expect) in enumerate(expectations):
+        filename = f"{index}.png"
+        _write_image(session / filename, image)
+        frame = {"file": filename}
+        if expect is not None:
+            frame["expect"] = expect
+        frames.append(frame)
+    (session / "manifest.json").write_text(
+        json.dumps({"version": 1, "device_id": "battle", "frames": frames}),
+        encoding="utf-8",
+    )
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"Servant A": {"other_name": []}}),
+        encoding="utf-8",
+    )
+    (data / "settings" / "battle.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Servant A",
+                "round1_turns": 1,
+                "round1_turn0_skill": [1],
+                "round1_turn0_np": [1],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    event_log = EventLog()
+    devices = DeviceService(
+        [ReplayBackend(tmp_path / "replays")],
+        event_log,
+        frame_normalizer=FrameNormalizer(),
+    )
+    devices.connect("replay", "battle")
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            devices,
+            RecognitionService(ResourceService(assets, data)),
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "battle",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="replay:battle",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result == {
+        "setting_name": "battle",
+        "turn_count": 1,
+        "action_count": 2,
+        "tap_count": 5,
+    }
+    events = manager.database.list_events(job.job_id)
+    assert [event.data["role"] for event in events if event.event_type == "device_action"] == [
+        "servant_skill_1",
+        "attack",
+        "np_1",
+        "face_card_1",
+        "face_card_2",
+    ]

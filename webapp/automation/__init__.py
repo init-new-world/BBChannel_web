@@ -1,5 +1,6 @@
 from webapp.automation.battle import (
     BATTLE_DRY_RUN_JOB_KIND,
+    BATTLE_EXECUTE_PLAN_JOB_KIND,
     BATTLE_EXECUTE_SKILLS_JOB_KIND,
     register_battle_jobs,
 )
@@ -8,6 +9,7 @@ from webapp.automation.program import compile_battle_program
 
 __all__ = [
     "BATTLE_DRY_RUN_JOB_KIND",
+    "BATTLE_EXECUTE_PLAN_JOB_KIND",
     "BATTLE_EXECUTE_SKILLS_JOB_KIND",
     "compile_battle_program",
     "register_battle_jobs",
