@@ -10,6 +10,7 @@ np = pytest.importorskip("numpy")
 
 from webapp.app import create_app
 from webapp.automation.battle import (
+    _TapTiming,
     _apply_servant_exchange,
     _apply_servant_replacements,
     _execute_hakuno_reroll,
@@ -18,6 +19,7 @@ from webapp.automation.battle import (
     _execute_steps,
     _frontline_servants,
     _matches_hakuno_needs,
+    _wait_for_battle_ready,
     _wait_for_battle_transition,
     register_battle_jobs,
 )
@@ -137,6 +139,59 @@ def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
     assert sleeps == pytest.approx([0.2, 0.4])
 
 
+def test_wait_for_battle_ready_recovers_network_prompt():
+    state = {"frame": "network"}
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["frame"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            state["frame"] = "battle"
+            return Operation()
+
+    class Match:
+        confidence = 1.0
+        center = (640, 420)
+        size = (120, 60)
+
+        def __init__(self, matched):
+            self.matched = matched
+
+    class Recognition:
+        def match_template(self, screenshot, template_path, *_args, **_options):
+            frame = screenshot.decode()
+            if template_path.endswith("/reconnect.png"):
+                return Match(frame == "network")
+            return Match(frame == "battle")
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    _wait_for_battle_ready(
+        Context(),
+        Device(),
+        Recognition(),
+        "battle/CH/attack.png",
+        0.85,
+        1,
+        0,
+        reconnect_timing=_TapTiming(0),
+    )
+
+    assert taps == [(640, 420)]
+
+
 @pytest.mark.parametrize(
     ("matched_paths", "expected"),
     [
@@ -222,7 +277,9 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches():
             return {"matched": True, "confidence": 1.0}
 
     class Recognition:
-        def match_template(self, *_args):
+        def match_template(self, _screenshot, template_path, *_args, **_options):
+            if template_path.endswith("/reconnect.png"):
+                return SimpleNamespace(matched=False)
             return Match()
 
         def match_templates(self, _screenshot, candidates):
@@ -348,7 +405,9 @@ def test_battle_jobs_run_dynamic_hakuno_reroll(
             return {"matched": True, "confidence": 1.0}
 
     class Recognition:
-        def match_template(self, *_args):
+        def match_template(self, _screenshot, template_path, *_args, **_options):
+            if template_path.endswith("/reconnect.png"):
+                return SimpleNamespace(matched=False)
             return Match()
 
         def match_templates(self, _screenshot, candidates):
@@ -440,8 +499,14 @@ def test_execute_battle_job_runs_extra_turn_while_round_is_unchanged(tmp_path: P
     class Recognition:
         transition_calls = 0
 
-        def match_template(self, _screenshot, template_path, _threshold):
-            return Match(template_path)
+        def match_template(
+            self,
+            _screenshot,
+            template_path,
+            _threshold=None,
+            **_options,
+        ):
+            return Match(template_path, not template_path.endswith("/reconnect.png"))
 
         def match_templates(self, _screenshot, candidates):
             paths = [candidate["template_path"] for candidate in candidates]
@@ -506,6 +571,9 @@ def test_card_condition_opens_command_cards_and_returns_to_battle():
             return Operation()
 
     class Recognition:
+        def match_template(self, _screenshot, _template_path, **_options):
+            return SimpleNamespace(matched=False)
+
         def match_templates(self, _screenshot, candidates):
             return [
                 SimpleNamespace(

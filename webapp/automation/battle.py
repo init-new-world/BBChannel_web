@@ -11,6 +11,7 @@ from webapp.automation.interaction import (
     randomized_touch_point,
     randomized_wait_seconds,
 )
+from webapp.automation.network import reconnect_if_present
 from webapp.automation.program import (
     ATTACK_POINT,
     COMMAND_CARD_BACK_POINT,
@@ -192,7 +193,7 @@ def _execute_hakuno_reroll(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
-    tap_interval: float,
+    tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
 ) -> int:
     tap_count = 0
@@ -207,6 +208,7 @@ def _execute_hakuno_reroll(
             threshold,
             timeout_seconds,
             poll_interval,
+            reconnect_timing=tap_interval,
         )
         tap_count += _execute_steps(
             context,
@@ -229,6 +231,7 @@ def _execute_hakuno_reroll(
             threshold,
             timeout_seconds,
             poll_interval,
+            reconnect_timing=tap_interval,
         )
         recognized = _recognize_command_cards(
             card_recognizer,
@@ -276,6 +279,7 @@ def _execute_hakuno_reroll(
             threshold,
             timeout_seconds,
             poll_interval,
+            reconnect_timing=tap_interval,
         )
         tap_count += _execute_steps(
             context,
@@ -294,6 +298,7 @@ def _wait_for_battle_transition(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
+    reconnect_timing: float | _TapTiming | None = None,
 ) -> dict[str, Any]:
     server = server.upper()
     attack_path = f"battle/{server}/attack.png"
@@ -315,6 +320,15 @@ def _wait_for_battle_transition(
     attempts = 0
     while True:
         screenshot = device_service.snapshot()
+        if _battle_reconnect_if_present(
+            context,
+            device_service,
+            recognition,
+            screenshot,
+            server,
+            reconnect_timing,
+        ) and monotonic() - started < timeout_seconds:
+            continue
         matches = recognition.match_templates(screenshot, candidates)
         attempts += 1
         by_path = {
@@ -577,6 +591,7 @@ def create_battle_execute_plan_handler(
                             threshold,
                             timeout_seconds,
                             poll_interval,
+                            reconnect_timing=tap_interval,
                         )
                         matched, condition_taps = _evaluate_card_condition(
                             context,
@@ -638,6 +653,7 @@ def create_battle_execute_plan_handler(
                     threshold,
                     timeout_seconds,
                     poll_interval,
+                    reconnect_timing=tap_interval,
                 )
                 tap_count += _execute_steps(
                     context,
@@ -672,6 +688,7 @@ def create_battle_execute_plan_handler(
                 threshold,
                 timeout_seconds,
                 poll_interval,
+                reconnect_timing=tap_interval,
             )
             command_steps = turn["command_phase"]["steps"]
             tap_count += _execute_steps(
@@ -688,6 +705,7 @@ def create_battle_execute_plan_handler(
                 threshold,
                 timeout_seconds,
                 poll_interval,
+                reconnect_timing=tap_interval,
             )
             for step in command_steps[1:]:
                 if step.get("type") == "tap":
@@ -745,6 +763,7 @@ def create_battle_execute_plan_handler(
                         threshold,
                         timeout_seconds,
                         poll_interval,
+                        reconnect_timing=tap_interval,
                     )
                     if transition["state"] == "finished":
                         battle_finished = True
@@ -803,7 +822,7 @@ def _execute_extra_turn(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
-    tap_interval: float,
+    tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
 ) -> int:
     tap_count = 0
@@ -842,6 +861,7 @@ def _execute_extra_turn(
             threshold,
             timeout_seconds,
             poll_interval,
+            reconnect_timing=tap_interval,
         )
         tap_count += _execute_steps(
             context,
@@ -869,6 +889,7 @@ def _execute_extra_turn(
         threshold,
         timeout_seconds,
         poll_interval,
+        reconnect_timing=tap_interval,
     )
     command_steps = turn["command_phase"]["steps"]
     tap_count += _execute_steps(
@@ -885,6 +906,7 @@ def _execute_extra_turn(
         threshold,
         timeout_seconds,
         poll_interval,
+        reconnect_timing=tap_interval,
     )
     for step in command_steps[1:]:
         if step.get("type") == "tap":
@@ -973,7 +995,7 @@ def _execute_strategy_step(
     servants: list[dict[str, Any]],
     step: dict[str, Any],
     threshold: float,
-    tap_interval: float,
+    tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
 ) -> int:
     if card_recognizer is None:
@@ -1034,7 +1056,7 @@ def _evaluate_card_condition(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
-    tap_interval: float,
+    tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
 ) -> tuple[bool, int]:
     if card_recognizer is None:
@@ -1054,6 +1076,7 @@ def _evaluate_card_condition(
         threshold,
         timeout_seconds,
         poll_interval,
+        reconnect_timing=tap_interval,
     )
     recognized = _recognize_command_cards(
         card_recognizer,
@@ -1163,6 +1186,7 @@ def _execute_skills_handler(
                 threshold,
                 timeout_seconds,
                 poll_interval,
+                reconnect_timing=tap_interval,
             )
             tap_count += _execute_steps(
                 context,
@@ -1240,11 +1264,22 @@ def _wait_for_battle_ready(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
+    reconnect_timing: float | _TapTiming | None = None,
 ) -> None:
     started = monotonic()
     attempts = 0
     while True:
         screenshot = device_service.snapshot()
+        server = _server_from_battle_template(template_path)
+        if server is not None and _battle_reconnect_if_present(
+            context,
+            device_service,
+            recognition,
+            screenshot,
+            server,
+            reconnect_timing,
+        ) and monotonic() - started < timeout_seconds:
+            continue
         match = recognition.match_template(screenshot, template_path, threshold)
         attempts += 1
         context.emit(
@@ -1274,6 +1309,7 @@ def _wait_for_command_cards(
     threshold: float,
     timeout_seconds: float,
     poll_interval: float,
+    reconnect_timing: float | _TapTiming | None = None,
 ) -> bytes:
     started = monotonic()
     attempts = 0
@@ -1283,6 +1319,20 @@ def _wait_for_command_cards(
     ]
     while True:
         screenshot = device_service.snapshot()
+        server = (
+            _server_from_battle_template(template_paths[0])
+            if template_paths
+            else None
+        )
+        if server is not None and _battle_reconnect_if_present(
+            context,
+            device_service,
+            recognition,
+            screenshot,
+            server,
+            reconnect_timing,
+        ) and monotonic() - started < timeout_seconds:
+            continue
         matches = recognition.match_templates(screenshot, candidates)
         attempts += 1
         context.emit(
@@ -1301,6 +1351,38 @@ def _wait_for_command_cards(
                 f"Command cards did not become ready within {timeout_seconds:.2f} seconds."
             )
         context.sleep(poll_interval)
+
+
+def _battle_reconnect_if_present(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    screenshot: bytes,
+    server: str,
+    timing: float | _TapTiming | None,
+) -> bool:
+    if timing is None:
+        return False
+    normalized = (
+        timing if isinstance(timing, _TapTiming) else _TapTiming(float(timing))
+    )
+    return reconnect_if_present(
+        context,
+        device_service,
+        recognition,
+        screenshot,
+        server,
+        action_wait_seconds=normalized.interval,
+        random_time=normalized.random_time,
+        random_touch=normalized.random_touch,
+    )
+
+
+def _server_from_battle_template(template_path: str) -> str | None:
+    parts = template_path.split("/")
+    if len(parts) < 3 or parts[0] != "battle" or not parts[1]:
+        return None
+    return parts[1]
 
 
 def _required_setting_name(payload: dict[str, Any]) -> str:
