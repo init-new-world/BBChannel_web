@@ -160,3 +160,157 @@ def test_assist_recognizer_filters_candidates_by_limit_break_marker(tmp_path: Pa
     assert result["candidates"][0]["checks"]["limit_break_template"] == (
         "assist/满破标记.png"
     )
+
+
+def test_assist_recognizer_filters_candidates_by_friend_marker(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    battle_assets = assets / "battle" / "CH"
+    servant_faces.mkdir(parents=True)
+    battle_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 65, 95))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((8, 8, 51, 51), fill=(210, 100, 170))
+    portrait_draw.line((5, 54, 54, 5), fill=(45, 225, 195), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    friend = Image.new("RGB", (60, 30), (30, 100, 150))
+    friend_draw = ImageDraw.Draw(friend)
+    friend_draw.rectangle((3, 3, 56, 26), outline=(245, 225, 75), width=2)
+    friend_draw.ellipse((20, 6, 39, 25), fill=(230, 80, 130))
+    friend.save(battle_assets / "is_friend.png")
+
+    screenshot = Image.new("RGB", (1280, 380), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    screenshot.paste(portrait, (70, 225))
+    screenshot.paste(friend, (1100, 280))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "friend_only": True,
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 255]
+    assert result["candidates"][0]["checks"]["friend"] is True
+    assert result["candidates"][0]["checks"]["friend_template"] == (
+        "battle/CH/is_friend.png"
+    )
+
+
+def test_assist_recognizer_filters_candidates_by_np_level(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    np_assets = assets / "assist" / "np_level_CH"
+    servant_faces.mkdir(parents=True)
+    np_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 65, 95))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((7, 7, 52, 52), fill=(190, 80, 210))
+    portrait_draw.line((6, 53, 53, 6), fill=(60, 230, 170), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    level1 = Image.new("RGB", (30, 20), (80, 35, 120))
+    level1_draw = ImageDraw.Draw(level1)
+    level1_draw.rectangle((3, 3, 26, 16), outline=(240, 210, 70), width=2)
+    level1_draw.line((6, 15, 12, 4), fill=(45, 190, 245), width=2)
+    level1.save(np_assets / "level1.png")
+    level3 = Image.new("RGB", (30, 20), (35, 100, 125))
+    level3_draw = ImageDraw.Draw(level3)
+    level3_draw.ellipse((4, 3, 25, 17), outline=(245, 120, 70), width=2)
+    level3_draw.line((7, 4, 23, 15), fill=(220, 230, 55), width=2)
+    level3.save(np_assets / "level3.png")
+
+    screenshot = Image.new("RGB", (800, 380), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    screenshot.paste(portrait, (70, 225))
+    screenshot.paste(level1, (400, 125))
+    screenshot.paste(level3, (400, 285))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "np_level": 2,
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 255]
+    assert result["candidates"][0]["checks"]["np_level"] == 3
+    assert result["candidates"][0]["checks"]["np_level_template"] == (
+        "assist/np_level_CH/level3.png"
+    )
+
+
+def test_assist_recognizer_requires_all_requested_level_ten_skills(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    skill_assets = assets / "assist" / "full_skill"
+    servant_faces.mkdir(parents=True)
+    skill_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (45, 70, 105))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.ellipse((7, 7, 52, 52), fill=(200, 85, 180))
+    portrait_draw.line((5, 52, 54, 7), fill=(50, 230, 185), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    level_ten = Image.new("RGB", (30, 20), (75, 35, 115))
+    level_ten_draw = ImageDraw.Draw(level_ten)
+    level_ten_draw.rectangle((2, 2, 27, 17), outline=(245, 210, 65), width=2)
+    level_ten_draw.line((5, 15, 24, 4), fill=(40, 195, 245), width=2)
+    level_ten.save(skill_assets / "10.png")
+
+    screenshot = Image.new("RGB", (700, 400), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    screenshot.paste(portrait, (70, 235))
+    for x in (250, 310):
+        screenshot.paste(level_ten, (x, 125))
+    for x in (250, 310, 370):
+        screenshot.paste(level_ten, (x, 295))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "skill_levels": [10, 10, 10],
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 265]
+    assert result["candidates"][0]["checks"]["skill_levels"] == [10, 10, 10]
+    assert len(result["candidates"][0]["checks"]["skill_templates"]) == 3

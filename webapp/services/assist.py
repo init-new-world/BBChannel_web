@@ -24,6 +24,7 @@ class AssistRecognizer:
         screenshot: bytes,
         assist: dict[str, Any],
         *,
+        server: str = "CH",
         threshold: float = 0.85,
     ) -> dict[str, Any]:
         canonical_name = assist.get("servant_canonical_name")
@@ -52,6 +53,43 @@ class AssistRecognizer:
                 max_results=20,
             )
             if assist.get("full_limit_break")
+            else []
+        )
+        friend_matches = (
+            self._recognition.match_template_all(
+                screenshot,
+                f"battle/{server.upper()}/is_friend.png",
+                threshold=threshold,
+                scales=ASSIST_EQUIP_SCALES,
+                max_results=20,
+            )
+            if assist.get("friend_only")
+            else []
+        )
+        required_np_level = assist.get("np_level")
+        np_level_matches = (
+            self._np_level_matches(screenshot, server, threshold)
+            if isinstance(required_np_level, int)
+            and not isinstance(required_np_level, bool)
+            and required_np_level > 1
+            else []
+        )
+        required_skill_levels = assist.get("skill_levels")
+        required_level_ten_count = (
+            sum(level == 10 for level in required_skill_levels)
+            if isinstance(required_skill_levels, list)
+            and all(level in {0, 10} for level in required_skill_levels)
+            else 0
+        )
+        level_ten_matches = (
+            self._recognition.match_template_all(
+                screenshot,
+                "assist/full_skill/10.png",
+                threshold=threshold,
+                scales=ASSIST_EQUIP_SCALES,
+                max_results=50,
+            )
+            if required_level_ten_count
             else []
         )
         matches = [
@@ -102,6 +140,54 @@ class AssistRecognizer:
                         "limit_break_confidence": limit_break_match.confidence,
                     }
                 )
+            if assist.get("friend_only"):
+                friend_match = self._candidate_friend_match(
+                    candidate["anchor"],
+                    friend_matches,
+                )
+                if friend_match is None:
+                    continue
+                candidate["checks"].update(
+                    {
+                        "friend": True,
+                        "friend_template": friend_match.template_path,
+                        "friend_confidence": friend_match.confidence,
+                    }
+                )
+            if np_level_matches:
+                np_level_match = self._candidate_np_level_match(
+                    candidate["anchor"],
+                    np_level_matches,
+                )
+                if np_level_match is None or np_level_match[0] < required_np_level:
+                    continue
+                np_level, match = np_level_match
+                candidate["checks"].update(
+                    {
+                        "np_level": np_level,
+                        "np_level_template": match.template_path,
+                        "np_level_confidence": match.confidence,
+                    }
+                )
+            if required_level_ten_count:
+                skill_matches = self._candidate_skill_matches(
+                    candidate["anchor"],
+                    level_ten_matches,
+                )
+                if len(skill_matches) < required_level_ten_count:
+                    continue
+                skill_matches = skill_matches[:required_level_ten_count]
+                candidate["checks"].update(
+                    {
+                        "skill_levels": [10] * required_level_ten_count,
+                        "skill_templates": [
+                            match.template_path for match in skill_matches
+                        ],
+                        "skill_confidences": [
+                            match.confidence for match in skill_matches
+                        ],
+                    }
+                )
             candidates.append(candidate)
 
         candidates.sort(key=lambda candidate: (candidate["anchor"][1], candidate["anchor"][0]))
@@ -148,6 +234,35 @@ class AssistRecognizer:
             ]
         return templates
 
+    def _np_level_matches(
+        self,
+        screenshot: bytes,
+        server: str,
+        threshold: float,
+    ) -> list[tuple[int, Any]]:
+        entries = self._resources.template_index(
+            prefix=f"assist/np_level_{server.upper()}",
+            limit=100,
+        )["entries"]
+        matches: list[tuple[int, Any]] = []
+        for entry in entries:
+            template_path = str(entry["path"])
+            stem = template_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            if not stem.startswith("level") or not stem[5:].isdigit():
+                continue
+            level = int(stem[5:])
+            matches.extend(
+                (level, match)
+                for match in self._recognition.match_template_all(
+                    screenshot,
+                    template_path,
+                    threshold=threshold,
+                    scales=ASSIST_EQUIP_SCALES,
+                    max_results=20,
+                )
+            )
+        return matches
+
     @staticmethod
     def _candidate_equip_match(anchor: list[int], equip_matches: dict[str, list[Any]]):
         anchor_x, anchor_y = anchor
@@ -174,6 +289,47 @@ class AssistRecognizer:
         if not nearby:
             return None
         return max(nearby, key=lambda match: match.confidence)
+
+    @staticmethod
+    def _candidate_friend_match(anchor: list[int], matches: list[Any]):
+        anchor_y = anchor[1]
+        nearby = [
+            match
+            for match in matches
+            if anchor_y + 20 <= match.center[1] <= anchor_y + 100
+        ]
+        if not nearby:
+            return None
+        return max(nearby, key=lambda match: match.confidence)
+
+    @staticmethod
+    def _candidate_np_level_match(
+        anchor: list[int],
+        matches: list[tuple[int, Any]],
+    ) -> tuple[int, Any] | None:
+        anchor_x, anchor_y = anchor
+        nearby = [
+            (level, match)
+            for level, match in matches
+            if match.center[0] >= anchor_x + 100
+            and anchor_y + 10 <= match.center[1] <= anchor_y + 110
+        ]
+        if not nearby:
+            return None
+        return max(nearby, key=lambda item: item[1].confidence)
+
+    @staticmethod
+    def _candidate_skill_matches(anchor: list[int], matches: list[Any]) -> list[Any]:
+        anchor_x, anchor_y = anchor
+        return sorted(
+            (
+                match
+                for match in matches
+                if match.center[0] >= anchor_x + 80
+                and anchor_y + 10 <= match.center[1] <= anchor_y + 110
+            ),
+            key=lambda match: match.center[0],
+        )
 
     @staticmethod
     def _overlaps(first: list[int], second: list[int]) -> bool:
