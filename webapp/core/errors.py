@@ -23,6 +23,7 @@ class ErrorCode(str, Enum):
     TEMPLATE_LOAD_FAILED = "template_load_failed"
     DATA_FILE_NOT_FOUND = "data_file_not_found"
     DATA_FILE_INVALID = "data_file_invalid"
+    DATA_FILE_CONFLICT = "data_file_conflict"
     OPENCV_UNAVAILABLE = "opencv_unavailable"
     MATCH_FAILED = "match_failed"
     MUMU_UNSUPPORTED_PLATFORM = "mumu_unsupported_platform"

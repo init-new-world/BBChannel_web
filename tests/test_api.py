@@ -369,6 +369,25 @@ def test_strategy_routes_expose_data_dir_presets(tmp_path: Path):
     assert detail_response.json()["entries"][0]["tag"] == "brave"
 
 
+def test_put_setting_creates_and_explicitly_overwrites_preset(tmp_path: Path):
+    client = _client(tmp_path)
+    config = {"server": "CH", "round1_turns": 0}
+
+    created = client.put("/api/settings/demo", json={"config": config})
+    conflict = client.put("/api/settings/demo", json={"config": config})
+    overwritten = client.put(
+        "/api/settings/demo",
+        json={"config": {**config, "round1_turns": 1}, "overwrite": True},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["name"] == "demo"
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "data_file_conflict"
+    assert overwritten.status_code == 200
+    assert overwritten.json()["config"]["round1_turns"] == 1
+
+
 def test_servant_and_master_routes_expose_catalogs(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

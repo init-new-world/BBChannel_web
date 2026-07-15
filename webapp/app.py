@@ -78,6 +78,11 @@ class BatchMatchRequest(BaseModel):
     candidates: list[MatchCandidateRequest] = Field(min_length=1, max_length=100)
 
 
+class SaveSettingRequest(BaseModel):
+    config: dict
+    overwrite: bool = False
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -240,6 +245,14 @@ def create_app(
     def setting_plan(name: str) -> dict:
         return script_data.get_setting_plan(name)
 
+    @app.put("/api/settings/{name}")
+    def save_setting(name: str, request: SaveSettingRequest) -> dict:
+        return script_data.save_setting(
+            name,
+            request.config,
+            overwrite=request.overwrite,
+        )
+
     @app.get("/api/strategies")
     def strategies() -> dict[str, list[dict[str, str]]]:
         return {"strategies": script_data.list_strategies()}
@@ -324,6 +337,8 @@ def _status_code_for(code: ErrorCode) -> int:
         return 404
     if code == ErrorCode.DATA_FILE_INVALID:
         return 400
+    if code == ErrorCode.DATA_FILE_CONFLICT:
+        return 409
     if code == ErrorCode.OPENCV_UNAVAILABLE:
         return 503
     if code in {

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,37 @@ class ScriptDataService:
             "summary": self._setting_summary(config),
             "validation": validation,
         }
+
+    def save_setting(
+        self,
+        name: str,
+        config: dict[str, Any],
+        *,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        if not isinstance(config, dict):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Setting file must contain a JSON object.",
+                {"name": name},
+            )
+        validation = self._validate_setting(config)
+        if not validation["ok"]:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                f"Setting data is invalid: {name}",
+                {"name": name, "validation": validation},
+            )
+
+        path = self._named_json_path(self.settings_dir, name, "settings")
+        if path.exists() and not overwrite:
+            raise AppError(
+                ErrorCode.DATA_FILE_CONFLICT,
+                f"Setting data file already exists: {name}",
+                {"name": name, "path": self._relative_path(path)},
+            )
+        self._write_json_atomic(path, config)
+        return self.get_setting(path.stem)
 
     def get_setting_plan(self, name: str) -> dict[str, Any]:
         detail = self.get_setting(name)
@@ -123,6 +156,16 @@ class ScriptDataService:
         ]
 
     def _resolve_named_json(self, directory: Path, name: str, kind: str) -> Path:
+        candidate = self._named_json_path(directory, name, kind)
+        if not candidate.is_file():
+            raise AppError(
+                ErrorCode.DATA_FILE_NOT_FOUND,
+                f"{kind.title()} data file not found: {name}",
+                {"name": name},
+            )
+        return candidate
+
+    def _named_json_path(self, directory: Path, name: str, kind: str) -> Path:
         normalized = name[:-5] if name.lower().endswith(".json") else name
         if not normalized or normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
             raise AppError(
@@ -133,13 +176,37 @@ class ScriptDataService:
 
         base = directory.resolve()
         candidate = (base / f"{normalized}.json").resolve()
-        if not self._is_inside(candidate, base) or not candidate.is_file():
+        if not self._is_inside(candidate, base):
             raise AppError(
                 ErrorCode.DATA_FILE_NOT_FOUND,
                 f"{kind.title()} data file not found: {name}",
                 {"name": name},
             )
         return candidate
+
+    @staticmethod
+    def _write_json_atomic(path: Path, payload: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="\n",
+                prefix=f".{path.stem}-",
+                suffix=".tmp",
+                dir=path.parent,
+                delete=False,
+            ) as temporary:
+                json.dump(payload, temporary, ensure_ascii=False, indent=2)
+                temporary.write("\n")
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temporary_path = Path(temporary.name)
+            os.replace(temporary_path, path)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
     def _load_json(self, path: Path) -> Any:
         try:

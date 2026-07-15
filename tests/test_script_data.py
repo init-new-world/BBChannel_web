@@ -177,6 +177,45 @@ def test_get_setting_reports_non_string_servant_names(tmp_path: Path):
     } in detail["validation"]["errors"]
 
 
+def test_save_setting_writes_utf8_json_and_requires_explicit_overwrite(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {"摩根": {"other_name": [], "class": "Berserker", "SN": "309"}},
+    )
+    service = ScriptDataService(tmp_path)
+    config = {"server": "CH", "servant_0_name": "摩根", "round1_turns": 0}
+
+    created = service.save_setting("周回配置", config)
+
+    assert created["name"] == "周回配置"
+    assert created["config"] == config
+    saved_text = (tmp_path / "settings" / "周回配置.json").read_text(encoding="utf-8")
+    assert "摩根" in saved_text
+    assert "\\u6469" not in saved_text
+    assert not list((tmp_path / "settings").glob(".*.tmp"))
+
+    with pytest.raises(AppError) as excinfo:
+        service.save_setting("周回配置", {**config, "round1_turns": 1})
+
+    assert excinfo.value.code == ErrorCode.DATA_FILE_CONFLICT
+    overwritten = service.save_setting(
+        "周回配置",
+        {**config, "round1_turns": 1},
+        overwrite=True,
+    )
+    assert overwritten["config"]["round1_turns"] == 1
+
+
+def test_save_setting_rejects_invalid_config_without_creating_file(tmp_path: Path):
+    service = ScriptDataService(tmp_path)
+
+    with pytest.raises(AppError) as excinfo:
+        service.save_setting("invalid", {"server": "NA"})
+
+    assert excinfo.value.code == ErrorCode.DATA_FILE_INVALID
+    assert not (tmp_path / "settings" / "invalid.json").exists()
+
+
 def test_get_strategy_returns_entries_summary_and_validation(tmp_path: Path):
     _write_json(
         tmp_path / "strategy" / "brave.json",
