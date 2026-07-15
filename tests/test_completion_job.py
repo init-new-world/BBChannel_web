@@ -44,10 +44,12 @@ def _run_completion(
     next_button = _pattern((100, 40), (80, 65, 150))
     run_again = _pattern((120, 50), (35, 120, 170))
     friendship_max = _pattern((90, 45), (145, 75, 105))
+    friendship_up = _pattern((160, 80), (115, 85, 145))
     drop_item = _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
     friendship_max.save(battle_assets / "jblevel10.png")
+    friendship_up.save(battle_assets / "relationship_up.png")
     drop_item.save(drop_assets / "item.png")
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
@@ -157,7 +159,27 @@ def test_completion_stops_when_full_friendship_is_reached(tmp_path: Path):
     assert result.result["actions"] == []
 
 
-def test_completion_counts_configured_drops_and_stops_at_limit(tmp_path: Path):
+def test_completion_advances_friendship_level_dialog(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    friendship_frame = base.copy()
+    friendship_frame.paste(_pattern((160, 80), (115, 85, 145)), (400, 250))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (friendship_frame, {"type": "tap", "x": 480, "y": 290}),
+            (repeat_frame, None),
+        ],
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["actions"] == ["relationship_up"]
+
+
+def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
     pytest.importorskip("cv2")
     frame = Image.new("RGB", (1280, 720), (18, 24, 32))
     drop_item = _pattern((40, 40), (165, 105, 45))
@@ -168,13 +190,14 @@ def test_completion_counts_configured_drops_and_stops_at_limit(tmp_path: Path):
         tmp_path,
         [(frame, None)],
         config={
-            "dropStopNum": 2,
+            "dropStopNum": 3,
             "dropImage": "E:/old/BBchannel/assets/drop/item.png",
         },
+        payload={"initial_drop_count": 1},
     )
 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["complete"] is False
     assert result.result["stopped"] is True
     assert result.result["reason"] == "drop_limit"
-    assert result.result["drop_count"] == 2
+    assert result.result["drop_count"] == 3

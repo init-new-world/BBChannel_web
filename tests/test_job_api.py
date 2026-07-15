@@ -33,6 +33,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "battle.execute-plan",
                     "battle.execute-skills",
                     "battle.prepare",
+                    "battle.run",
                     "diagnostic.template-tap",
                     "echo",
                 ]

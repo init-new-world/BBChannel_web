@@ -311,7 +311,7 @@ def register_battle_jobs(
     ):
         job_manager.register(
             BATTLE_EXECUTE_PLAN_JOB_KIND,
-            _execute_plan_handler(
+            create_battle_execute_plan_handler(
                 script_data,
                 device_service,
                 recognition,
@@ -321,7 +321,7 @@ def register_battle_jobs(
         )
 
 
-def _execute_plan_handler(
+def create_battle_execute_plan_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,

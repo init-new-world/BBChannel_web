@@ -11,14 +11,11 @@ from webapp.services.script_data import ScriptDataService
 ASSIST_SELECT_JOB_KIND = "assist.select"
 
 
-def register_assist_job(
-    job_manager: JobManager,
+def create_assist_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     assist_recognizer: AssistRecognizer,
-) -> None:
-    if job_manager.has_kind(ASSIST_SELECT_JOB_KIND):
-        return
+):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = payload.get("setting_name")
@@ -154,4 +151,19 @@ def register_assist_job(
             "tap": operation.to_dict(),
         }
 
-    job_manager.register(ASSIST_SELECT_JOB_KIND, handler, requires_device=True)
+    return handler
+
+
+def register_assist_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    assist_recognizer: AssistRecognizer,
+) -> None:
+    if job_manager.has_kind(ASSIST_SELECT_JOB_KIND):
+        return
+    job_manager.register(
+        ASSIST_SELECT_JOB_KIND,
+        create_assist_handler(script_data, device_service, assist_recognizer),
+        requires_device=True,
+    )

@@ -15,15 +15,12 @@ from webapp.services.script_data import ScriptDataService
 BATTLE_COMPLETE_JOB_KIND = "battle.complete"
 
 
-def register_completion_job(
-    job_manager: JobManager,
+def create_completion_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,
     resources: ResourceService,
-) -> None:
-    if job_manager.has_kind(BATTLE_COMPLETE_JOB_KIND):
-        return
+):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = payload.get("setting_name")
@@ -35,6 +32,13 @@ def register_completion_job(
         timeout_seconds = _number(payload, "timeout_seconds", 180, 0.1, 600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(payload, "action_wait_seconds", 0.5, 0, 10)
+        initial_drop_count = payload.get("initial_drop_count", 0)
+        if (
+            isinstance(initial_drop_count, bool)
+            or not isinstance(initial_drop_count, int)
+            or initial_drop_count < 0
+        ):
+            raise ValueError("initial_drop_count must be a non-negative integer.")
         plan = script_data.get_setting_plan(setting_name.strip())
         server = str(plan["server"]).upper()
         drop_limit = int(plan["run"]["drop_stop_num"])
@@ -45,7 +49,7 @@ def register_completion_job(
         started = monotonic()
         attempts = 0
         actions: list[str] = []
-        drop_count = 0
+        drop_count = initial_drop_count
         observed_drop_frames: set[str] = set()
 
         while monotonic() - started <= timeout_seconds:
@@ -130,6 +134,7 @@ def register_completion_job(
                         "Started the next run.",
                         data={"role": "run_again", "operation": operation.to_dict()},
                     )
+                    context.sleep(action_wait_seconds)
                 context.checkpoint(
                     "complete",
                     progress=1.0,
@@ -143,6 +148,22 @@ def register_completion_job(
                     "actions": actions,
                     "attempts": attempts,
                 }
+
+            relationship_up = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/relationship_up.png",
+            )
+            if relationship_up is not None and relationship_up.matched:
+                operation = device_service.tap(*relationship_up.center)
+                actions.append("relationship_up")
+                context.emit(
+                    "device_action",
+                    "Advanced friendship level dialog.",
+                    data={"role": "relationship_up", "operation": operation.to_dict()},
+                )
+                context.sleep(action_wait_seconds)
+                continue
 
             next_button = _match_optional(
                 recognition,
@@ -171,7 +192,28 @@ def register_completion_job(
             f"Battle settlement did not complete within {timeout_seconds:.2f} seconds."
         )
 
-    job_manager.register(BATTLE_COMPLETE_JOB_KIND, handler, requires_device=True)
+    return handler
+
+
+def register_completion_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    resources: ResourceService,
+) -> None:
+    if job_manager.has_kind(BATTLE_COMPLETE_JOB_KIND):
+        return
+    job_manager.register(
+        BATTLE_COMPLETE_JOB_KIND,
+        create_completion_handler(
+            script_data,
+            device_service,
+            recognition,
+            resources,
+        ),
+        requires_device=True,
+    )
 
 
 def _match_optional(

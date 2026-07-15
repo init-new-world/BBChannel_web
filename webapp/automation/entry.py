@@ -13,14 +13,11 @@ from webapp.services.script_data import ScriptDataService
 BATTLE_PREPARE_JOB_KIND = "battle.prepare"
 
 
-def register_battle_entry_job(
-    job_manager: JobManager,
+def create_battle_entry_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,
-) -> None:
-    if job_manager.has_kind(BATTLE_PREPARE_JOB_KIND):
-        return
+):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = payload.get("setting_name")
@@ -135,7 +132,22 @@ def register_battle_entry_job(
             f"Battle did not become ready within {timeout_seconds:.2f} seconds."
         )
 
-    job_manager.register(BATTLE_PREPARE_JOB_KIND, handler, requires_device=True)
+    return handler
+
+
+def register_battle_entry_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+) -> None:
+    if job_manager.has_kind(BATTLE_PREPARE_JOB_KIND):
+        return
+    job_manager.register(
+        BATTLE_PREPARE_JOB_KIND,
+        create_battle_entry_handler(script_data, device_service, recognition),
+        requires_device=True,
+    )
 
 
 def _number(

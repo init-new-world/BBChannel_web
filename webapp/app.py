@@ -14,11 +14,16 @@ from pydantic import BaseModel, Field
 from webapp.api import create_job_router
 from webapp.automation import (
     compile_battle_program,
+    create_assist_handler,
+    create_battle_entry_handler,
+    create_battle_execute_plan_handler,
+    create_completion_handler,
     register_assist_job,
     register_battle_entry_job,
     register_battle_jobs,
     register_completion_job,
     register_diagnostic_job,
+    register_full_run_job,
 )
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
@@ -156,6 +161,23 @@ def create_app(
         device_service,
         recognition,
         card_recognizer,
+    )
+    register_full_run_job(
+        job_manager,
+        create_assist_handler(script_data, device_service, assist_recognizer),
+        create_battle_entry_handler(script_data, device_service, recognition),
+        create_battle_execute_plan_handler(
+            script_data,
+            device_service,
+            recognition,
+            card_recognizer,
+        ),
+        create_completion_handler(
+            script_data,
+            device_service,
+            recognition,
+            resources,
+        ),
     )
 
     def active_device_key() -> str | None:
