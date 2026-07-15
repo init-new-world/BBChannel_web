@@ -222,6 +222,20 @@ class AssistRecognizer:
             scales=ASSIST_EQUIP_SCALES,
         )
 
+    def match_recommended_header(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/tuijian.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
     def match_refresh_confirmation(
         self,
         screenshot: bytes,

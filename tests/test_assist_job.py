@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from webapp.automation.assist import ASSIST_SELECT_JOB_KIND, register_assist_job
+from webapp.automation.assist import (
+    ASSIST_SELECT_JOB_KIND,
+    _assist_class_point,
+    create_assist_handler,
+    register_assist_job,
+)
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
@@ -14,6 +19,78 @@ from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
+
+
+def test_assist_class_point_uses_standard_and_recommended_tab_layouts():
+    assert _assist_class_point("Saber", recommended=False) == (161, 128)
+    assert _assist_class_point("Caster", recommended=True) == (453, 128)
+    assert _assist_class_point("MoonCancer", recommended=False) == (632, 128)
+
+
+def test_assist_handler_selects_configured_class_before_recognition():
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        matched = False
+
+    class Recognizer:
+        def match_recommended_header(self, _screenshot, _server):
+            return Match()
+
+        def recognize(self, _screenshot, _assist, *, server):
+            return {
+                "candidate_count": 1,
+                "servant_name": "Support",
+                "candidates": [
+                    {"anchor": [70, 225], "scale": 1.0, "checks": {}}
+                ],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {
+                    "servant_class": "Caster",
+                    "all_not_skip": False,
+                },
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_kwargs):
+            pass
+
+        def emit(self, *_args, **_kwargs):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {"setting_name": "demo"},
+    )
+
+    assert taps == [(430, 128), (430, 128), (340, 165)]
+    assert result["class_selection"] == {
+        "class": "Caster",
+        "recommended": False,
+        "point": [430, 128],
+        "operation": {"ok": True},
+    }
 
 
 def test_assist_select_job_taps_first_matching_candidate(tmp_path: Path):

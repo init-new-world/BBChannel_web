@@ -392,6 +392,7 @@ class ScriptDataService:
         servant_name = config.get(f"servant_{slot}_name") if isinstance(slot, int) else None
         canonical_name: str | None = None
         servant_sn: str | None = None
+        servant_class: str | None = None
 
         server = config.get("server")
         if isinstance(server, str) and server.upper() in VALID_SERVERS and isinstance(servant_name, str):
@@ -404,6 +405,8 @@ class ScriptDataService:
                 canonical_name = name
                 sn = details.get("SN")
                 servant_sn = str(sn) if isinstance(sn, (str, int)) else None
+                class_name = details.get("class")
+                servant_class = class_name if isinstance(class_name, str) else None
                 break
 
         equip_value = config.get("assistEquip")
@@ -421,12 +424,14 @@ class ScriptDataService:
             "servant_name": servant_name,
             "servant_canonical_name": canonical_name,
             "servant_sn": servant_sn,
+            "servant_class": servant_class,
             "equip_names": equip_names,
             "full_limit_break": bool(config.get("fullEquip")),
             "friend_only": bool(config.get("onlyFriendAssist")),
             "np_level": config.get("NPlevel"),
             "skill_levels": skill_levels[:3] if isinstance(skill_levels, list) else [],
             "scroll_limit": config.get("scrollLimit"),
+            "all_not_skip": bool(config.get("allNotSkip", 1)),
         }
 
     @staticmethod

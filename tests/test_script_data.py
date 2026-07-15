@@ -156,7 +156,13 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
 def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
     _write_json(
         tmp_path / "servant_info_CH.json",
-        {"Support": {"other_name": ["Support Alias"], "SN": "314"}},
+        {
+            "Support": {
+                "other_name": ["Support Alias"],
+                "SN": "314",
+                "class": "Caster",
+            }
+        },
     )
     _write_json(
         tmp_path / "settings" / "demo.json",
@@ -165,6 +171,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
             "servant_3_name": "Support Alias",
             "assistMode": "从者礼装",
             "assistIdx": 3,
+            "allNotSkip": 0,
             "assistEquip": ["Event CE", None, "Bond CE"],
             "fullEquip": 1,
             "onlyFriendAssist": 0,
@@ -182,12 +189,14 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
         "servant_name": "Support Alias",
         "servant_canonical_name": "Support",
         "servant_sn": "314",
+        "servant_class": "Caster",
         "equip_names": ["Event CE", "Bond CE"],
         "full_limit_break": True,
         "friend_only": False,
         "np_level": 2,
         "skill_levels": [10, 9, 8],
         "scroll_limit": 0.96,
+        "all_not_skip": False,
     }
 
 

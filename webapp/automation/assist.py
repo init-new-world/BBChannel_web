@@ -15,6 +15,23 @@ from webapp.services.script_data import ScriptDataService
 
 
 ASSIST_SELECT_JOB_KIND = "assist.select"
+ASSIST_CLASS_INDEX = {
+    "Saber": 1,
+    "Archer": 2,
+    "Lancer": 3,
+    "Rider": 4,
+    "Caster": 5,
+    "Assassin": 6,
+    "Berserker": 7,
+    "Alterego": 8,
+    "Avenger": 8,
+    "Foreigner": 8,
+    "MoonCancer": 8,
+    "Pretender": 8,
+    "Ruler": 8,
+    "Shielder": 8,
+    "Beast": 8,
+}
 
 
 def create_assist_handler(
@@ -66,6 +83,36 @@ def create_assist_handler(
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
+        class_selection = None
+        if not plan["assist"].get("all_not_skip"):
+            servant_class = plan["assist"].get("servant_class")
+            if isinstance(servant_class, str) and servant_class:
+                screenshot = device_service.snapshot()
+                recommended = assist_recognizer.match_recommended_header(
+                    screenshot,
+                    plan["server"],
+                ).matched
+                point = _assist_class_point(servant_class, recommended=recommended)
+                for _ in range(2):
+                    touch_point = randomized_touch_point(
+                        point,
+                        enabled=random_touch,
+                    )
+                    operation = device_service.tap(*touch_point)
+                class_selection = {
+                    "class": servant_class,
+                    "recommended": recommended,
+                    "point": list(point),
+                    "operation": operation.to_dict(),
+                }
+                context.emit(
+                    "device_action",
+                    "Selected the configured assist class.",
+                    data={"role": "assist_class", **class_selection},
+                )
+                context.sleep(
+                    randomized_wait_seconds(refresh_wait_seconds, random_time)
+                )
         attempts = 0
         scrolls = 0
         scrolls_since_refresh = 0
@@ -164,6 +211,7 @@ def create_assist_handler(
             "attempts": attempts,
             "scrolls": scrolls,
             "refreshes": refreshes,
+            "class_selection": class_selection,
             "selected": selected,
             "tap": operation.to_dict(),
         }
@@ -184,3 +232,12 @@ def register_assist_job(
         create_assist_handler(script_data, device_service, assist_recognizer),
         requires_device=True,
     )
+
+
+def _assist_class_point(class_name: str, *, recommended: bool) -> tuple[int, int]:
+    try:
+        index = ASSIST_CLASS_INDEX[class_name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported assist class: {class_name}") from exc
+    source_x = 225 + index * 91 if recommended else 140 + index * 101
+    return round(source_x / 1.5), 128
