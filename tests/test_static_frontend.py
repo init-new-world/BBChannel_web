@@ -21,6 +21,14 @@ def test_operator_console_references_api_controls():
     assert 'id="setting-plan"' in index
     assert 'id="strategy-select"' in index
     assert 'id="template-select"' in index
+    assert 'id="recognition-scales"' in index
+    assert 'id="recognition-roi-enabled"' in index
+    assert 'id="recognition-roi-x"' in index
+    assert 'id="recognition-roi-y"' in index
+    assert 'id="recognition-roi-width"' in index
+    assert 'id="recognition-roi-height"' in index
+    assert 'id="screen-source-mode"' in index
+    assert 'id="screen-debug-mode"' in index
     assert 'id="event-log"' in index
     assert 'id="start-diagnostic"' in index
     assert 'id="job-status"' in index
@@ -36,6 +44,8 @@ def test_operator_console_references_api_controls():
     assert "/plan" in script
     assert "/api/snapshot" in script
     assert "/api/match" in script
+    assert "/api/match/debug" in script
+    assert "overlay_base64" in script
     assert "/api/tap" in script
     assert "/api/swipe" in script
     assert "/api/jobs" in script

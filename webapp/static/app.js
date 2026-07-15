@@ -9,6 +9,8 @@ const state = {
   strategies: [],
   screenshotUrl: null,
   screenshotBase64: "",
+  debugOverlayDataUrl: null,
+  screenMode: "source",
   screenshotNaturalSize: null,
   latestMatch: null,
   selectedSettingPlan: null,
@@ -37,6 +39,13 @@ const els = {
   clearScreenshot: document.querySelector("#clear-screenshot"),
   templateSelect: document.querySelector("#template-select"),
   thresholdInput: document.querySelector("#threshold-input"),
+  recognitionScales: document.querySelector("#recognition-scales"),
+  recognitionRoiEnabled: document.querySelector("#recognition-roi-enabled"),
+  recognitionRoiControls: document.querySelector("#recognition-roi-controls"),
+  recognitionRoiX: document.querySelector("#recognition-roi-x"),
+  recognitionRoiY: document.querySelector("#recognition-roi-y"),
+  recognitionRoiWidth: document.querySelector("#recognition-roi-width"),
+  recognitionRoiHeight: document.querySelector("#recognition-roi-height"),
   matchButton: document.querySelector("#match-button"),
   matchResult: document.querySelector("#match-result"),
   tapX: document.querySelector("#tap-x"),
@@ -53,6 +62,8 @@ const els = {
   screenshot: document.querySelector("#screenshot"),
   screenEmpty: document.querySelector("#screen-empty"),
   matchOverlay: document.querySelector("#match-overlay"),
+  screenSourceMode: document.querySelector("#screen-source-mode"),
+  screenDebugMode: document.querySelector("#screen-debug-mode"),
   fitScreen: document.querySelector("#fit-screen"),
   actualScreen: document.querySelector("#actual-screen"),
   refreshEvents: document.querySelector("#refresh-events"),
@@ -135,10 +146,15 @@ function bindEvents() {
   els.snapshotButton.addEventListener("click", captureScreenshot);
   els.clearScreenshot.addEventListener("click", clearScreenshot);
   els.matchButton.addEventListener("click", matchTemplate);
+  els.recognitionRoiEnabled.addEventListener("change", () => {
+    els.recognitionRoiControls.hidden = !els.recognitionRoiEnabled.checked;
+  });
   els.tapButton.addEventListener("click", sendTap);
   els.swipeButton.addEventListener("click", sendSwipe);
   els.fitScreen.addEventListener("click", () => setScreenScale("fit"));
   els.actualScreen.addEventListener("click", () => setScreenScale("actual"));
+  els.screenSourceMode.addEventListener("click", () => setScreenMode("source"));
+  els.screenDebugMode.addEventListener("click", () => setScreenMode("debug"));
   els.refreshEvents.addEventListener("click", loadEvents);
   els.screenshot.addEventListener("load", onScreenshotLoaded);
   els.screenStage.addEventListener("click", populateTapFromClick);
@@ -385,11 +401,13 @@ function setScreenshot(dataUrl) {
   }
   state.screenshotUrl = dataUrl;
   state.screenshotBase64 = dataUrl.split(",", 2)[1] || "";
+  state.debugOverlayDataUrl = null;
+  state.screenMode = "source";
   state.latestMatch = null;
-  els.screenshot.src = dataUrl;
   els.screenshot.classList.add("visible");
   els.screenEmpty.hidden = true;
   clearMatchOverlay();
+  setScreenMode("source");
   updateControls();
 }
 
@@ -399,6 +417,8 @@ function clearScreenshot() {
   }
   state.screenshotUrl = null;
   state.screenshotBase64 = "";
+  state.debugOverlayDataUrl = null;
+  state.screenMode = "source";
   state.screenshotNaturalSize = null;
   state.latestMatch = null;
   els.screenshot.removeAttribute("src");
@@ -407,21 +427,34 @@ function clearScreenshot() {
   els.screenMeta.textContent = "No capture";
   els.matchResult.textContent = "No match";
   clearMatchOverlay();
+  setScreenMode("source");
   updateControls();
 }
 
 async function matchTemplate() {
   try {
-    const payload = await api("/api/match", {
+    const roi = els.recognitionRoiEnabled.checked
+      ? [
+        readNumber(els.recognitionRoiX),
+        readNumber(els.recognitionRoiY),
+        readNumber(els.recognitionRoiWidth),
+        readNumber(els.recognitionRoiHeight),
+      ]
+      : null;
+    const payload = await api("/api/match/debug", {
       method: "POST",
       body: JSON.stringify({
         screenshot_base64: state.screenshotBase64,
         template_path: els.templateSelect.value,
         threshold: Number(els.thresholdInput.value),
+        roi,
+        scales: readScales(),
       }),
     });
-    state.latestMatch = payload;
-    renderMatch(payload);
+    state.latestMatch = payload.result;
+    state.debugOverlayDataUrl = `data:image/png;base64,${payload.overlay_base64}`;
+    renderMatch(payload.result);
+    setScreenMode("debug");
     await loadEvents();
   } catch (error) {
     showError(error);
@@ -821,6 +854,7 @@ function updateControls() {
   els.snapshotButton.disabled = !state.connected;
   els.clearScreenshot.disabled = !hasScreenshot;
   els.matchButton.disabled = !hasScreenshot || !hasTemplate;
+  els.screenDebugMode.disabled = !state.debugOverlayDataUrl;
   els.tapButton.disabled = !state.connected;
   els.swipeButton.disabled = !state.connected;
   const selectedJobStatus = state.activeJob?.status || "idle";
@@ -855,14 +889,22 @@ function onScreenshotLoaded() {
     width: els.screenshot.naturalWidth,
     height: els.screenshot.naturalHeight,
   };
-  els.screenMeta.textContent = `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height}`;
+  els.screenMeta.textContent = `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${state.screenMode === "debug" ? "Debug" : "Source"}`;
+  if (!els.recognitionRoiEnabled.checked) {
+    els.recognitionRoiWidth.value = state.screenshotNaturalSize.width;
+    els.recognitionRoiHeight.value = state.screenshotNaturalSize.height;
+  }
   if (state.latestMatch) {
     renderMatch(state.latestMatch);
   }
 }
 
 function renderMatch(result) {
-  els.matchResult.textContent = `${result.matched ? "Matched" : "Below threshold"} · ${result.confidence.toFixed(3)} · ${result.center.join(", ")}`;
+  els.matchResult.textContent = `${result.matched ? "Matched" : "Below threshold"} · ${result.confidence.toFixed(3)} · ${result.scale.toFixed(2)}x · ${result.center.join(", ")}`;
+  if (state.screenMode !== "source") {
+    clearMatchOverlay();
+    return;
+  }
   const screenshotRect = els.screenshot.getBoundingClientRect();
   const stageRect = els.screenStage.getBoundingClientRect();
   const natural = state.screenshotNaturalSize;
@@ -910,6 +952,28 @@ function setScreenScale(mode) {
   }
 }
 
+function setScreenMode(mode) {
+  const nextMode = mode === "debug" && state.debugOverlayDataUrl ? "debug" : "source";
+  state.screenMode = nextMode;
+  els.screenSourceMode.classList.toggle("active", nextMode === "source");
+  els.screenDebugMode.classList.toggle("active", nextMode === "debug");
+  els.screenSourceMode.setAttribute("aria-pressed", String(nextMode === "source"));
+  els.screenDebugMode.setAttribute("aria-pressed", String(nextMode === "debug"));
+  const imageSource = nextMode === "debug" ? state.debugOverlayDataUrl : state.screenshotUrl;
+  if (imageSource) {
+    els.screenshot.src = imageSource;
+  }
+  if (nextMode === "source" && state.latestMatch) {
+    requestAnimationFrame(() => renderMatch(state.latestMatch));
+  } else {
+    clearMatchOverlay();
+  }
+  if (state.screenshotNaturalSize) {
+    els.screenMeta.textContent = `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${nextMode === "debug" ? "Debug" : "Source"}`;
+  }
+  updateControls();
+}
+
 function showError(error) {
   const message = error?.payload?.error?.message || error.message || "Request failed";
   const toast = document.createElement("div");
@@ -922,6 +986,17 @@ function showError(error) {
 
 function readNumber(input) {
   return Number(input.value || 0);
+}
+
+function readScales() {
+  const values = els.recognitionScales.value
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map(Number);
+  if (!values.length || values.some((value) => !Number.isFinite(value) || value <= 0)) {
+    throw new Error("Scales must be positive numbers separated by commas.");
+  }
+  return [...new Set(values)];
 }
 
 function formatTime(value) {

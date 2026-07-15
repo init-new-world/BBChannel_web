@@ -53,7 +53,21 @@
               <span>Threshold</span>
               <input id="threshold-input" class="field number-field" type="number" min="0" max="1" step="0.01" value="0.80">
             </label>
-            <button id="match-button" class="tool-button" type="button">Match</button>
+            <label class="input-row">
+              <span>Scales</span>
+              <input id="recognition-scales" class="field number-field" type="text" inputmode="decimal" value="1.0">
+            </label>
+            <label class="toggle-row">
+              <input id="recognition-roi-enabled" type="checkbox">
+              <span>Limit to ROI</span>
+            </label>
+            <div id="recognition-roi-controls" class="roi-grid" hidden>
+              <label><span>X</span><input id="recognition-roi-x" class="field" type="number" min="0" value="0"></label>
+              <label><span>Y</span><input id="recognition-roi-y" class="field" type="number" min="0" value="0"></label>
+              <label><span>W</span><input id="recognition-roi-width" class="field" type="number" min="1" value="1280"></label>
+              <label><span>H</span><input id="recognition-roi-height" class="field" type="number" min="1" value="720"></label>
+            </div>
+            <button id="match-button" class="tool-button" type="button">Visualize Match</button>
             <div id="match-result" class="result-box">No match</div>
           </section>
 
@@ -95,6 +109,10 @@
               <div id="screen-meta" class="screen-meta">No capture</div>
             </div>
             <div class="screen-actions">
+              <div class="segmented-control" role="group" aria-label="Screen mode">
+                <button id="screen-source-mode" class="segment active" type="button" aria-pressed="true">Source</button>
+                <button id="screen-debug-mode" class="segment" type="button" aria-pressed="false" disabled>Debug</button>
+              </div>
               <button id="fit-screen" class="ghost-button" type="button">Fit</button>
               <button id="actual-screen" class="ghost-button" type="button">100%</button>
             </div>
