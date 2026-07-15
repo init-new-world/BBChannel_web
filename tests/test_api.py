@@ -671,6 +671,127 @@ def test_setting_program_rejects_unhashable_skill_command_without_server_error(t
     }
 
 
+@pytest.mark.parametrize(
+    ("command", "expected_steps"),
+    [
+        (
+            ["Kukulkan", 2, 1, 3],
+            [
+                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Kukulkan_option_1", "x": 960, "y": 423},
+                {"type": "tap", "role": "skill_target_3", "x": 970, "y": 440},
+            ],
+        ),
+        (
+            ["Barghest", 3, 0],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Barghest_option_0", "x": 640, "y": 423},
+            ],
+        ),
+        (
+            ["Soujyuro", 3, "B"],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Soujyuro_option_B", "x": 1000, "y": 422},
+            ],
+        ),
+        (
+            ["BBDubai", 3, 0],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "BBDubai_option_0", "x": 483, "y": 390},
+            ],
+        ),
+        (
+            ["Hakuno", 3, "R"],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Hakuno_option_R", "x": 1000, "y": 422},
+            ],
+        ),
+        (
+            ["VanGoghMiner", 1, "B"],
+            [
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "VanGoghMiner_option_B", "x": 1000, "y": 422},
+            ],
+        ),
+        (
+            ["Dante", 2, "A"],
+            [
+                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Dante_option_A", "x": 640, "y": 423},
+            ],
+        ),
+        (
+            ["Gyokuto", 2, "One"],
+            [
+                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Gyokuto_option_One", "x": 960, "y": 423},
+            ],
+        ),
+        (
+            ["Charlotte", 3, "暴"],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Charlotte_option_暴", "x": 767, "y": 422},
+            ],
+        ),
+        (
+            ["Flora", 3, "D"],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "Flora_option_D", "x": 960, "y": 423},
+            ],
+        ),
+    ],
+)
+def test_setting_program_compiles_named_servant_skill_options(
+    tmp_path: Path,
+    command: list,
+    expected_steps: list[dict],
+):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "named-skill.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [command],
+        },
+    )
+
+    payload = client.get("/api/settings/named-skill/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    assert payload["rounds"][0]["turns"][0]["actions"][0]["steps"] == expected_steps
+
+
+def test_setting_program_marks_dynamic_hakuno_skill_unsupported(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "hakuno-dynamic.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [["Hakuno", 1, []]],
+        },
+    )
+
+    payload = client.get("/api/settings/hakuno-dynamic/program").json()
+
+    action = payload["rounds"][0]["turns"][0]["actions"][0]
+    assert action["supported"] is False
+    assert action["reason"] == "Dynamic Hakuno card selection is not implemented yet."
+
+
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

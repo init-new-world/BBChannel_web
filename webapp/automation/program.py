@@ -33,6 +33,20 @@ ENEMY_POINTS = tuple(
     (141 + 200 * (position % 3), 39 + 99 * (position // 3))
     for position in range(6)
 )
+TWO_CHOICE_POINTS = {0: (640, 423), 1: (960, 423)}
+CARD_TYPE_CHOICE_POINTS = {"Q": (537, 422), "A": (767, 422), "B": (1000, 422)}
+NAMED_SERVANT_OPTION_POINTS: dict[str, dict[Any, tuple[int, int]]] = {
+    "Kukulkan": TWO_CHOICE_POINTS,
+    "Barghest": TWO_CHOICE_POINTS,
+    "Soujyuro": CARD_TYPE_CHOICE_POINTS,
+    "BBDubai": {0: (483, 390), 1: (795, 390)},
+    "Hakuno": {"T": (537, 422), "D": (767, 422), "R": (1000, 422)},
+    "VanGoghMiner": CARD_TYPE_CHOICE_POINTS,
+    "Dante": {"A": (640, 423), "B": (960, 423)},
+    "Gyokuto": {"All": (640, 423), "One": (960, 423)},
+    "Charlotte": {"技": (537, 422), "暴": (767, 422), "宝": (1000, 422)},
+    "Flora": {"T": (640, 423), "D": (960, 423)},
+}
 
 
 def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
@@ -219,6 +233,9 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
     command_spell = _compile_command_spell(action, command)
     if command_spell is not None:
         return command_spell
+    named_servant_skill = _compile_named_servant_skill(action, command)
+    if named_servant_skill is not None:
+        return named_servant_skill
     special_skill = _compile_special_skill(action, command)
     if special_skill is not None:
         return special_skill
@@ -375,6 +392,58 @@ def _compile_command_spell(
             _tap(f"command_spell_target_{target}", target_x, target_y),
         ],
     )
+
+
+def _compile_named_servant_skill(
+    action: dict[str, Any],
+    command: Any,
+) -> dict[str, Any] | None:
+    if (
+        not isinstance(command, list)
+        or not command
+        or not isinstance(command[0], str)
+        or command[0] not in NAMED_SERVANT_OPTION_POINTS
+    ):
+        return None
+
+    name = command[0]
+    expected_lengths = {3, 4} if name == "Kukulkan" else {3}
+    if len(command) not in expected_lengths:
+        return _unsupported(action, f"{name} skill commands have an invalid length.")
+    skill = command[1]
+    if isinstance(skill, bool) or not isinstance(skill, int) or not 1 <= skill <= 9:
+        return _unsupported(action, "Named servant skills must be numbered 1 through 9.")
+
+    option = command[2]
+    if name == "Hakuno" and skill % 3 == 1:
+        return _unsupported(action, "Dynamic Hakuno card selection is not implemented yet.")
+    if name == "Hakuno" and skill % 3 != 0:
+        return _unsupported(action, "Hakuno option selection only applies to first or third skills.")
+    if name in {"Kukulkan", "Barghest", "BBDubai"} and isinstance(option, bool):
+        return _unsupported(action, f"{name} skill option must be 0 or 1.")
+    try:
+        option_point = NAMED_SERVANT_OPTION_POINTS[name].get(option)
+    except TypeError:
+        option_point = None
+    if option_point is None:
+        return _unsupported(action, f"Unknown {name} skill option.")
+
+    skill_x, skill_y = SERVANT_SKILL_POINTS[skill - 1]
+    steps = [
+        _tap(
+            f"servant_skill_{skill}",
+            skill_x,
+            skill_y,
+            wait_after_seconds=1.0,
+        ),
+        _tap(f"{name}_option_{option}", *option_point),
+    ]
+    if len(command) == 4:
+        target = command[3]
+        if isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 3:
+            return _unsupported(action, "Kukulkan targets must be servant positions 1 through 3.")
+        steps.append(_tap(f"skill_target_{target}", *SKILL_TARGET_POINTS[target - 1]))
+    return _supported(action, steps)
 
 
 def _compile_special_skill(
