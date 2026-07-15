@@ -77,8 +77,18 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
     _write_json(
         tmp_path / "servant_info_CH.json",
         {
-            "Servant A": {"other_name": [], "class": "Caster", "SN": "100"},
-            "Support B": {"other_name": ["B"], "class": "Rider", "SN": "101"},
+            "Servant A": {
+                "other_name": [],
+                "class": "Caster",
+                "SN": "100",
+                "NPcolor": "A",
+            },
+            "Support B": {
+                "other_name": ["B"],
+                "class": "Rider",
+                "SN": "101",
+                "NPcolor": "Q",
+            },
         },
     )
     strategy = _strategy_payload()
@@ -112,12 +122,12 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
     assert plan["server"] == "CH"
     assert plan["validation"]["ok"] is True
     assert plan["servants"] == [
-        {"slot": 0, "name": "Servant A", "active": True},
-        {"slot": 1, "name": "B", "active": True},
-        {"slot": 2, "name": None, "active": False},
-        {"slot": 3, "name": None, "active": False},
-        {"slot": 4, "name": None, "active": False},
-        {"slot": 5, "name": None, "active": False},
+        {"slot": 0, "name": "Servant A", "active": True, "sn": "100", "np_color": "A"},
+        {"slot": 1, "name": "B", "active": True, "sn": "101", "np_color": "Q"},
+        {"slot": 2, "name": None, "active": False, "sn": None, "np_color": None},
+        {"slot": 3, "name": None, "active": False, "sn": None, "np_color": None},
+        {"slot": 4, "name": None, "active": False, "sn": None, "np_color": None},
+        {"slot": 5, "name": None, "active": False, "sn": None, "np_color": None},
     ]
     assert plan["master"] == {"equip": 7, "sex": 1}
     assert plan["rounds"][0]["round"] == 1

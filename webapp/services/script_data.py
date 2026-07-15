@@ -351,14 +351,44 @@ class ScriptDataService:
             for slot in config.get("usedServant", [])
             if isinstance(slot, int)
         }
-        return [
-            {
-                "slot": slot,
-                "name": config.get(f"servant_{slot}_name"),
-                "active": slot in active_slots,
-            }
-            for slot in range(6)
-        ]
+        catalog_by_name: dict[str, dict[str, Any]] = {}
+        server = config.get("server")
+        if isinstance(server, str) and server.upper() in VALID_SERVERS:
+            for canonical_name, details in self._load_servant_catalog(server.upper()).items():
+                if not isinstance(details, dict):
+                    continue
+                catalog_by_name[canonical_name] = details
+                aliases = details.get("other_name")
+                if isinstance(aliases, list):
+                    for alias in aliases:
+                        if isinstance(alias, str):
+                            catalog_by_name[alias] = details
+
+        def metadata(name: Any) -> tuple[str | None, str | None]:
+            details = catalog_by_name.get(name) if isinstance(name, str) else None
+            if details is None:
+                return None, None
+            sn = details.get("SN")
+            np_color = details.get("NPcolor")
+            return (
+                str(sn) if isinstance(sn, (str, int)) else None,
+                np_color if isinstance(np_color, str) else None,
+            )
+
+        servants = []
+        for slot in range(6):
+            name = config.get(f"servant_{slot}_name")
+            sn, np_color = metadata(name)
+            servants.append(
+                {
+                    "slot": slot,
+                    "name": name,
+                    "active": slot in active_slots,
+                    "sn": sn,
+                    "np_color": np_color,
+                }
+            )
+        return servants
 
     def _build_rounds(self, config: dict[str, Any]) -> list[dict[str, Any]]:
         rounds: list[dict[str, Any]] = []
