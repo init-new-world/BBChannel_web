@@ -153,6 +153,44 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
     assert plan["summary"]["action_count"] == 5
 
 
+def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {"Support": {"other_name": ["Support Alias"], "SN": "314"}},
+    )
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_3_name": "Support Alias",
+            "assistMode": "从者礼装",
+            "assistIdx": 3,
+            "assistEquip": ["Event CE", None, "Bond CE"],
+            "fullEquip": 1,
+            "onlyFriendAssist": 0,
+            "NPlevel": 2,
+            "skillsLevel": [10, 9, 8, 0, 0, 0],
+            "scrollLimit": 0.96,
+        },
+    )
+
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+
+    assert plan["assist"] == {
+        "mode": "从者礼装",
+        "slot": 3,
+        "servant_name": "Support Alias",
+        "servant_canonical_name": "Support",
+        "servant_sn": "314",
+        "equip_names": ["Event CE", "Bond CE"],
+        "full_limit_break": True,
+        "friend_only": False,
+        "np_level": 2,
+        "skill_levels": [10, 9, 8],
+        "scroll_limit": 0.96,
+    }
+
+
 def test_get_setting_reports_unknown_servants(tmp_path: Path):
     _write_json(tmp_path / "servant_info_CH.json", {"Known": {"other_name": []}})
     _write_json(

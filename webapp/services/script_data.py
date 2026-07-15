@@ -92,6 +92,7 @@ class ScriptDataService:
             "path": detail["path"],
             "server": config.get("server"),
             "servants": self._plan_servants(config),
+            "assist": self._plan_assist(config),
             "master": {
                 "equip": config.get("master_equip"),
                 "sex": config.get("master_sex"),
@@ -384,6 +385,48 @@ class ScriptDataService:
                 }
             )
         return servants
+
+    def _plan_assist(self, config: dict[str, Any]) -> dict[str, Any]:
+        slot = config.get("assistIdx")
+        servant_name = config.get(f"servant_{slot}_name") if isinstance(slot, int) else None
+        canonical_name: str | None = None
+        servant_sn: str | None = None
+
+        server = config.get("server")
+        if isinstance(server, str) and server.upper() in VALID_SERVERS and isinstance(servant_name, str):
+            for name, details in self._load_servant_catalog(server.upper()).items():
+                if not isinstance(details, dict):
+                    continue
+                aliases = details.get("other_name")
+                if servant_name != name and not (isinstance(aliases, list) and servant_name in aliases):
+                    continue
+                canonical_name = name
+                sn = details.get("SN")
+                servant_sn = str(sn) if isinstance(sn, (str, int)) else None
+                break
+
+        equip_value = config.get("assistEquip")
+        if isinstance(equip_value, str):
+            equip_names = [equip_value] if equip_value else []
+        elif isinstance(equip_value, list):
+            equip_names = [name for name in equip_value if isinstance(name, str) and name]
+        else:
+            equip_names = []
+
+        skill_levels = config.get("skillsLevel")
+        return {
+            "mode": config.get("assistMode"),
+            "slot": slot,
+            "servant_name": servant_name,
+            "servant_canonical_name": canonical_name,
+            "servant_sn": servant_sn,
+            "equip_names": equip_names,
+            "full_limit_break": bool(config.get("fullEquip")),
+            "friend_only": bool(config.get("onlyFriendAssist")),
+            "np_level": config.get("NPlevel"),
+            "skill_levels": skill_levels[:3] if isinstance(skill_levels, list) else [],
+            "scroll_limit": config.get("scrollLimit"),
+        }
 
     def _build_rounds(self, config: dict[str, Any]) -> list[dict[str, Any]]:
         rounds: list[dict[str, Any]] = []
