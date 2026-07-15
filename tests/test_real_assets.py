@@ -56,3 +56,25 @@ def test_real_lfs_template_indexes_matches_and_renders_debug_overlay():
     assert result.roi == [120, 70, 120, 90]
     assert overlay.size == screenshot.size
     assert ImageChops.difference(screenshot, overlay).getbbox() is not None
+
+
+def test_real_command_card_template_matches_with_transparency():
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = ResourceService(PROJECT_ROOT / "assets", PROJECT_ROOT / "data")
+    template_path = "commands_CH/100100/card_servant_1.png"
+    with Image.open(resources.resolve_template(template_path)) as source:
+        template = source.convert("RGBA")
+    screenshot = Image.new("RGB", (500, 400), (40, 70, 110))
+    screenshot.paste(template, (140, 80), template)
+
+    result = RecognitionService(resources).match_template(
+        _png_bytes(screenshot),
+        template_path,
+        threshold=0.95,
+    )
+
+    assert result.matched is True
+    assert result.confidence >= 0.98
+    assert result.top_left == [140, 80]

@@ -160,15 +160,25 @@ class RecognitionService:
         roi: object = None,
         scales: object = None,
     ) -> MatchResult:
-        cv, _ = self._require_opencv()
+        cv, numpy = self._require_opencv()
         template_file = self._resources.resolve_template(template_path)
-        template_image = cv.imread(str(template_file), cv.IMREAD_COLOR)
-        if template_image is None:
+        template_source = cv.imread(str(template_file), cv.IMREAD_UNCHANGED)
+        if template_source is None:
             raise AppError(
                 ErrorCode.TEMPLATE_LOAD_FAILED,
                 f"Template image could not be loaded: {template_path}",
                 {"template_path": template_path},
             )
+        template_mask = None
+        if len(template_source.shape) == 3 and template_source.shape[2] == 4:
+            alpha = template_source[:, :, 3]
+            template_image = template_source[:, :, :3]
+            if int(alpha.min()) < 255:
+                template_mask = alpha
+        elif len(template_source.shape) == 2:
+            template_image = cv.cvtColor(template_source, cv.COLOR_GRAY2BGR)
+        else:
+            template_image = template_source
 
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
@@ -190,6 +200,7 @@ class RecognitionService:
                 continue
             if scaled_width == template_width and scaled_height == template_height:
                 scaled_template = template_image
+                scaled_mask = template_mask
             else:
                 interpolation = cv.INTER_AREA if scale < 1 else cv.INTER_LINEAR
                 scaled_template = cv.resize(
@@ -197,7 +208,34 @@ class RecognitionService:
                     (scaled_width, scaled_height),
                     interpolation=interpolation,
                 )
-            matches = cv.matchTemplate(search_image, scaled_template, cv.TM_CCOEFF_NORMED)
+                scaled_mask = (
+                    cv.resize(
+                        template_mask,
+                        (scaled_width, scaled_height),
+                        interpolation=cv.INTER_NEAREST,
+                    )
+                    if template_mask is not None
+                    else None
+                )
+            if scaled_mask is None:
+                matches = cv.matchTemplate(
+                    search_image,
+                    scaled_template,
+                    cv.TM_CCOEFF_NORMED,
+                )
+            else:
+                matches = cv.matchTemplate(
+                    search_image,
+                    scaled_template,
+                    cv.TM_CCORR_NORMED,
+                    mask=scaled_mask,
+                )
+                matches = numpy.nan_to_num(
+                    matches,
+                    nan=-1.0,
+                    posinf=-1.0,
+                    neginf=-1.0,
+                )
             _, confidence, _, max_location = cv.minMaxLoc(matches)
             candidate = (
                 float(confidence),

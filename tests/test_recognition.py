@@ -118,6 +118,29 @@ def test_match_template_selects_best_scale(tmp_path: Path):
     assert result.size == [24, 20]
 
 
+def test_match_template_uses_alpha_channel_as_mask(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = Image.new("RGBA", (30, 30), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((10, 10, 19, 19), fill=(255, 20, 20, 255))
+    draw.line((10, 10, 19, 19), fill=(20, 255, 20, 255), width=2)
+    template.save(resources.assets_dir / "alpha.png")
+    screenshot = Image.new("RGB", (100, 70), (40, 90, 140))
+    screenshot.paste(template, (45, 22), template)
+
+    result = RecognitionService(resources).match_template(
+        _png_bytes(screenshot),
+        "alpha.png",
+        threshold=0.95,
+    )
+
+    assert result.matched is True
+    assert result.top_left == [45, 22]
+
+
 def test_match_templates_decodes_screenshot_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     cv = pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService
