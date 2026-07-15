@@ -1,3 +1,4 @@
+from webapp.automation.assist import ASSIST_SELECT_JOB_KIND, register_assist_job
 from webapp.automation.battle import (
     BATTLE_DRY_RUN_JOB_KIND,
     BATTLE_EXECUTE_PLAN_JOB_KIND,
@@ -8,10 +9,12 @@ from webapp.automation.diagnostic import register_diagnostic_job
 from webapp.automation.program import compile_battle_program
 
 __all__ = [
+    "ASSIST_SELECT_JOB_KIND",
     "BATTLE_DRY_RUN_JOB_KIND",
     "BATTLE_EXECUTE_PLAN_JOB_KIND",
     "BATTLE_EXECUTE_SKILLS_JOB_KIND",
     "compile_battle_program",
+    "register_assist_job",
     "register_battle_jobs",
     "register_diagnostic_job",
 ]

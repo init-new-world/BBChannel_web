@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from webapp.api import create_job_router
 from webapp.automation import (
     compile_battle_program,
+    register_assist_job,
     register_battle_jobs,
     register_diagnostic_job,
 )
@@ -24,6 +25,7 @@ from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager
 from webapp.services.cards import CommandCardRecognizer
+from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
@@ -116,6 +118,7 @@ def create_app(
         frame_normalizer=FrameNormalizer(),
     )
     recognition = RecognitionService(resources)
+    assist_recognizer = AssistRecognizer(resources, recognition)
     card_recognizer = CommandCardRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
@@ -126,6 +129,12 @@ def create_app(
         )
         job_manager = JobManager(JobDatabase(runtime_db_path or default_db_path))
     register_diagnostic_job(job_manager, device_service, recognition)
+    register_assist_job(
+        job_manager,
+        script_data,
+        device_service,
+        assist_recognizer,
+    )
     register_battle_jobs(
         job_manager,
         script_data,
@@ -154,6 +163,7 @@ def create_app(
     app.state.resources = resources
     app.state.device_service = device_service
     app.state.recognition = recognition
+    app.state.assist_recognizer = assist_recognizer
     app.state.card_recognizer = card_recognizer
     app.state.script_data = script_data
     app.state.job_manager = job_manager
