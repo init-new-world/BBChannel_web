@@ -94,7 +94,7 @@ const els = {
   battleProgramStatus: document.querySelector("#battle-program-status"),
   battleActionDelay: document.querySelector("#battle-action-delay"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
-  startBattleSkills: document.querySelector("#start-battle-skills"),
+  startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
   jobStatus: document.querySelector("#job-status"),
   jobKind: document.querySelector("#job-kind"),
@@ -191,7 +191,7 @@ function bindEvents() {
   els.screenStage.addEventListener("click", populateTapFromClick);
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
-  els.startBattleSkills.addEventListener("click", startBattleSkills);
+  els.startBattlePlan.addEventListener("click", startBattlePlan);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -670,12 +670,12 @@ async function startBattleDryRun() {
   });
 }
 
-async function startBattleSkills() {
+async function startBattlePlan() {
   const settingName = els.settingSelect.value;
-  if (!settingName || !state.selectedSettingProgram?.execution?.skills?.ready) {
+  if (!settingName || !state.selectedSettingProgram?.execution?.battle?.ready) {
     return;
   }
-  await enqueueJob("battle.execute-skills", {
+  await enqueueJob("battle.execute-plan", {
     setting_name: settingName,
     tap_interval_seconds: Number(els.battleActionDelay.value),
   });
@@ -981,9 +981,9 @@ function renderBattleProgram(program) {
     return;
   }
   const summary = program.summary;
-  const execution = program.execution?.skills;
+  const execution = program.execution?.battle;
   if (execution?.ready) {
-    els.battleProgramStatus.textContent = `Ready · ${summary.supported_action_count} actions · ${summary.tap_count} taps`;
+    els.battleProgramStatus.textContent = `Ready · ${summary.supported_action_count} actions · ${summary.execution_tap_count} taps`;
     els.battleProgramStatus.classList.add("ok");
     return;
   }
@@ -1053,8 +1053,8 @@ function updateControls() {
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
-  els.startBattleSkills.disabled = !state.connected
-    || !state.selectedSettingProgram?.execution?.skills?.ready
+  els.startBattlePlan.disabled = !state.connected
+    || !state.selectedSettingProgram?.execution?.battle?.ready
     || hasRunningJob;
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
