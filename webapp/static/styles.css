@@ -613,6 +613,11 @@ select:disabled {
   overflow-wrap: anywhere;
 }
 
+.job-result {
+  min-height: 0;
+  overflow-wrap: anywhere;
+}
+
 .job-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

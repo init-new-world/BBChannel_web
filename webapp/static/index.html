@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>BBchannel Console</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -140,10 +141,16 @@
             <div id="battle-script-name" class="job-kind">No script selected</div>
             <div id="battle-program-status" class="status-line">No program</div>
             <label class="input-row">
+              <span>Run count</span>
+              <input id="full-run-count" class="field number-field" type="number" min="1" max="10000" step="1" value="1">
+            </label>
+            <button id="start-full-run" class="primary-button wide" type="button">Start Full Run</button>
+            <div class="panel-divider"></div>
+            <label class="input-row">
               <span>Action delay</span>
               <input id="battle-action-delay" class="field number-field" type="number" min="0" max="10" step="0.05" value="0">
             </label>
-            <button id="start-battle-dry-run" class="primary-button wide" type="button">Dry Run Script</button>
+            <button id="start-battle-dry-run" class="ghost-button wide" type="button">Dry Run Script</button>
             <button id="start-battle-plan" class="ghost-button wide" type="button">Execute Battle</button>
             <div class="panel-divider"></div>
             <div class="section-label">Diagnostic Job</div>
@@ -171,6 +178,7 @@
             <div id="job-kind" class="job-kind">No job selected</div>
             <progress id="job-progress" class="job-progress" max="1"></progress>
             <div id="job-step" class="job-step">Waiting</div>
+            <div id="job-result" class="result-box job-result" hidden></div>
             <div class="job-actions">
               <button id="pause-job" class="ghost-button" type="button">Pause</button>
               <button id="resume-job" class="ghost-button" type="button">Resume</button>

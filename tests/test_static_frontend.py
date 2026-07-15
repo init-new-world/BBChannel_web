@@ -46,12 +46,15 @@ def test_operator_console_references_api_controls():
     assert 'id="start-battle-dry-run"' in index
     assert 'id="battle-program-status"' in index
     assert 'id="start-battle-plan"' in index
+    assert 'id="full-run-count"' in index
+    assert 'id="start-full-run"' in index
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
     assert 'id="pause-job"' in index
     assert 'id="resume-job"' in index
     assert 'id="cancel-job"' in index
     assert 'id="job-events"' in index
+    assert 'id="job-result"' in index
     assert "/api/capabilities" in script
     assert "/api/adb/connect-endpoint" in script
     assert "/api/settings" in script
@@ -69,6 +72,8 @@ def test_operator_console_references_api_controls():
     assert "/api/jobs" in script
     assert "battle.dry-run" in script
     assert "battle.execute-plan" in script
+    assert "battle.run" in script
+    assert "max_runs" in script
     assert "execution?.battle" in script
     assert "/program" in script
     assert "/events/stream" in script

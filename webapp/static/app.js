@@ -93,6 +93,8 @@ const els = {
   battleScriptName: document.querySelector("#battle-script-name"),
   battleProgramStatus: document.querySelector("#battle-program-status"),
   battleActionDelay: document.querySelector("#battle-action-delay"),
+  fullRunCount: document.querySelector("#full-run-count"),
+  startFullRun: document.querySelector("#start-full-run"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -100,6 +102,7 @@ const els = {
   jobKind: document.querySelector("#job-kind"),
   jobProgress: document.querySelector("#job-progress"),
   jobStep: document.querySelector("#job-step"),
+  jobResult: document.querySelector("#job-result"),
   pauseJob: document.querySelector("#pause-job"),
   resumeJob: document.querySelector("#resume-job"),
   cancelJob: document.querySelector("#cancel-job"),
@@ -192,6 +195,7 @@ function bindEvents() {
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.startBattlePlan.addEventListener("click", startBattlePlan);
+  els.startFullRun.addEventListener("click", startFullRun);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -681,6 +685,20 @@ async function startBattlePlan() {
   });
 }
 
+async function startFullRun() {
+  const settingName = els.settingSelect.value;
+  if (!settingName || !state.selectedSettingProgram?.execution?.battle?.ready) {
+    return;
+  }
+  await enqueueJob("battle.run", {
+    setting_name: settingName,
+    max_runs: readNumber(els.fullRunCount),
+    battle: {
+      tap_interval_seconds: Number(els.battleActionDelay.value),
+    },
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -889,6 +907,29 @@ function renderJob(job) {
     els.jobError.hidden = true;
     els.jobError.textContent = "";
   }
+  renderJobResult(job);
+}
+
+function renderJobResult(job) {
+  const result = job?.result;
+  if (!result) {
+    els.jobResult.hidden = true;
+    els.jobResult.textContent = "";
+    return;
+  }
+  els.jobResult.hidden = false;
+  if (job.kind === "battle.run") {
+    const lines = [
+      `${result.runs_completed || 0}/${result.max_runs || 0} runs`,
+      `${result.drop_count || 0} configured drops`,
+    ];
+    if (result.reason) {
+      lines.push(`Stopped: ${String(result.reason).replaceAll("_", " ")}`);
+    }
+    els.jobResult.textContent = lines.join(" · ");
+    return;
+  }
+  els.jobResult.textContent = "Completed";
 }
 
 function renderJobEvents() {
@@ -1054,6 +1095,9 @@ function updateControls() {
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
+    || !state.selectedSettingProgram?.execution?.battle?.ready
+    || hasRunningJob;
+  els.startFullRun.disabled = !state.connected
     || !state.selectedSettingProgram?.execution?.battle?.ready
     || hasRunningJob;
   els.pauseJob.disabled = selectedJobStatus !== "running";
