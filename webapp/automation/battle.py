@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from time import monotonic
 from typing import Any
 
@@ -21,6 +22,125 @@ from webapp.services.script_data import ScriptDataService
 BATTLE_DRY_RUN_JOB_KIND = "battle.dry-run"
 BATTLE_EXECUTE_PLAN_JOB_KIND = "battle.execute-plan"
 BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
+
+
+def _matches_hakuno_needs(
+    cards: list[dict[str, Any]],
+    need_cards: list[list[str]],
+) -> bool:
+    available = Counter(
+        card["code"]
+        for card in cards
+        if isinstance(card.get("code"), str)
+    )
+    return any(
+        all(available[code] >= count for code, count in Counter(need).items())
+        for need in need_cards
+    )
+
+
+def _execute_hakuno_reroll(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer,
+    server: str,
+    servants: list[dict[str, Any]],
+    runtime: dict[str, Any],
+    card_templates: list[str],
+    attack_template: str,
+    threshold: float,
+    timeout_seconds: float,
+    poll_interval: float,
+    tap_interval: float,
+) -> int:
+    tap_count = 0
+    need_cards = runtime["need_cards"]
+    max_rerolls = int(runtime["max_rerolls"])
+    for check_number in range(1, max_rerolls + 2):
+        _wait_for_battle_ready(
+            context,
+            device_service,
+            recognition,
+            attack_template,
+            threshold,
+            timeout_seconds,
+            poll_interval,
+        )
+        tap_count += _execute_steps(
+            context,
+            device_service,
+            [
+                {
+                    "type": "tap",
+                    "role": "hakuno_check_attack",
+                    "x": ATTACK_POINT[0],
+                    "y": ATTACK_POINT[1],
+                }
+            ],
+            tap_interval,
+        )
+        screenshot = _wait_for_command_cards(
+            context,
+            device_service,
+            recognition,
+            card_templates,
+            threshold,
+            timeout_seconds,
+            poll_interval,
+        )
+        recognized = card_recognizer.recognize(
+            screenshot,
+            server,
+            servants,
+            threshold=threshold,
+        )
+        matched = _matches_hakuno_needs(recognized["cards"], need_cards)
+        tap_count += _execute_steps(
+            context,
+            device_service,
+            [
+                {
+                    "type": "tap",
+                    "role": "hakuno_check_back",
+                    "x": COMMAND_CARD_BACK_POINT[0],
+                    "y": COMMAND_CARD_BACK_POINT[1],
+                }
+            ],
+            tap_interval,
+        )
+        context.emit(
+            "hakuno_card_check",
+            "Hakuno card requirement check completed.",
+            data={
+                "check": check_number,
+                "matched": matched,
+                "need_cards": need_cards,
+                "recognition": recognized,
+            },
+        )
+        if matched:
+            return tap_count
+        if check_number > max_rerolls:
+            raise RuntimeError(
+                f"Hakuno card requirements were not met after {max_rerolls} rerolls."
+            )
+        _wait_for_battle_ready(
+            context,
+            device_service,
+            recognition,
+            attack_template,
+            threshold,
+            timeout_seconds,
+            poll_interval,
+        )
+        tap_count += _execute_steps(
+            context,
+            device_service,
+            [runtime["skill_step"]],
+            tap_interval,
+        )
+    raise AssertionError("Hakuno reroll loop exited unexpectedly.")
 
 
 def register_battle_jobs(
@@ -110,7 +230,12 @@ def register_battle_jobs(
     ):
         job_manager.register(
             BATTLE_EXECUTE_SKILLS_JOB_KIND,
-            _execute_skills_handler(script_data, device_service, recognition),
+            _execute_skills_handler(
+                script_data,
+                device_service,
+                recognition,
+                card_recognizer,
+            ),
             requires_device=True,
         )
     if (
@@ -153,6 +278,11 @@ def _execute_plan_handler(
             for step in turn["command_phase"]["steps"]
         ) or any(
             action.get("control", {}).get("check_cards")
+            for round_plan in program["rounds"]
+            for turn in round_plan["turns"]
+            for action in turn["actions"]
+        ) or any(
+            action.get("runtime", {}).get("type") == "hakuno_card_reroll"
             for round_plan in program["rounds"]
             for turn in round_plan["turns"]
             for action in turn["actions"]
@@ -230,6 +360,24 @@ def _execute_plan_handler(
                     f"round_{round_number}.turn_{turn['turn']}.skill_{skill_number}",
                     progress=(turn_number - 1) / max(len(turns), 1),
                 )
+                runtime = action.get("runtime")
+                if runtime and runtime["type"] == "hakuno_card_reroll":
+                    tap_count += _execute_hakuno_reroll(
+                        context,
+                        device_service,
+                        recognition,
+                        card_recognizer,
+                        program["server"],
+                        _frontline_servants(servant_positions),
+                        runtime,
+                        card_templates,
+                        attack_template,
+                        threshold,
+                        timeout_seconds,
+                        poll_interval,
+                        tap_interval,
+                    )
+                    continue
                 _wait_for_battle_ready(
                     context,
                     device_service,
@@ -517,13 +665,15 @@ def _execute_skills_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None,
 ):
     def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
         threshold, timeout_seconds, poll_interval, tap_interval = _execution_options(
             payload
         )
-        program = compile_battle_program(script_data.get_setting_plan(setting_name))
+        plan = script_data.get_setting_plan(setting_name)
+        program = compile_battle_program(plan)
         execution_status = program["execution"]["skills"]
         if not execution_status["ready"]:
             raise ValueError(execution_status["reason"])
@@ -534,13 +684,42 @@ def _execute_skills_handler(
             for turn in round_plan["turns"]
             for action in turn["actions"]
         ]
+        has_hakuno_reroll = any(
+            action.get("runtime", {}).get("type") == "hakuno_card_reroll"
+            for action in actions
+        )
+        if has_hakuno_reroll and card_recognizer is None:
+            raise ValueError("Command card recognition is not configured.")
         attack_template = f"battle/{program['server']}/attack.png"
+        card_templates = [
+            f"battle/{program['server']}/{card_type}.png"
+            for card_type in ("Arts", "Buster", "Quick")
+        ]
+        servant_positions = _servant_positions(plan["servants"])
         tap_count = 0
         for action_number, action in enumerate(actions, start=1):
             context.checkpoint(
                 f"skill_{action_number}.wait_for_battle",
                 progress=(action_number - 1) / max(len(actions), 1),
             )
+            runtime = action.get("runtime")
+            if runtime and runtime["type"] == "hakuno_card_reroll":
+                tap_count += _execute_hakuno_reroll(
+                    context,
+                    device_service,
+                    recognition,
+                    card_recognizer,
+                    program["server"],
+                    _frontline_servants(servant_positions),
+                    runtime,
+                    card_templates,
+                    attack_template,
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    tap_interval,
+                )
+                continue
             _wait_for_battle_ready(
                 context,
                 device_service,

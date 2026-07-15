@@ -771,7 +771,40 @@ def test_setting_program_compiles_named_servant_skill_options(
     assert payload["rounds"][0]["turns"][0]["actions"][0]["steps"] == expected_steps
 
 
-def test_setting_program_marks_dynamic_hakuno_skill_unsupported(tmp_path: Path):
+@pytest.mark.parametrize(
+    ("needs", "expected_steps", "expected_runtime"),
+    [
+        (
+            [],
+            [
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 1.0},
+            ],
+            None,
+        ),
+        (
+            [["1B", "2A"], ["3Q"]],
+            [],
+            {
+                "type": "hakuno_card_reroll",
+                "need_cards": [["1B", "2A"], ["3Q"]],
+                "skill_step": {
+                    "type": "tap",
+                    "role": "servant_skill_1",
+                    "x": 70,
+                    "y": 590,
+                    "wait_after_seconds": 1.0,
+                },
+                "max_rerolls": 3,
+            },
+        ),
+    ],
+)
+def test_setting_program_compiles_dynamic_hakuno_skill(
+    tmp_path: Path,
+    needs: list,
+    expected_steps: list[dict],
+    expected_runtime: dict | None,
+):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)
     _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
@@ -781,15 +814,17 @@ def test_setting_program_marks_dynamic_hakuno_skill_unsupported(tmp_path: Path):
             "server": "CH",
             "servant_0_name": "Servant A",
             "round1_turns": 1,
-            "round1_turn0_skill": [["Hakuno", 1, []]],
+            "round1_turn0_skill": [["Hakuno", 1, needs]],
         },
     )
 
     payload = client.get("/api/settings/hakuno-dynamic/program").json()
 
     action = payload["rounds"][0]["turns"][0]["actions"][0]
-    assert action["supported"] is False
-    assert action["reason"] == "Dynamic Hakuno card selection is not implemented yet."
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    assert action["supported"] is True
+    assert action["steps"] == expected_steps
+    assert action.get("runtime") == expected_runtime
 
 
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):

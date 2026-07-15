@@ -416,7 +416,27 @@ def _compile_named_servant_skill(
 
     option = command[2]
     if name == "Hakuno" and skill % 3 == 1:
-        return _unsupported(action, "Dynamic Hakuno card selection is not implemented yet.")
+        if not isinstance(option, list) or any(
+            not isinstance(need, list)
+            or any(not isinstance(card, str) or not card for card in need)
+            for need in option
+        ):
+            return _unsupported(action, "Hakuno card needs must be a list of card-code lists.")
+        skill_step = _tap(
+            f"servant_skill_{skill}",
+            *SERVANT_SKILL_POINTS[skill - 1],
+            wait_after_seconds=1.0,
+        )
+        if not option:
+            return _supported(action, [skill_step])
+        result = _supported(action, [])
+        result["runtime"] = {
+            "type": "hakuno_card_reroll",
+            "need_cards": option,
+            "skill_step": skill_step,
+            "max_rerolls": 3,
+        }
+        return result
     if name == "Hakuno" and skill % 3 != 0:
         return _unsupported(action, "Hakuno option selection only applies to first or third skills.")
     if name in {"Kukulkan", "Barghest", "BBDubai"} and isinstance(option, bool):

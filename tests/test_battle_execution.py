@@ -12,8 +12,10 @@ from webapp.app import create_app
 from webapp.automation.battle import (
     _apply_servant_exchange,
     _apply_servant_replacements,
+    _execute_hakuno_reroll,
     _evaluate_card_condition,
     _frontline_servants,
+    _matches_hakuno_needs,
     register_battle_jobs,
 )
 from webapp.devices.coordinates import FrameNormalizer
@@ -69,6 +71,216 @@ def test_servant_exchange_swaps_runtime_positions_immediately():
         "One",
         "Five",
         "Six",
+    ]
+
+
+def test_hakuno_card_needs_match_unordered_alternatives_with_duplicate_counts():
+    cards = [
+        {"code": "1B"},
+        {"code": "2A"},
+        {"code": "1B"},
+        {"code": "3Q"},
+        {"code": None},
+    ]
+
+    assert _matches_hakuno_needs(cards, [["2B"], ["2A", "1B", "1B"]]) is True
+    assert _matches_hakuno_needs(cards, [["1B", "1B", "1B"]]) is False
+
+
+def test_hakuno_reroll_casts_skill_until_card_need_matches():
+    taps = []
+    events = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        matched = True
+        confidence = 1.0
+
+        def to_dict(self):
+            return {"matched": True, "confidence": 1.0}
+
+    class Recognition:
+        def match_template(self, *_args):
+            return Match()
+
+        def match_templates(self, _screenshot, candidates):
+            return [Match() for _ in candidates]
+
+    class Cards:
+        calls = 0
+
+        def recognize(self, _screenshot, _server, _servants, *, threshold):
+            assert threshold == 0.75
+            self.calls += 1
+            codes = ["1B", "3Q"] if self.calls == 1 else ["1B", "2A"]
+            return {
+                "complete": True,
+                "cards": [{"code": code} for code in codes],
+            }
+
+    class Context:
+        def emit(self, event_type, message, *, data):
+            events.append((event_type, message, data))
+
+        def sleep(self, _seconds):
+            pass
+
+    card_recognizer = Cards()
+    tap_count = _execute_hakuno_reroll(
+        Context(),
+        Device(),
+        Recognition(),
+        card_recognizer,
+        "CH",
+        [{"slot": 0, "name": "Hakuno", "active": True, "sn": "1"}],
+        {
+            "type": "hakuno_card_reroll",
+            "need_cards": [["1B", "2A"]],
+            "skill_step": {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590},
+            "max_rerolls": 3,
+        },
+        ["battle/CH/Arts.png", "battle/CH/Buster.png", "battle/CH/Quick.png"],
+        "battle/CH/attack.png",
+        0.75,
+        1.0,
+        0.01,
+        0,
+    )
+
+    assert tap_count == 5
+    assert card_recognizer.calls == 2
+    assert taps == [
+        (1150, 600),
+        (1250, 683),
+        (70, 590),
+        (1150, 600),
+        (1250, 683),
+    ]
+    checks = [event for event in events if event[0] == "hakuno_card_check"]
+    assert [event[2]["matched"] for event in checks] == [False, True]
+
+
+@pytest.mark.parametrize(
+    ("job_kind", "expected_result"),
+    [
+        (
+            "battle.execute-plan",
+            {
+                "setting_name": "hakuno",
+                "turn_count": 1,
+                "action_count": 1,
+                "tap_count": 9,
+            },
+        ),
+        (
+            "battle.execute-skills",
+            {
+                "setting_name": "hakuno",
+                "action_count": 1,
+                "tap_count": 5,
+            },
+        ),
+    ],
+)
+def test_battle_jobs_run_dynamic_hakuno_reroll(
+    tmp_path: Path,
+    job_kind: str,
+    expected_result: dict,
+):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"Hakuno": {"other_name": [], "id": "1"}}),
+        encoding="utf-8",
+    )
+    (data / "settings" / "hakuno.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Hakuno",
+                "round1_turns": 1,
+                "round1_turn0_skill": [["Hakuno", 1, [["1B", "2A"]]]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        matched = True
+        confidence = 1.0
+
+        def to_dict(self):
+            return {"matched": True, "confidence": 1.0}
+
+    class Recognition:
+        def match_template(self, *_args):
+            return Match()
+
+        def match_templates(self, _screenshot, candidates):
+            return [Match() for _ in candidates]
+
+    class Cards:
+        calls = 0
+
+        def recognize(self, _screenshot, _server, _servants, *, threshold):
+            self.calls += 1
+            codes = ["1B", "3Q"] if self.calls == 1 else ["1B", "2A"]
+            return {"complete": True, "cards": [{"code": code} for code in codes]}
+
+    cards = Cards()
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            Recognition(),
+            cards,
+        )
+        job = manager.start(
+            job_kind,
+            {
+                "setting_name": "hakuno",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:hakuno",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result == expected_result
+    assert cards.calls == 2
+    assert taps[:5] == [
+        (1150, 600),
+        (1250, 683),
+        (70, 590),
+        (1150, 600),
+        (1250, 683),
     ]
 
 
