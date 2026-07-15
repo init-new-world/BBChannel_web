@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from typing import Any
+
+from webapp.services.recognition import RecognitionService
+from webapp.services.resources import ResourceService
+
+
+CARD_SLOT_ROIS = tuple((slot * 256, 340, 256, 330) for slot in range(5))
+CARD_TEMPLATE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+COLOR_TEMPLATES = {
+    "B": "Buster.png",
+    "A": "Arts.png",
+    "Q": "Quick.png",
+}
+
+
+class CommandCardRecognizer:
+    def __init__(
+        self,
+        resources: ResourceService,
+        recognition: RecognitionService,
+    ) -> None:
+        self._resources = resources
+        self._recognition = recognition
+
+    def recognize(
+        self,
+        screenshot: bytes,
+        server: str,
+        servants: list[dict[str, Any]],
+        *,
+        threshold: float = 0.7,
+    ) -> dict[str, Any]:
+        normalized_server = server.upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError(f"Unsupported server: {server}")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        active_servants = [servant for servant in servants if servant.get("active") and servant.get("sn")]
+        if not active_servants:
+            active_servants = [servant for servant in servants if servant.get("sn")][:3]
+        active_servants = active_servants[:3]
+
+        servant_templates: list[tuple[int, dict[str, Any], str]] = []
+        for position, servant in enumerate(active_servants, start=1):
+            prefix = f"commands_{normalized_server}/{servant['sn']}"
+            page = self._resources.template_index(prefix=prefix, limit=1000)
+            for entry in page["entries"]:
+                template_path = str(entry["path"])
+                filename = template_path.rsplit("/", 1)[-1]
+                if filename.startswith("card_servant_") and filename != "card_servant_np.png":
+                    servant_templates.append((position, servant, template_path))
+
+        candidates: list[dict[str, object]] = []
+        candidate_meta: list[tuple[str, int, Any]] = []
+        for slot_index, roi in enumerate(CARD_SLOT_ROIS):
+            for color, filename in COLOR_TEMPLATES.items():
+                candidates.append(
+                    {
+                        "template_path": f"battle/{normalized_server}/{filename}",
+                        "threshold": threshold,
+                        "roi": roi,
+                        "scales": CARD_TEMPLATE_SCALES,
+                    }
+                )
+                candidate_meta.append(("color", slot_index, color))
+            for position, servant, template_path in servant_templates:
+                candidates.append(
+                    {
+                        "template_path": template_path,
+                        "threshold": threshold,
+                        "roi": roi,
+                        "scales": CARD_TEMPLATE_SCALES,
+                    }
+                )
+                candidate_meta.append(
+                    (
+                        "servant",
+                        slot_index,
+                        {
+                            "position": position,
+                            "name": servant.get("name"),
+                            "sn": str(servant["sn"]),
+                        },
+                    )
+                )
+
+        matches = self._recognition.match_templates(screenshot, candidates)
+        grouped: list[dict[str, list[tuple[Any, Any]]]] = [
+            {"color": [], "servant": []} for _ in CARD_SLOT_ROIS
+        ]
+        for meta, match in zip(candidate_meta, matches, strict=True):
+            kind, slot_index, value = meta
+            grouped[slot_index][kind].append((value, match))
+
+        cards = []
+        for slot_index, groups in enumerate(grouped):
+            color_value, color_match = _best_match(groups["color"])
+            servant_value, servant_match = _best_match(groups["servant"])
+            recognized = color_match is not None and servant_match is not None
+            cards.append(
+                {
+                    "slot": slot_index + 1,
+                    "code": (
+                        f"{servant_value['position']}{color_value}" if recognized else None
+                    ),
+                    "color": color_value if color_match is not None else None,
+                    "servant_position": (
+                        servant_value["position"] if servant_match is not None else None
+                    ),
+                    "servant_name": (
+                        servant_value["name"] if servant_match is not None else None
+                    ),
+                    "servant_sn": servant_value["sn"] if servant_match is not None else None,
+                    "color_confidence": (
+                        color_match.confidence if color_match is not None else None
+                    ),
+                    "servant_confidence": (
+                        servant_match.confidence if servant_match is not None else None
+                    ),
+                    "color_template": (
+                        color_match.template_path if color_match is not None else None
+                    ),
+                    "servant_template": (
+                        servant_match.template_path if servant_match is not None else None
+                    ),
+                }
+            )
+
+        recognized_count = sum(card["code"] is not None for card in cards)
+        return {
+            "server": normalized_server,
+            "cards": cards,
+            "recognized_count": recognized_count,
+            "complete": recognized_count == len(CARD_SLOT_ROIS),
+        }
+
+
+def _best_match(candidates: list[tuple[Any, Any]]) -> tuple[Any, Any | None]:
+    matched = [(value, result) for value, result in candidates if result.matched]
+    if not matched:
+        return None, None
+    return max(matched, key=lambda item: item[1].confidence)
