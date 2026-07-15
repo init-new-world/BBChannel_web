@@ -90,6 +90,7 @@ def test_hakuno_card_needs_match_unordered_alternatives_with_duplicate_counts():
 
 
 def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
+    taps = []
     sleeps = []
 
     class Operation:
@@ -97,7 +98,8 @@ def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
             return {"ok": True}
 
     class Device:
-        def tap(self, _x, _y):
+        def tap(self, x, y):
+            taps.append((x, y))
             return Operation()
 
     class Context:
@@ -112,6 +114,11 @@ def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
         "webapp.automation.battle.random.random",
         lambda: next(random_values),
     )
+    touch_values = iter((0, 8, 0, 3))
+    monkeypatch.setattr(
+        "webapp.automation.interaction.random.randint",
+        lambda _lower, _upper: next(touch_values),
+    )
 
     _execute_steps(
         Context(),
@@ -122,8 +129,10 @@ def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
         ],
         0.1,
         random_time=0.4,
+        random_touch=True,
     )
 
+    assert taps == [(0, 8), (0, 3)]
     assert sleeps == pytest.approx([0.2, 0.4])
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any
 
+from webapp.automation.interaction import match_touch_point
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
@@ -33,6 +34,7 @@ def create_battle_entry_handler(
         if not isinstance(recover_ap, bool):
             raise ValueError("recover_ap must be a boolean.")
         plan = script_data.get_setting_plan(setting_name.strip())
+        random_touch = bool(plan["run"].get("random_touch"))
         server = str(plan["server"]).upper()
         template_roles = (
             ("battle_ready", f"battle/{server}/attack.png"),
@@ -89,7 +91,9 @@ def create_battle_entry_handler(
                 }
             if matched_role == "apple_close" and matched_result is not None:
                 if not recover_ap:
-                    operation = device_service.tap(*matched_result.center)
+                    operation = device_service.tap(
+                        *match_touch_point(matched_result, enabled=random_touch)
+                    )
                     actions.append("apple_close")
                     context.emit(
                         "device_action",
@@ -113,7 +117,9 @@ def create_battle_entry_handler(
                 if apple_match is None:
                     raise RuntimeError("No available AP recovery item was recognized.")
                 apple_name, apple_result = apple_match
-                operation = device_service.tap(*apple_result.center)
+                operation = device_service.tap(
+                    *match_touch_point(apple_result, enabled=random_touch)
+                )
                 action = f"apple_{apple_name}"
                 actions.append(action)
                 context.emit(
@@ -124,7 +130,9 @@ def create_battle_entry_handler(
                 context.sleep(action_wait_seconds)
                 continue
             if matched_role is not None and matched_result is not None:
-                operation = device_service.tap(*matched_result.center)
+                operation = device_service.tap(
+                    *match_touch_point(matched_result, enabled=random_touch)
+                )
                 actions.append(matched_role)
                 context.emit(
                     "device_action",

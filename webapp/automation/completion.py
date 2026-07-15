@@ -4,6 +4,7 @@ import hashlib
 from time import monotonic
 from typing import Any
 
+from webapp.automation.interaction import match_touch_point
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
@@ -40,6 +41,7 @@ def create_completion_handler(
         ):
             raise ValueError("initial_drop_count must be a non-negative integer.")
         plan = script_data.get_setting_plan(setting_name.strip())
+        random_touch = bool(plan["run"].get("random_touch"))
         server = str(plan["server"]).upper()
         drop_limit = int(plan["run"]["drop_stop_num"])
         drop_template = _resolve_drop_template(
@@ -127,7 +129,9 @@ def create_completion_handler(
             )
             if run_again is not None and run_again.matched:
                 if repeat:
-                    operation = device_service.tap(*run_again.center)
+                    operation = device_service.tap(
+                        *match_touch_point(run_again, enabled=random_touch)
+                    )
                     actions.append("run_again")
                     context.emit(
                         "device_action",
@@ -155,7 +159,9 @@ def create_completion_handler(
                 f"battle/{server}/relationship_up.png",
             )
             if relationship_up is not None and relationship_up.matched:
-                operation = device_service.tap(*relationship_up.center)
+                operation = device_service.tap(
+                    *match_touch_point(relationship_up, enabled=random_touch)
+                )
                 actions.append("relationship_up")
                 context.emit(
                     "device_action",
@@ -171,7 +177,9 @@ def create_completion_handler(
                 f"battle/{server}/next.png",
             )
             if next_button is not None and next_button.matched:
-                operation = device_service.tap(*next_button.center)
+                operation = device_service.tap(
+                    *match_touch_point(next_button, enabled=random_touch)
+                )
                 actions.append("next")
                 context.emit(
                     "device_action",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from webapp.automation.interaction import match_touch_point, randomized_touch_point
 from webapp.runtime import JobManager, RunContext
 from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
@@ -58,6 +59,7 @@ def create_assist_handler(
             raise ValueError("refresh_wait_seconds must be between 0 and 10.")
 
         plan = script_data.get_setting_plan(setting_name.strip())
+        random_touch = bool(plan["run"].get("random_touch"))
         attempts = 0
         scrolls = 0
         scrolls_since_refresh = 0
@@ -108,7 +110,9 @@ def create_assist_handler(
             )
             if not refresh_button.matched:
                 raise RuntimeError("Assist list refresh button was not recognized.")
-            device_service.tap(*refresh_button.center)
+            device_service.tap(
+                *match_touch_point(refresh_button, enabled=random_touch)
+            )
             context.sleep(float(refresh_wait_seconds))
             refresh_confirmation = assist_recognizer.match_refresh_confirmation(
                 device_service.snapshot(),
@@ -116,7 +120,9 @@ def create_assist_handler(
             )
             if not refresh_confirmation.matched:
                 raise RuntimeError("Assist list refresh confirmation was not recognized.")
-            device_service.tap(*refresh_confirmation.center)
+            device_service.tap(
+                *match_touch_point(refresh_confirmation, enabled=random_touch)
+            )
             refreshes += 1
             scrolls_since_refresh = 0
             context.emit(
@@ -128,10 +134,15 @@ def create_assist_handler(
 
         selected = dict(recognition["candidates"][0])
         scale = float(selected["scale"])
-        tap_point = [
-            round(selected["anchor"][0] + 270 * scale),
-            round(selected["anchor"][1] - 60 * scale),
-        ]
+        tap_point = list(
+            randomized_touch_point(
+                (
+                    round(selected["anchor"][0] + 270 * scale),
+                    round(selected["anchor"][1] - 60 * scale),
+                ),
+                enabled=random_touch,
+            )
+        )
         selected["tap_point"] = tap_point
         context.checkpoint("select_assist", progress=0.75)
         operation = device_service.tap(*tap_point)

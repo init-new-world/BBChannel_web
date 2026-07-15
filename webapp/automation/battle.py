@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import Any
 
+from webapp.automation.interaction import match_touch_point, randomized_touch_point
 from webapp.automation.program import (
     ATTACK_POINT,
     COMMAND_CARD_BACK_POINT,
@@ -30,6 +31,7 @@ BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
 class _TapTiming:
     interval: float
     random_time: float = 0.0
+    random_touch: bool = False
 
 
 def initialize_battle_settings(
@@ -39,6 +41,7 @@ def initialize_battle_settings(
     server: str,
     *,
     action_wait_seconds: float = 0.5,
+    random_touch: bool = False,
 ) -> dict[str, Any]:
     server = server.upper()
     screenshot = device_service.snapshot()
@@ -50,7 +53,7 @@ def initialize_battle_settings(
     )
     if not menu_button.matched:
         raise RuntimeError("Battle menu button was not recognized.")
-    device_service.tap(*menu_button.center)
+    device_service.tap(*match_touch_point(menu_button, enabled=random_touch))
     actions = ["open_menu"]
     context.sleep(action_wait_seconds)
 
@@ -81,7 +84,7 @@ def initialize_battle_settings(
     ):
         if enabled == desired:
             continue
-        device_service.tap(*match.center)
+        device_service.tap(*match_touch_point(match, enabled=random_touch))
         actions.append(f"toggle_{index}")
         context.sleep(action_wait_seconds)
 
@@ -94,7 +97,7 @@ def initialize_battle_settings(
     )
     if not back_button.matched:
         raise RuntimeError("Battle menu back button was not recognized.")
-    device_service.tap(*back_button.center)
+    device_service.tap(*match_touch_point(back_button, enabled=random_touch))
     actions.append("close_menu")
     context.emit(
         "battle_settings",
@@ -449,6 +452,7 @@ def create_battle_execute_plan_handler(
         tap_interval = _TapTiming(
             tap_interval,
             _configured_random_time(plan["run"].get("random_time", 0)),
+            bool(plan["run"].get("random_touch")),
         )
         initialize_settings = payload.get(
             "initialize_settings",
@@ -493,6 +497,7 @@ def create_battle_execute_plan_handler(
                 recognition,
                 program["server"],
                 action_wait_seconds=tap_interval.interval,
+                random_touch=tap_interval.random_touch,
             )
 
         turns = [
@@ -1057,6 +1062,7 @@ def _execute_skills_handler(
         tap_interval = _TapTiming(
             tap_interval,
             _configured_random_time(plan["run"].get("random_time", 0)),
+            bool(plan["run"].get("random_touch")),
         )
         program = compile_battle_program(plan)
         execution_status = program["execution"]["skills"]
@@ -1151,14 +1157,23 @@ def _execute_steps(
     tap_interval: float | _TapTiming,
     *,
     random_time: float = 0.0,
+    random_touch: bool = False,
 ) -> int:
     timing = (
         tap_interval
         if isinstance(tap_interval, _TapTiming)
-        else _TapTiming(float(tap_interval), _configured_random_time(random_time))
+        else _TapTiming(
+            float(tap_interval),
+            _configured_random_time(random_time),
+            random_touch,
+        )
     )
     for step in steps:
-        operation = device_service.tap(step["x"], step["y"])
+        touch_point = randomized_touch_point(
+            (step["x"], step["y"]),
+            enabled=timing.random_touch,
+        )
+        operation = device_service.tap(*touch_point)
         context.emit(
             "device_action",
             f"Tapped {step['role']}.",
