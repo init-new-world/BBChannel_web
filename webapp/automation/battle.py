@@ -143,6 +143,72 @@ def _execute_hakuno_reroll(
     raise AssertionError("Hakuno reroll loop exited unexpectedly.")
 
 
+def _wait_for_battle_transition(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    server: str,
+    threshold: float,
+    timeout_seconds: float,
+    poll_interval: float,
+) -> dict[str, Any]:
+    server = server.upper()
+    attack_path = f"battle/{server}/attack.png"
+    phase_paths = [f"battle/{server}/phase_{round_number}.png" for round_number in range(1, 4)]
+    finish_paths = [
+        f"battle/{server}/battleFinish.png",
+        f"battle/{server}/battleFinish1.png",
+        f"battle/{server}/fight_end.png",
+    ]
+    candidates = [
+        {
+            "template_path": path,
+            "threshold": threshold,
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+        }
+        for path in [attack_path, *phase_paths, *finish_paths]
+    ]
+    started = monotonic()
+    attempts = 0
+    while True:
+        screenshot = device_service.snapshot()
+        matches = recognition.match_templates(screenshot, candidates)
+        attempts += 1
+        by_path = {
+            candidate["template_path"]: match
+            for candidate, match in zip(candidates, matches, strict=True)
+        }
+        if any(by_path[path].matched for path in finish_paths):
+            result = {"state": "finished", "round": None}
+        else:
+            matched_rounds = [
+                round_number
+                for round_number, path in enumerate(phase_paths, start=1)
+                if by_path[path].matched
+            ]
+            result = (
+                {"state": "battle", "round": matched_rounds[0]}
+                if by_path[attack_path].matched and matched_rounds
+                else None
+            )
+        context.emit(
+            "battle_transition",
+            "Battle transition recognition completed.",
+            data={
+                "attempt": attempts,
+                "result": result,
+                "matches": [match.to_dict() for match in matches],
+            },
+        )
+        if result is not None:
+            return result
+        if monotonic() - started >= timeout_seconds:
+            raise TimeoutError(
+                f"Battle transition was not recognized within {timeout_seconds:.2f} seconds."
+            )
+        context.sleep(poll_interval)
+
+
 def register_battle_jobs(
     job_manager: JobManager,
     script_data: ScriptDataService,
@@ -286,6 +352,14 @@ def _execute_plan_handler(
             for round_plan in program["rounds"]
             for turn in round_plan["turns"]
             for action in turn["actions"]
+        ) or any(
+            step.get("type") == "strategy"
+            for round_plan in program["rounds"]
+            for step in round_plan["extra_turn"]["command_phase"]["steps"]
+        ) or any(
+            action.get("runtime", {}).get("type") == "hakuno_card_reroll"
+            for round_plan in program["rounds"]
+            for action in round_plan["extra_turn"]["actions"]
         )
         if needs_card_recognition and card_recognizer is None:
             raise ValueError("Command card recognition is not configured.")
@@ -303,6 +377,17 @@ def _execute_plan_handler(
         action_count = 0
         tap_count = 0
         servant_positions = _servant_positions(plan["servants"])
+        compiled_rounds = {
+            round_plan["round"]: round_plan for round_plan in program["rounds"]
+        }
+        last_turns = {
+            round_plan["round"]: max(
+                (turn["turn"] for turn in round_plan["turns"]),
+                default=-1,
+            )
+            for round_plan in program["rounds"]
+        }
+        battle_finished = False
 
         for turn_number, (round_number, turn) in enumerate(turns, start=1):
             skill_actions = [
@@ -477,6 +562,54 @@ def _execute_plan_handler(
                     },
                 )
 
+            compiled_round = compiled_rounds[round_number]
+            extra_turn = compiled_round["extra_turn"]
+            if (
+                turn["turn"] == last_turns[round_number]
+                and extra_turn["actions"]
+            ):
+                for extra_number in range(1, 11):
+                    transition = _wait_for_battle_transition(
+                        context,
+                        device_service,
+                        recognition,
+                        program["server"],
+                        threshold,
+                        timeout_seconds,
+                        poll_interval,
+                    )
+                    if transition["state"] == "finished":
+                        battle_finished = True
+                        break
+                    if transition["round"] != round_number:
+                        break
+                    context.emit(
+                        "battle_extra_turn",
+                        "Executing configured extra battle turn.",
+                        data={"round": round_number, "extra_turn": extra_number},
+                    )
+                    tap_count += _execute_extra_turn(
+                        context,
+                        device_service,
+                        recognition,
+                        card_recognizer,
+                        program["server"],
+                        servant_positions,
+                        extra_turn,
+                        card_templates,
+                        attack_template,
+                        threshold,
+                        timeout_seconds,
+                        poll_interval,
+                        tap_interval,
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Round {round_number} exceeded the 10 configured extra-turn limit."
+                    )
+            if battle_finished:
+                break
+
         context.checkpoint("complete", progress=1.0, message="Battle execution completed.")
         return {
             "setting_name": setting_name,
@@ -486,6 +619,123 @@ def _execute_plan_handler(
         }
 
     return execute
+
+
+def _execute_extra_turn(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None,
+    server: str,
+    servant_positions: list[dict[str, Any] | None],
+    turn: dict[str, Any],
+    card_templates: list[str],
+    attack_template: str,
+    threshold: float,
+    timeout_seconds: float,
+    poll_interval: float,
+    tap_interval: float,
+) -> int:
+    tap_count = 0
+    skill_actions = [
+        action
+        for action in turn["actions"]
+        if action["source"].get("type") == "skill"
+    ]
+    for action in skill_actions:
+        runtime = action.get("runtime")
+        if runtime and runtime["type"] == "hakuno_card_reroll":
+            if card_recognizer is None:
+                raise ValueError("Command card recognition is not configured.")
+            tap_count += _execute_hakuno_reroll(
+                context,
+                device_service,
+                recognition,
+                card_recognizer,
+                server,
+                _frontline_servants(servant_positions),
+                runtime,
+                card_templates,
+                attack_template,
+                threshold,
+                timeout_seconds,
+                poll_interval,
+                tap_interval,
+            )
+            continue
+        _wait_for_battle_ready(
+            context,
+            device_service,
+            recognition,
+            attack_template,
+            threshold,
+            timeout_seconds,
+            poll_interval,
+        )
+        tap_count += _execute_steps(
+            context,
+            device_service,
+            action["steps"],
+            tap_interval,
+        )
+        state_change = action.get("state_change")
+        if state_change and state_change["type"] == "servant_exchange":
+            _apply_servant_exchange(servant_positions, state_change["positions"])
+            context.emit(
+                "servant_exchange",
+                "Runtime servant positions were exchanged.",
+                data={
+                    "positions": state_change["positions"],
+                    "frontline": _frontline_servants(servant_positions),
+                },
+            )
+
+    _wait_for_battle_ready(
+        context,
+        device_service,
+        recognition,
+        attack_template,
+        threshold,
+        timeout_seconds,
+        poll_interval,
+    )
+    command_steps = turn["command_phase"]["steps"]
+    tap_count += _execute_steps(
+        context,
+        device_service,
+        command_steps[:1],
+        tap_interval,
+    )
+    command_screenshot = _wait_for_command_cards(
+        context,
+        device_service,
+        recognition,
+        card_templates,
+        threshold,
+        timeout_seconds,
+        poll_interval,
+    )
+    for step in command_steps[1:]:
+        if step.get("type") == "tap":
+            tap_count += _execute_steps(
+                context,
+                device_service,
+                [step],
+                tap_interval,
+            )
+        elif step.get("type") == "strategy":
+            tap_count += _execute_strategy_step(
+                context,
+                device_service,
+                card_recognizer,
+                command_screenshot,
+                server,
+                _frontline_servants(servant_positions),
+                step,
+                threshold,
+                tap_interval,
+            )
+    return tap_count
 
 
 def _servant_positions(servants: list[dict[str, Any]]) -> list[dict[str, Any] | None]:

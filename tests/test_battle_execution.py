@@ -16,6 +16,7 @@ from webapp.automation.battle import (
     _evaluate_card_condition,
     _frontline_servants,
     _matches_hakuno_needs,
+    _wait_for_battle_transition,
     register_battle_jobs,
 )
 from webapp.devices.coordinates import FrameNormalizer
@@ -85,6 +86,67 @@ def test_hakuno_card_needs_match_unordered_alternatives_with_duplicate_counts():
 
     assert _matches_hakuno_needs(cards, [["2B"], ["2A", "1B", "1B"]]) is True
     assert _matches_hakuno_needs(cards, [["1B", "1B", "1B"]]) is False
+
+
+@pytest.mark.parametrize(
+    ("matched_paths", "expected"),
+    [
+        (
+            {"battle/CH/attack.png", "battle/CH/phase_2.png"},
+            {"state": "battle", "round": 2},
+        ),
+        (
+            {"battle/CH/attack.png", "battle/CH/phase_2.png", "battle/CH/battleFinish.png"},
+            {"state": "finished", "round": None},
+        ),
+    ],
+)
+def test_wait_for_battle_transition_recognizes_round_or_finish(
+    matched_paths: set[str],
+    expected: dict,
+):
+    events = []
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+    class Match:
+        confidence = 1.0
+
+        def __init__(self, template_path, matched):
+            self.template_path = template_path
+            self.matched = matched
+
+        def to_dict(self):
+            return {"template_path": self.template_path, "matched": self.matched}
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [
+                Match(candidate["template_path"], candidate["template_path"] in matched_paths)
+                for candidate in candidates
+            ]
+
+    class Context:
+        def emit(self, event_type, message, *, data):
+            events.append((event_type, message, data))
+
+        def sleep(self, _seconds):
+            pass
+
+    result = _wait_for_battle_transition(
+        Context(),
+        Device(),
+        Recognition(),
+        "CH",
+        0.75,
+        1.0,
+        0.01,
+    )
+
+    assert result == expected
+    assert events[-1][0] == "battle_transition"
 
 
 def test_hakuno_reroll_casts_skill_until_card_need_matches():
@@ -281,6 +343,100 @@ def test_battle_jobs_run_dynamic_hakuno_reroll(
         (70, 590),
         (1150, 600),
         (1250, 683),
+    ]
+
+
+def test_execute_battle_job_runs_extra_turn_while_round_is_unchanged(tmp_path: Path):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"Servant A": {"other_name": []}}),
+        encoding="utf-8",
+    )
+    (data / "settings" / "extra.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Servant A",
+                "round1_turns": 1,
+                "round1_extraSkill": [1],
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        confidence = 1.0
+
+        def __init__(self, template_path, matched=True):
+            self.template_path = template_path
+            self.matched = matched
+
+        def to_dict(self):
+            return {"template_path": self.template_path, "matched": self.matched}
+
+    class Recognition:
+        transition_calls = 0
+
+        def match_template(self, _screenshot, template_path, _threshold):
+            return Match(template_path)
+
+        def match_templates(self, _screenshot, candidates):
+            paths = [candidate["template_path"] for candidate in candidates]
+            if not any("phase_" in path or "battleFinish" in path for path in paths):
+                return [Match(path) for path in paths]
+            self.transition_calls += 1
+            matched_paths = (
+                {"battle/CH/attack.png", "battle/CH/phase_1.png"}
+                if self.transition_calls == 1
+                else {"battle/CH/battleFinish.png"}
+            )
+            return [Match(path, path in matched_paths) for path in paths]
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            Recognition(),
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "extra",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:extra",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["tap_count"] == 9
+    assert taps == [
+        (1150, 600),
+        (150, 500),
+        (375, 500),
+        (650, 500),
+        (70, 590),
+        (1150, 600),
+        (150, 500),
+        (375, 500),
+        (650, 500),
     ]
 
 
