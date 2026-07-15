@@ -14,8 +14,10 @@ SERVANT_SKILL_POINTS = (
     (786, 590),
     (879, 590),
 )
-SKILL_TARGET_POINTS = ((320, 420), (640, 420), (960, 420))
-NP_POINTS = ((320, 300), (640, 300), (960, 300))
+SKILL_TARGET_POINTS = ((350, 440), (640, 440), (970, 440))
+MASTER_SKILL_MENU_POINT = (1131, 320)
+MASTER_SKILL_POINTS = ((850, 310), (940, 310), (1020, 310))
+NP_POINTS = ((500, 110), (650, 200), (870, 200))
 
 
 def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
@@ -88,15 +90,23 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
         skill, target = command
     else:
         skill = command
-    if isinstance(skill, bool) or not isinstance(skill, int) or not 1 <= skill <= 9:
-        return _unsupported(action, "Only servant skill commands 1 through 9 are compiled.")
+    if isinstance(skill, bool) or not isinstance(skill, int) or not 1 <= skill <= 12:
+        return _unsupported(action, "Skill commands must be numbered 1 through 12.")
     if target is not None and (
         isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 3
     ):
         return _unsupported(action, "Skill targets must be servant positions 1 through 3.")
 
-    x, y = SERVANT_SKILL_POINTS[skill - 1]
-    steps = [_tap(f"servant_skill_{skill}", x, y)]
+    if skill <= 9:
+        x, y = SERVANT_SKILL_POINTS[skill - 1]
+        steps = [_tap(f"servant_skill_{skill}", x, y)]
+    else:
+        menu_x, menu_y = MASTER_SKILL_MENU_POINT
+        x, y = MASTER_SKILL_POINTS[skill - 10]
+        steps = [
+            _tap("master_skill_menu", menu_x, menu_y, wait_after_seconds=1.5),
+            _tap(f"master_skill_{skill}", x, y),
+        ]
     if target is not None:
         target_x, target_y = SKILL_TARGET_POINTS[target - 1]
         steps.append(_tap(f"skill_target_{target}", target_x, target_y))
@@ -111,8 +121,17 @@ def _compile_np(action: dict[str, Any]) -> dict[str, Any]:
     return _supported(action, [_tap(f"np_{servant}", x, y)])
 
 
-def _tap(role: str, x: int, y: int) -> dict[str, Any]:
-    return {"type": "tap", "role": role, "x": x, "y": y}
+def _tap(
+    role: str,
+    x: int,
+    y: int,
+    *,
+    wait_after_seconds: float | None = None,
+) -> dict[str, Any]:
+    step = {"type": "tap", "role": role, "x": x, "y": y}
+    if wait_after_seconds is not None:
+        step["wait_after_seconds"] = wait_after_seconds
+    return step
 
 
 def _supported(source: dict[str, Any], steps: list[dict[str, Any]]) -> dict[str, Any]:

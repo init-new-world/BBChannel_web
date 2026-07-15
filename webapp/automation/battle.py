@@ -169,8 +169,12 @@ def _execute_skills_handler(
                     f"Tapped {step['role']}.",
                     data={"role": step["role"], "operation": operation.to_dict()},
                 )
-                if tap_interval:
-                    context.sleep(tap_interval)
+                wait_after = max(
+                    tap_interval,
+                    float(step.get("wait_after_seconds", 0.0)),
+                )
+                if wait_after:
+                    context.sleep(wait_after)
 
         context.checkpoint(
             "complete",

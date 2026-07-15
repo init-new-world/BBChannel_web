@@ -45,7 +45,7 @@ def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Pa
                 "device_id": "skills",
                 "frames": [
                     {"file": "0.png", "expect": {"type": "tap", "x": 474, "y": 590}},
-                    {"file": "1.png", "expect": {"type": "tap", "x": 640, "y": 420}},
+                    {"file": "1.png", "expect": {"type": "tap", "x": 640, "y": 440}},
                     {"file": "2.png"},
                 ],
             }

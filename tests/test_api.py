@@ -392,10 +392,42 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
     ]
     assert actions[1]["steps"] == [
         {"type": "tap", "role": "servant_skill_5", "x": 474, "y": 590},
-        {"type": "tap", "role": "skill_target_2", "x": 640, "y": 420},
+        {"type": "tap", "role": "skill_target_2", "x": 640, "y": 440},
     ]
     assert actions[2]["steps"] == [
-        {"type": "tap", "role": "np_3", "x": 960, "y": 300},
+        {"type": "tap", "role": "np_3", "x": 870, "y": 200},
+    ]
+
+
+def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "master.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [[11, 1]],
+        },
+    )
+
+    response = client.get("/api/settings/master/program")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["execution"]["skills"] == {"ready": True, "reason": None}
+    assert payload["rounds"][0]["turns"][0]["actions"][0]["steps"] == [
+        {
+            "type": "tap",
+            "role": "master_skill_menu",
+            "x": 1131,
+            "y": 320,
+            "wait_after_seconds": 1.5,
+        },
+        {"type": "tap", "role": "master_skill_11", "x": 940, "y": 310},
+        {"type": "tap", "role": "skill_target_1", "x": 350, "y": 440},
     ]
 
 
