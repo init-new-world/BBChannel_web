@@ -24,6 +24,111 @@ BATTLE_EXECUTE_PLAN_JOB_KIND = "battle.execute-plan"
 BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
 
 
+def initialize_battle_settings(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    server: str,
+    *,
+    action_wait_seconds: float = 0.5,
+) -> dict[str, Any]:
+    server = server.upper()
+    screenshot = device_service.snapshot()
+    menu_button = recognition.match_template(
+        screenshot,
+        f"battle/{server}/fight_menu_button.png",
+        threshold=0.85,
+        scales=(1.0, 0.75, 2 / 3, 0.5),
+    )
+    if not menu_button.matched:
+        raise RuntimeError("Battle menu button was not recognized.")
+    device_service.tap(*menu_button.center)
+    actions = ["open_menu"]
+    context.sleep(action_wait_seconds)
+
+    screenshot = device_service.snapshot()
+    candidates = []
+    for enabled, template_path in (
+        (True, f"battle/{server}/on.png"),
+        (False, f"battle/{server}/off.png"),
+    ):
+        for match in recognition.match_template_all(
+            screenshot,
+            template_path,
+            threshold=0.85,
+            scales=(1.0, 0.75, 2 / 3, 0.5),
+            max_results=10,
+        ):
+            candidates.append((enabled, match))
+    toggles = _distinct_toggle_matches(candidates)
+    if len(toggles) != 3:
+        raise RuntimeError(
+            f"Expected three battle settings toggles but recognized {len(toggles)}."
+        )
+
+    initial_states = [enabled for enabled, _match in toggles]
+    for index, ((enabled, match), desired) in enumerate(
+        zip(toggles, (True, True, False), strict=True),
+        start=1,
+    ):
+        if enabled == desired:
+            continue
+        device_service.tap(*match.center)
+        actions.append(f"toggle_{index}")
+        context.sleep(action_wait_seconds)
+
+    screenshot = device_service.snapshot()
+    back_button = recognition.match_template(
+        screenshot,
+        f"battle/{server}/back.png",
+        threshold=0.85,
+        scales=(1.0, 0.75, 2 / 3, 0.5),
+    )
+    if not back_button.matched:
+        raise RuntimeError("Battle menu back button was not recognized.")
+    device_service.tap(*back_button.center)
+    actions.append("close_menu")
+    context.emit(
+        "battle_settings",
+        "Initial battle settings were normalized.",
+        data={"states": initial_states, "actions": actions},
+    )
+    context.sleep(action_wait_seconds)
+    return {
+        "changed": any(
+            state != desired
+            for state, desired in zip(initial_states, (True, True, False), strict=True)
+        ),
+        "states": initial_states,
+        "actions": actions,
+    }
+
+
+def _distinct_toggle_matches(candidates):
+    selected = []
+    for candidate in sorted(candidates, key=lambda item: item[1].confidence, reverse=True):
+        if any(_match_iou(candidate[1], existing[1]) > 0.3 for existing in selected):
+            continue
+        selected.append(candidate)
+    return sorted(selected, key=lambda item: (item[1].center[1], item[1].center[0]))
+
+
+def _match_iou(first, second) -> float:
+    first_x, first_y = first.top_left
+    first_width, first_height = first.size
+    second_x, second_y = second.top_left
+    second_width, second_height = second.size
+    left = max(first_x, second_x)
+    top = max(first_y, second_y)
+    right = min(first_x + first_width, second_x + second_width)
+    bottom = min(first_y + first_height, second_y + second_height)
+    intersection = max(right - left, 0) * max(bottom - top, 0)
+    if not intersection:
+        return 0.0
+    union = first_width * first_height + second_width * second_height - intersection
+    return intersection / union
+
+
 def _matches_hakuno_needs(
     cards: list[dict[str, Any]],
     need_cards: list[list[str]],
@@ -333,6 +438,12 @@ def create_battle_execute_plan_handler(
             payload
         )
         plan = script_data.get_setting_plan(setting_name)
+        initialize_settings = payload.get(
+            "initialize_settings",
+            bool(plan["run"]["first_battle_set"]),
+        )
+        if not isinstance(initialize_settings, bool):
+            raise ValueError("initialize_settings must be a boolean.")
         program = compile_battle_program(plan)
         execution_status = program["execution"]["battle"]
         if not execution_status["ready"]:
@@ -363,6 +474,14 @@ def create_battle_execute_plan_handler(
         )
         if needs_card_recognition and card_recognizer is None:
             raise ValueError("Command card recognition is not configured.")
+        if initialize_settings:
+            initialize_battle_settings(
+                context,
+                device_service,
+                recognition,
+                program["server"],
+                action_wait_seconds=tap_interval,
+            )
 
         turns = [
             (round_plan["round"], turn)

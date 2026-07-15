@@ -657,7 +657,10 @@ def test_execute_skills_rejects_np_before_snapshot_or_tap(tmp_path: Path):
     assert device_calls == []
 
 
-def test_execute_battle_job_runs_skill_and_command_phase(tmp_path: Path):
+def test_execute_battle_job_runs_skill_and_command_phase(
+    tmp_path: Path,
+    monkeypatch,
+):
     assets = tmp_path / "assets"
     data = tmp_path / "data"
     session = tmp_path / "replays" / "battle"
@@ -710,6 +713,7 @@ def test_execute_battle_job_runs_skill_and_command_phase(tmp_path: Path):
                 "round1_turns": 1,
                 "round1_turn0_skill": [1],
                 "round1_turn0_np": [1],
+                "firstBattleSet": 1,
             }
         ),
         encoding="utf-8",
@@ -722,6 +726,13 @@ def test_execute_battle_job_runs_skill_and_command_phase(tmp_path: Path):
         frame_normalizer=FrameNormalizer(),
     )
     devices.connect("replay", "battle")
+    initialized = []
+
+    def initialize(*_args, **_kwargs):
+        initialized.append(True)
+        return {"changed": False, "states": [True, True, False], "actions": []}
+
+    monkeypatch.setattr("webapp.automation.battle.initialize_battle_settings", initialize)
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_battle_jobs(
             manager,
@@ -742,6 +753,7 @@ def test_execute_battle_job_runs_skill_and_command_phase(tmp_path: Path):
         result = manager.wait(job.job_id, timeout=2)
 
     assert result.status == JobStatus.SUCCEEDED
+    assert initialized == [True]
     assert result.result == {
         "setting_name": "battle",
         "turn_count": 1,

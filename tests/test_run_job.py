@@ -14,10 +14,12 @@ class _ScriptData:
         before: float = 0,
         after: float = 0,
         clear_ap: bool = False,
+        first_battle_set: bool = False,
     ) -> None:
         self.before = before
         self.after = after
         self.clear_ap = clear_ap
+        self.first_battle_set = first_battle_set
 
     def get_setting_plan(self, _name: str):
         return {
@@ -25,6 +27,7 @@ class _ScriptData:
                 "interval_before_fight": self.before,
                 "interval_after_fight": self.after,
                 "clear_ap": self.clear_ap,
+                "first_battle_set": self.first_battle_set,
             }
         }
 
@@ -59,7 +62,7 @@ def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Pat
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_full_run_job(
             manager,
-            _ScriptData(),
+            _ScriptData(first_battle_set=True),
             stage("assist"),
             stage("prepare"),
             stage("battle"),
@@ -87,6 +90,8 @@ def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Pat
     ]
     completion_payloads = [payload for name, payload in calls if name == "complete"]
     assert [payload["repeat"] for payload in completion_payloads] == [True, False]
+    battle_payloads = [payload for name, payload in calls if name == "battle"]
+    assert [payload["initialize_settings"] for payload in battle_payloads] == [True, False]
 
 
 def test_full_run_stops_when_completion_requests_it(tmp_path: Path):

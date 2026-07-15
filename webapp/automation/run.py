@@ -49,6 +49,7 @@ def create_full_run_handler(
             "interval_after_fight",
         )
         clear_ap = bool(run_options.get("clear_ap"))
+        first_battle_set = bool(run_options.get("first_battle_set"))
         stage_options = {
             name: _stage_options(payload, name)
             for name in ("assist", "prepare", "battle", "completion")
@@ -109,7 +110,11 @@ def create_full_run_handler(
             )
             battle_result = execute_battle(
                 context,
-                {"setting_name": normalized_name, **stage_options["battle"]},
+                {
+                    **stage_options["battle"],
+                    "setting_name": normalized_name,
+                    "initialize_settings": first_battle_set and run_number == 1,
+                },
             ) or {}
             if interval_after_fight:
                 context.sleep(interval_after_fight)
