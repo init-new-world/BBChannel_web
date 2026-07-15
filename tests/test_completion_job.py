@@ -45,11 +45,15 @@ def _run_completion(
     run_again = _pattern((120, 50), (35, 120, 170))
     friendship_max = _pattern((90, 45), (145, 75, 105))
     friendship_up = _pattern((160, 80), (115, 85, 145))
+    finish_without_friend = _pattern((174, 52), (75, 135, 65))
+    apply_for_friend = _pattern((308, 69), (165, 65, 105))
     drop_item = _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
     friendship_max.save(battle_assets / "jblevel10.png")
     friendship_up.save(battle_assets / "relationship_up.png")
+    finish_without_friend.save(battle_assets / "friend_apply.png")
+    apply_for_friend.save(battle_assets / "friend_apply_1.png")
     drop_item.save(drop_assets / "item.png")
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
@@ -177,6 +181,51 @@ def test_completion_advances_friendship_level_dialog(tmp_path: Path):
 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["actions"] == ["relationship_up"]
+
+
+@pytest.mark.parametrize(
+    (
+        "add_friend",
+        "template_size",
+        "template_color",
+        "expected_point",
+        "expected_action",
+    ),
+    [
+        (False, (174, 52), (75, 135, 65), (287, 526), "finish_without_friend"),
+        (True, (308, 69), (165, 65, 105), (854, 534), "apply_for_friend"),
+    ],
+)
+def test_completion_handles_friend_request_page(
+    tmp_path: Path,
+    add_friend: bool,
+    template_size: tuple[int, int],
+    template_color: tuple[int, int, int],
+    expected_point: tuple[int, int],
+    expected_action: str,
+):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    friend_frame = base.copy()
+    left, top = (200, 500) if not add_friend else (700, 500)
+    friend_frame.paste(_pattern(template_size, template_color), (left, top))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (
+                friend_frame,
+                {"type": "tap", "x": expected_point[0], "y": expected_point[1]},
+            ),
+            (repeat_frame, None),
+        ],
+        config={"addFriend": int(add_friend)},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["actions"] == [expected_action]
 
 
 def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):

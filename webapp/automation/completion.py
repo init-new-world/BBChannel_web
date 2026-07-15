@@ -178,6 +178,29 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
+            add_friend = bool(plan["run"].get("add_friend"))
+            friend_action = (
+                "apply_for_friend" if add_friend else "finish_without_friend"
+            )
+            friend_template = "friend_apply_1.png" if add_friend else "friend_apply.png"
+            friend_button = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/{friend_template}",
+            )
+            if friend_button is not None and friend_button.matched:
+                operation = device_service.tap(
+                    *match_touch_point(friend_button, enabled=random_touch)
+                )
+                actions.append(friend_action)
+                context.emit(
+                    "device_action",
+                    "Handled the post-battle friend request.",
+                    data={"role": friend_action, "operation": operation.to_dict()},
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+
             next_button = _match_optional(
                 recognition,
                 screenshot,

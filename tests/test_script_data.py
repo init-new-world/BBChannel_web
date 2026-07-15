@@ -236,6 +236,7 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
             "dropStopNum": 2,
             "dropImage": "assets/drop/item.png",
             "gameCrushRestart": 1,
+            "addFriend": 1,
         },
     )
 
@@ -253,6 +254,7 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
         "drop_stop_num": 2,
         "drop_image": "assets/drop/item.png",
         "game_crash_restart": True,
+        "add_friend": True,
     }
 
 

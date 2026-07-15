@@ -454,6 +454,7 @@ class ScriptDataService:
             "drop_stop_num": config.get("dropStopNum", 0),
             "drop_image": config.get("dropImage"),
             "game_crash_restart": bool(config.get("gameCrushRestart")),
+            "add_friend": bool(config.get("addFriend")),
         }
 
     @staticmethod
