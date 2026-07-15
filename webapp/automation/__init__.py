@@ -22,7 +22,11 @@ from webapp.automation.entry import (
     register_battle_entry_job,
 )
 from webapp.automation.program import compile_battle_program
-from webapp.automation.run import FULL_RUN_JOB_KIND, register_full_run_job
+from webapp.automation.run import (
+    FULL_RUN_JOB_KIND,
+    create_full_run_handler,
+    register_full_run_job,
+)
 
 __all__ = [
     "ASSIST_SELECT_JOB_KIND",
@@ -37,6 +41,7 @@ __all__ = [
     "create_battle_entry_handler",
     "create_battle_execute_plan_handler",
     "create_completion_handler",
+    "create_full_run_handler",
     "register_assist_job",
     "register_battle_jobs",
     "register_completion_job",

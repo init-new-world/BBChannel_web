@@ -47,6 +47,7 @@ def test_operator_console_references_api_controls():
     assert 'id="battle-program-status"' in index
     assert 'id="start-battle-plan"' in index
     assert 'id="full-run-count"' in index
+    assert 'id="full-run-apple"' in index
     assert 'id="start-full-run"' in index
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
@@ -74,6 +75,7 @@ def test_operator_console_references_api_controls():
     assert "battle.execute-plan" in script
     assert "battle.run" in script
     assert "max_runs" in script
+    assert "prepare:" in script
     assert "execution?.battle" in script
     assert "/program" in script
     assert "/events/stream" in script

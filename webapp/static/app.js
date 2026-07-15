@@ -94,6 +94,7 @@ const els = {
   battleProgramStatus: document.querySelector("#battle-program-status"),
   battleActionDelay: document.querySelector("#battle-action-delay"),
   fullRunCount: document.querySelector("#full-run-count"),
+  fullRunApple: document.querySelector("#full-run-apple"),
   startFullRun: document.querySelector("#start-full-run"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
@@ -693,6 +694,9 @@ async function startFullRun() {
   await enqueueJob("battle.run", {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
+    prepare: {
+      apple: els.fullRunApple.value,
+    },
     battle: {
       tap_interval_seconds: Number(els.battleActionDelay.value),
     },

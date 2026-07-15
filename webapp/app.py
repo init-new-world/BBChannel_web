@@ -164,6 +164,7 @@ def create_app(
     )
     register_full_run_job(
         job_manager,
+        script_data,
         create_assist_handler(script_data, device_service, assist_recognizer),
         create_battle_entry_handler(script_data, device_service, recognition),
         create_battle_execute_plan_handler(

@@ -4,7 +4,11 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from webapp.automation.entry import BATTLE_PREPARE_JOB_KIND, register_battle_entry_job
+from webapp.automation.entry import (
+    BATTLE_PREPARE_JOB_KIND,
+    _available_apple,
+    register_battle_entry_job,
+)
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
@@ -13,6 +17,46 @@ from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
+
+
+class _AppleMatch:
+    def __init__(self, matched: bool) -> None:
+        self.matched = matched
+
+
+class _AppleRecognition:
+    def __init__(self, available: str) -> None:
+        self.available = available
+        self.checked: list[str] = []
+
+    def match_template(self, _screenshot, template_path, **_options):
+        apple_name = template_path.rsplit("/", 1)[-1].removesuffix(".png")
+        self.checked.append(apple_name)
+        return _AppleMatch(apple_name == self.available)
+
+
+def test_available_apple_only_falls_back_when_enabled():
+    restricted = _AppleRecognition("silver")
+    assert _available_apple(
+        restricted,
+        b"screen",
+        "CH",
+        preferred="gold",
+        allow_other=False,
+    ) is None
+    assert restricted.checked == ["gold"]
+
+    fallback = _AppleRecognition("silver")
+    result = _available_apple(
+        fallback,
+        b"screen",
+        "CH",
+        preferred="gold",
+        allow_other=True,
+    )
+    assert result is not None
+    assert result[0] == "silver"
+    assert fallback.checked == ["gold", "silver"]
 
 
 def test_battle_prepare_job_confirms_team_starts_quest_and_waits_for_battle(tmp_path: Path):

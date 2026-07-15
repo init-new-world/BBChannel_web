@@ -1,7 +1,36 @@
 from pathlib import Path
 
-from webapp.automation.run import FULL_RUN_JOB_KIND, register_full_run_job
+from webapp.automation.run import (
+    FULL_RUN_JOB_KIND,
+    create_full_run_handler,
+    register_full_run_job,
+)
 from webapp.runtime import JobDatabase, JobManager, JobStatus
+
+
+class _ScriptData:
+    def __init__(self, before: float = 0, after: float = 0) -> None:
+        self.before = before
+        self.after = after
+
+    def get_setting_plan(self, _name: str):
+        return {
+            "run": {
+                "interval_before_fight": self.before,
+                "interval_after_fight": self.after,
+            }
+        }
+
+
+class _Context:
+    def __init__(self) -> None:
+        self.trace: list[str | tuple[str, float]] = []
+
+    def checkpoint(self, step, **_options):
+        self.trace.append(step)
+
+    def sleep(self, seconds):
+        self.trace.append(("sleep", seconds))
 
 
 def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Path):
@@ -23,6 +52,7 @@ def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Pat
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_full_run_job(
             manager,
+            _ScriptData(),
             stage("assist"),
             stage("prepare"),
             stage("battle"),
@@ -80,6 +110,7 @@ def test_full_run_stops_when_completion_requests_it(tmp_path: Path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_full_run_job(
             manager,
+            _ScriptData(),
             ordinary("assist"),
             ordinary("prepare"),
             ordinary("battle"),
@@ -105,5 +136,39 @@ def test_full_run_stops_when_completion_requests_it(tmp_path: Path):
         "assist",
         "prepare",
         "battle",
+        "complete",
+    ]
+
+
+def test_full_run_applies_configured_before_and_after_fight_intervals():
+    context = _Context()
+
+    def stage(name: str):
+        def execute(_context, _payload):
+            context.trace.append(name)
+            return {"complete": True} if name == "complete" else {}
+
+        return execute
+
+    handler = create_full_run_handler(
+        _ScriptData(before=0.2, after=0.3),
+        stage("assist"),
+        stage("prepare"),
+        stage("battle"),
+        stage("complete"),
+    )
+    handler(context, {"setting_name": "demo", "max_runs": 1})
+
+    assert context.trace == [
+        "run.select_assist",
+        "assist",
+        "run.prepare_battle",
+        "prepare",
+        ("sleep", 0.2),
+        "run.execute_battle",
+        "battle",
+        ("sleep", 0.3),
+        "run.complete_battle",
+        "complete",
         "complete",
     ]

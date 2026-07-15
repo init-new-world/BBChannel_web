@@ -26,6 +26,9 @@ def create_battle_entry_handler(
         timeout_seconds = _number(payload, "timeout_seconds", 180, 0.1, 600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(payload, "action_wait_seconds", 0.5, 0, 10)
+        preferred_apple = payload.get("apple", "gold")
+        if preferred_apple not in {"gold", "silver", "blue", "copper"}:
+            raise ValueError("apple must be gold, silver, blue, or copper.")
         plan = script_data.get_setting_plan(setting_name.strip())
         server = str(plan["server"]).upper()
         template_roles = (
@@ -97,7 +100,13 @@ def create_battle_entry_handler(
                         "actions": actions,
                         "attempts": attempts,
                     }
-                apple_match = _available_apple(recognition, screenshot, server)
+                apple_match = _available_apple(
+                    recognition,
+                    screenshot,
+                    server,
+                    preferred=preferred_apple,
+                    allow_other=plan["run"]["allow_other_apple"],
+                )
                 if apple_match is None:
                     raise RuntimeError("No available AP recovery item was recognized.")
                 apple_name, apple_result = apple_match
@@ -170,14 +179,25 @@ def _available_apple(
     recognition: RecognitionService,
     screenshot: bytes,
     server: str,
+    *,
+    preferred: str,
+    allow_other: bool,
 ):
-    templates = (
-        ("gold", f"battle/{server}/gold.png"),
-        ("silver", f"battle/{server}/silver.png"),
-        ("blue", "battle/public/blue.png"),
-        ("copper", f"battle/{server}/copper.png"),
-    )
-    for apple_name, template_path in templates:
+    templates = {
+        "gold": f"battle/{server}/gold.png",
+        "silver": f"battle/{server}/silver.png",
+        "blue": "battle/public/blue.png",
+        "copper": f"battle/{server}/copper.png",
+    }
+    candidates = [preferred]
+    if allow_other:
+        candidates.extend(
+            apple_name
+            for apple_name in ("gold", "silver", "blue", "copper")
+            if apple_name != preferred
+        )
+    for apple_name in candidates:
+        template_path = templates[apple_name]
         try:
             result = recognition.match_template(
                 screenshot,

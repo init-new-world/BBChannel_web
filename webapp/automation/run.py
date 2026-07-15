@@ -4,21 +4,20 @@ from collections.abc import Callable
 from typing import Any
 
 from webapp.runtime import JobManager, RunContext
+from webapp.services.script_data import ScriptDataService
 
 
 FULL_RUN_JOB_KIND = "battle.run"
 StageHandler = Callable[[RunContext, dict[str, Any]], dict[str, Any] | None]
 
 
-def register_full_run_job(
-    job_manager: JobManager,
+def create_full_run_handler(
+    script_data: ScriptDataService,
     select_assist: StageHandler,
     prepare_battle: StageHandler,
     execute_battle: StageHandler,
     complete_battle: StageHandler,
-) -> None:
-    if job_manager.has_kind(FULL_RUN_JOB_KIND):
-        return
+):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = payload.get("setting_name")
@@ -33,6 +32,15 @@ def register_full_run_job(
             raise ValueError("max_runs must be between 1 and 10000.")
 
         normalized_name = setting_name.strip()
+        run_options = script_data.get_setting_plan(normalized_name)["run"]
+        interval_before_fight = _configured_interval(
+            run_options.get("interval_before_fight", 0),
+            "interval_before_fight",
+        )
+        interval_after_fight = _configured_interval(
+            run_options.get("interval_after_fight", 0),
+            "interval_after_fight",
+        )
         stage_options = {
             name: _stage_options(payload, name)
             for name in ("assist", "prepare", "battle", "completion")
@@ -73,6 +81,8 @@ def register_full_run_job(
                     }
                 )
                 break
+            if interval_before_fight:
+                context.sleep(interval_before_fight)
 
             context.checkpoint(
                 "run.execute_battle",
@@ -83,6 +93,8 @@ def register_full_run_job(
                 context,
                 {"setting_name": normalized_name, **stage_options["battle"]},
             ) or {}
+            if interval_after_fight:
+                context.sleep(interval_after_fight)
 
             context.checkpoint(
                 "run.complete_battle",
@@ -130,7 +142,30 @@ def register_full_run_job(
             "runs": run_results,
         }
 
-    job_manager.register(FULL_RUN_JOB_KIND, handler, requires_device=True)
+    return handler
+
+
+def register_full_run_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    select_assist: StageHandler,
+    prepare_battle: StageHandler,
+    execute_battle: StageHandler,
+    complete_battle: StageHandler,
+) -> None:
+    if job_manager.has_kind(FULL_RUN_JOB_KIND):
+        return
+    job_manager.register(
+        FULL_RUN_JOB_KIND,
+        create_full_run_handler(
+            script_data,
+            select_assist,
+            prepare_battle,
+            execute_battle,
+            complete_battle,
+        ),
+        requires_device=True,
+    )
 
 
 def _stage_options(payload: dict[str, Any], stage: str) -> dict[str, Any]:
@@ -138,3 +173,12 @@ def _stage_options(payload: dict[str, Any], stage: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{stage} must be an object.")
     return dict(value)
+
+
+def _configured_interval(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number.")
+    result = float(value)
+    if not 0 <= result <= 600:
+        raise ValueError(f"{name} must be between 0 and 600.")
+    return result
