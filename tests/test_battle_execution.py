@@ -775,6 +775,65 @@ def test_strategy_execution_passes_special_keys_to_card_recognition():
     assert taps[0] == (375, 500)
 
 
+def test_strategy_execution_avoids_chain_for_single_np():
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Cards:
+        def recognize(self, *_args, **_options):
+            return {
+                "complete": True,
+                "recognized_count": 5,
+                "cards": [
+                    {
+                        "slot": slot,
+                        "code": code,
+                        "servant_position": int(code[0]),
+                        "color": code[1],
+                        "stars": 0,
+                    }
+                    for slot, code in enumerate(
+                        ("1B", "1A", "2B", "2A", "3B"),
+                        start=1,
+                    )
+                ],
+            }
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    tap_count = _execute_strategy_step(
+        Context(),
+        Device(),
+        Cards(),
+        b"frame",
+        "CH",
+        [],
+        {
+            "strategies": [],
+            "preselected_nps": [1],
+            "avoid_chain": True,
+        },
+        0.75,
+        0,
+    )
+
+    assert tap_count == 3
+    assert taps == [(500, 110), (150, 500), (900, 500)]
+
+
 def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Path):
     assets = tmp_path / "assets"
     data = tmp_path / "data"

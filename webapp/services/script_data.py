@@ -453,6 +453,7 @@ class ScriptDataService:
             "interval_after_fight": config.get("intervalAF", 0),
             "random_time": config.get("randomTime", 0),
             "random_touch": bool(config.get("randomTouch")),
+            "no_chain": bool(config.get("noChain")),
             "full_friendship_stop": bool(config.get("fullFriendshipStop")),
             "drop_stop_num": config.get("dropStopNum", 0),
             "drop_image": config.get("dropImage"),

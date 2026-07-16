@@ -1,6 +1,10 @@
 import pytest
 
-from webapp.automation.strategy import StrategySelectionError, select_command_cards
+from webapp.automation.strategy import (
+    StrategySelectionError,
+    select_command_cards,
+    select_command_cards_without_chain,
+)
 
 
 def _card(slot: int, code: str, stars: int | None = 0) -> dict:
@@ -69,6 +73,24 @@ def test_strategy_fallback_prefers_different_servants():
         {"type": "np", "servant": 1},
         {"type": "face", "slot": 2, "code": "2A", "stars": 0},
         {"type": "face", "slot": 4, "code": "3B", "stars": 0},
+    ]
+
+
+def test_no_chain_selection_uses_different_servants_and_colors():
+    cards = [
+        _card(1, "1B"),
+        _card(2, "1A"),
+        _card(3, "2B"),
+        _card(4, "2A"),
+        _card(5, "3B"),
+    ]
+
+    selected = select_command_cards_without_chain(cards, preselected_np=1)
+
+    assert selected == [
+        {"type": "np", "servant": 1},
+        {"type": "face", "slot": 1, "code": "1B", "stars": 0},
+        {"type": "face", "slot": 4, "code": "2A", "stars": 0},
     ]
 
 

@@ -7,6 +7,48 @@ class StrategySelectionError(ValueError):
     pass
 
 
+def select_command_cards_without_chain(
+    recognized_cards: list[dict[str, Any]],
+    *,
+    preselected_np: int,
+) -> list[dict[str, Any]]:
+    if isinstance(preselected_np, bool) or not isinstance(preselected_np, int):
+        raise StrategySelectionError("No-chain selection requires one Noble Phantasm.")
+    if not 1 <= preselected_np <= 3:
+        raise StrategySelectionError("Noble Phantasm position must be between 1 and 3.")
+    cards = sorted(
+        (
+            card
+            for card in recognized_cards
+            if isinstance(card.get("slot"), int)
+            and isinstance(card.get("servant_position"), int)
+            and card.get("color") in {"A", "B", "Q"}
+            and isinstance(card.get("code"), str)
+        ),
+        key=lambda card: int(card["slot"]),
+    )
+    if len(cards) < 2:
+        raise StrategySelectionError("No-chain selection requires at least two face cards.")
+
+    selected_cards = None
+    for first_index, first in enumerate(cards):
+        for second in cards[first_index + 1 :]:
+            if (
+                first["servant_position"] != second["servant_position"]
+                and first["color"] != second["color"]
+            ):
+                selected_cards = (first, second)
+                break
+        if selected_cards is not None:
+            break
+    if selected_cards is None:
+        selected_cards = (cards[0], cards[1])
+    return [
+        {"type": "np", "servant": preselected_np},
+        *(_face_selection(card) for card in selected_cards),
+    ]
+
+
 def select_command_cards(
     strategies: list[dict[str, Any]],
     recognized_cards: list[dict[str, Any]],

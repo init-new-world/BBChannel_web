@@ -60,12 +60,13 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
     extra_unsupported_action_count = 0
     source_types: list[object] = []
     command_phases: list[dict[str, Any]] = []
+    no_chain = bool(plan.get("run", {}).get("no_chain"))
 
     for round_plan in plan["rounds"]:
         turns: list[dict[str, Any]] = []
         for turn in round_plan["turns"]:
             actions = [_compile_action(action) for action in turn["actions"]]
-            command_phase = _compile_command_phase(turn)
+            command_phase = _compile_command_phase(turn, no_chain=no_chain)
             action_count += len(actions)
             supported_action_count += sum(bool(action["supported"]) for action in actions)
             tap_count += sum(len(action["steps"]) for action in actions)
@@ -103,7 +104,8 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
             {
                 "strategy": round_plan.get("extra_strategy"),
                 "nps": [],
-            }
+            },
+            no_chain=no_chain,
         )
         extra_action_count += len(extra_actions)
         extra_unsupported_action_count += sum(
@@ -194,7 +196,11 @@ def _battle_execution_status(
     return {"ready": True, "reason": None}
 
 
-def _compile_command_phase(turn: dict[str, Any]) -> dict[str, Any]:
+def _compile_command_phase(
+    turn: dict[str, Any],
+    *,
+    no_chain: bool = False,
+) -> dict[str, Any]:
     if turn.get("strategy"):
         strategies = turn["strategy"]
         return {
@@ -218,6 +224,23 @@ def _compile_command_phase(turn: dict[str, Any]) -> dict[str, Any]:
             "supported": False,
             "steps": [],
             "reason": "A turn cannot select more than three Noble Phantasms.",
+        }
+
+    if no_chain and len(nps) == 1:
+        return {
+            "supported": True,
+            "steps": [
+                _tap("attack", *ATTACK_POINT),
+                {
+                    "type": "strategy",
+                    "role": "command_card_no_chain",
+                    "strategies": [],
+                    "preselected_nps": nps,
+                    "avoid_chain": True,
+                    "selection_count": 3,
+                },
+            ],
+            "reason": None,
         }
 
     steps = [_tap("attack", *ATTACK_POINT)]

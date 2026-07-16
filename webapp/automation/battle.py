@@ -19,7 +19,11 @@ from webapp.automation.program import (
     NP_POINTS,
     compile_battle_program,
 )
-from webapp.automation.strategy import StrategySelectionError, select_command_cards
+from webapp.automation.strategy import (
+    StrategySelectionError,
+    select_command_cards,
+    select_command_cards_without_chain,
+)
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.cards import CommandCardRecognizer
@@ -1103,11 +1107,22 @@ def _execute_strategy_step(
         raise ValueError(
             f"Recognized {recognized['recognized_count']} of 5 command cards."
         )
-    selected = select_command_cards(
-        step["strategies"],
-        recognized["cards"],
-        preselected_nps=step.get("preselected_nps", []),
-    )
+    if step.get("avoid_chain"):
+        preselected_nps = step.get("preselected_nps")
+        if not isinstance(preselected_nps, list) or len(preselected_nps) != 1:
+            raise StrategySelectionError(
+                "No-chain selection requires exactly one Noble Phantasm."
+            )
+        selected = select_command_cards_without_chain(
+            recognized["cards"],
+            preselected_np=preselected_nps[0],
+        )
+    else:
+        selected = select_command_cards(
+            step["strategies"],
+            recognized["cards"],
+            preselected_nps=step.get("preselected_nps", []),
+        )
     context.emit(
         "strategy_selection",
         "Command card strategy was resolved.",

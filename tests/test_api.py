@@ -355,6 +355,42 @@ def test_setting_plan_route_exposes_normalized_actions(tmp_path: Path):
     assert payload["summary"]["action_count"] == 2
 
 
+def test_setting_program_compiles_no_chain_np_turn_to_dynamic_selection(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "noChain": 1,
+            "round1_turns": 1,
+            "round1_turn0_np": [1],
+        },
+    )
+
+    response = client.get("/api/settings/demo/program")
+
+    assert response.status_code == 200
+    command_phase = response.json()["rounds"][0]["turns"][0]["command_phase"]
+    assert command_phase == {
+        "supported": True,
+        "steps": [
+            {"type": "tap", "role": "attack", "x": 1150, "y": 600},
+            {
+                "type": "strategy",
+                "role": "command_card_no_chain",
+                "strategies": [],
+                "preselected_nps": [1],
+                "avoid_chain": True,
+                "selection_count": 3,
+            },
+        ],
+        "reason": None,
+    }
+
+
 def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)
