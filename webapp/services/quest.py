@@ -41,21 +41,29 @@ class QuestRecognizer:
 
         candidates = []
         for match in self._distinct_matches(matches):
-            clear_result = self._recognition.match_template(
-                screenshot,
-                f"battle/Free/{normalized_server}/clear.png",
-                threshold=threshold,
-                roi=self._clear_roi(match.center),
-                scales=(FREE_QUEST_LAYOUT_SCALE,),
-                template_size=(160, 50),
+            clear_roi = self._clear_roi(match.center)
+            clear_result = (
+                self._recognition.match_template(
+                    screenshot,
+                    f"battle/Free/{normalized_server}/clear.png",
+                    threshold=threshold,
+                    roi=clear_roi,
+                    scales=(FREE_QUEST_LAYOUT_SCALE,),
+                    template_size=(160, 50),
+                )
+                if clear_roi is not None
+                else None
             )
             candidates.append(
                 {
                     "center": list(match.center),
                     "template_path": match.template_path,
                     "confidence": match.confidence,
-                    "cleared": clear_result.matched,
-                    "clear_confidence": clear_result.confidence,
+                    "cleared": clear_result.matched if clear_result is not None else False,
+                    "clear_visible": clear_result is not None,
+                    "clear_confidence": (
+                        clear_result.confidence if clear_result is not None else None
+                    ),
                 }
             )
 
@@ -127,9 +135,11 @@ class QuestRecognizer:
         return sorted(distinct, key=lambda match: (match.center[1], match.center[0]))
 
     @staticmethod
-    def _clear_roi(center: list[int]) -> tuple[int, int, int, int]:
+    def _clear_roi(center: list[int]) -> tuple[int, int, int, int] | None:
         left = round(center[0] - 80 * FREE_QUEST_LAYOUT_SCALE)
         top = round(center[1] + 75 * FREE_QUEST_LAYOUT_SCALE)
         right = round(center[0] + 80 * FREE_QUEST_LAYOUT_SCALE)
         bottom = round(center[1] + 125 * FREE_QUEST_LAYOUT_SCALE)
+        if left < 0 or top < 0 or right >= 1280 or bottom >= 720:
+            return None
         return left, top, right - left + 1, bottom - top + 1

@@ -197,3 +197,26 @@ def test_free_map_recognizer_filters_unsafe_red_dots_and_offsets_touch_point():
     assert result["candidates"][0]["center"] == [400, 300]
     assert result["candidates"][0]["touch"] == [373, 327]
     assert result["selected"] == result["candidates"][0]
+
+
+def test_free_quest_recognizer_keeps_bottom_candidate_when_clear_badge_is_offscreen():
+    class BottomRecognition:
+        def match_template_all(self, _screenshot, template_path, **_options):
+            if template_path.endswith("freeQuest.png"):
+                return [_match(template_path, [700, 690])]
+            return []
+
+        def match_template(self, *_args, **_kwargs):
+            raise AssertionError("offscreen clear ROI must not be matched")
+
+    result = QuestRecognizer(BottomRecognition()).recognize_free_quests(
+        b"screen",
+        "CH",
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["center"] == [700, 690]
+    assert result["candidates"][0]["cleared"] is False
+    assert result["candidates"][0]["clear_visible"] is False
+    assert result["candidates"][0]["clear_confidence"] is None
+    assert result["selected"] == result["candidates"][0]
