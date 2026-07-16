@@ -36,6 +36,7 @@ class _Recognition:
         ("friend_apply", "completion"),
         ("friend_apply_1", "completion"),
         ("jblevel10", "completion"),
+        ("jbMax", "completion"),
         ("attack", "battle"),
         ("teamDecide", "prepare"),
         ("listupdatebtn", "assist"),

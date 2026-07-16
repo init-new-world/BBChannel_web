@@ -120,12 +120,18 @@ def create_completion_handler(
                         "attempts": attempts,
                     }
             if plan["run"]["full_friendship_stop"]:
-                friendship_max = _match_optional(
-                    recognition,
-                    screenshot,
-                    f"battle/{server}/jblevel10.png",
+                friendship_markers = (
+                    _match_optional(
+                        recognition,
+                        screenshot,
+                        f"battle/{server}/{template_name}.png",
+                    )
+                    for template_name in ("jblevel10", "jbMax")
                 )
-                if friendship_max is not None and friendship_max.matched:
+                if any(
+                    marker is not None and marker.matched
+                    for marker in friendship_markers
+                ):
                     context.checkpoint(
                         "complete",
                         progress=1.0,

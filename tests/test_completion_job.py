@@ -43,7 +43,8 @@ def _run_completion(
 
     next_button = _pattern((100, 40), (80, 65, 150))
     run_again = _pattern((120, 50), (35, 120, 170))
-    friendship_max = _pattern((90, 45), (145, 75, 105))
+    friendship_level_10 = _pattern((90, 45), (145, 75, 105))
+    friendship_max = _pattern((121, 46), (35, 155, 95))
     friendship_up = _pattern((160, 80), (115, 85, 145))
     finish_without_friend = _pattern((174, 52), (75, 135, 65))
     apply_for_friend = _pattern((308, 69), (165, 65, 105))
@@ -51,7 +52,8 @@ def _run_completion(
     drop_item = _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
-    friendship_max.save(battle_assets / "jblevel10.png")
+    friendship_level_10.save(battle_assets / "jblevel10.png")
+    friendship_max.save(battle_assets / "jbMax.png")
     friendship_up.save(battle_assets / "relationship_up.png")
     finish_without_friend.save(battle_assets / "friend_apply.png")
     apply_for_friend.save(battle_assets / "friend_apply_1.png")
@@ -151,6 +153,24 @@ def test_completion_stops_when_full_friendship_is_reached(tmp_path: Path):
     pytest.importorskip("cv2")
     frame = Image.new("RGB", (1280, 720), (18, 24, 32))
     frame.paste(_pattern((90, 45), (145, 75, 105)), (500, 350))
+
+    result = _run_completion(
+        tmp_path,
+        [(frame, None)],
+        config={"fullFriendshipStop": 1},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is False
+    assert result.result["stopped"] is True
+    assert result.result["reason"] == "full_friendship"
+    assert result.result["actions"] == []
+
+
+def test_completion_stops_when_friendship_maximum_marker_is_reached(tmp_path: Path):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern((121, 46), (35, 155, 95)), (500, 350))
 
     result = _run_completion(
         tmp_path,
