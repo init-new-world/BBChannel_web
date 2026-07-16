@@ -197,6 +197,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
             "NPlevel": 2,
             "skillsLevel": [10, 9, 8, 0, 0, 0],
             "scrollLimit": 0.96,
+            "intervalAFswipeAssist": 0.7,
         },
     )
 
@@ -215,6 +216,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
         "np_level": 2,
         "skill_levels": [10, 9, 8],
         "scroll_limit": 0.96,
+        "interval_after_swipe": 0.7,
         "all_not_skip": False,
     }
 

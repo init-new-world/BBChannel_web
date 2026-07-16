@@ -90,6 +90,24 @@ def test_assist_handler_stops_after_network_reconnect_limit():
         )
 
 
+def test_assist_handler_rejects_invalid_configured_swipe_interval():
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {
+                    "all_not_skip": True,
+                    "interval_after_swipe": 11,
+                },
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    handler = create_assist_handler(ScriptData(), None, None)
+
+    with pytest.raises(ValueError, match="scroll_wait_seconds"):
+        handler(None, {"setting_name": "demo"})
+
+
 def test_assist_handler_retries_when_selected_candidate_is_unavailable():
     state = {"screen": "candidate_1"}
     taps = []

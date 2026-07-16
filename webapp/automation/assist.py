@@ -45,6 +45,7 @@ def create_assist_handler(
         setting_name = payload.get("setting_name")
         if not isinstance(setting_name, str) or not setting_name.strip():
             raise ValueError("setting_name must be a non-empty string.")
+        plan = script_data.get_setting_plan(setting_name.strip())
         tap_wait_seconds = payload.get("tap_wait_seconds", 0.5)
         if (
             isinstance(tap_wait_seconds, bool)
@@ -52,7 +53,13 @@ def create_assist_handler(
             or not 0 <= tap_wait_seconds <= 10
         ):
             raise ValueError("tap_wait_seconds must be between 0 and 10.")
-        scroll_wait_seconds = payload.get("scroll_wait_seconds", 0.5)
+        configured_scroll_wait = plan["assist"].get("interval_after_swipe", 0.5)
+        if configured_scroll_wait is None:
+            configured_scroll_wait = 0.5
+        scroll_wait_seconds = payload.get(
+            "scroll_wait_seconds",
+            configured_scroll_wait,
+        )
         if (
             isinstance(scroll_wait_seconds, bool)
             or not isinstance(scroll_wait_seconds, (int, float))
@@ -95,7 +102,6 @@ def create_assist_handler(
         ):
             raise ValueError("max_unavailable must be between 0 and 100.")
 
-        plan = script_data.get_setting_plan(setting_name.strip())
         scroll_limit = payload.get(
             "scroll_limit",
             plan["assist"].get("scroll_limit", 0.96),
