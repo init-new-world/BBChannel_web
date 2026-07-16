@@ -36,10 +36,12 @@ def _run_completion(
     session = tmp_path / "replays" / "completion"
     battle_assets = assets / "battle" / "CH"
     interlude_assets = assets / "battle" / "Interlude" / "CH"
+    main_story_assets = assets / "battle" / "MainStory" / "CH"
     drop_assets = assets / "drop"
     settings = data / "settings"
     battle_assets.mkdir(parents=True)
     interlude_assets.mkdir(parents=True)
+    main_story_assets.mkdir(parents=True)
     drop_assets.mkdir(parents=True)
     settings.mkdir(parents=True)
     session.mkdir(parents=True)
@@ -56,6 +58,7 @@ def _run_completion(
     reconnect = _pattern((114, 53), (125, 45, 165))
     goto_interlude = _pattern((180, 48), (95, 75, 165))
     goto_stage = _pattern((220, 52), (155, 105, 45))
+    next_story = _pattern((161, 100), (105, 145, 65))
     drop_item = _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
@@ -69,6 +72,7 @@ def _run_completion(
     reconnect.save(battle_assets / "reconnect.png")
     goto_interlude.save(interlude_assets / "gotoInterlude.png")
     goto_stage.save(interlude_assets / "gotoStage.png")
+    next_story.save(main_story_assets / "nextOne.png")
     drop_item.save(drop_assets / "item.png")
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
@@ -349,6 +353,13 @@ def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
             "story_navigation",
             "goto_stage",
             id="goto-stage",
+        ),
+        pytest.param(
+            (161, 100),
+            (105, 145, 65),
+            "main_story_navigation",
+            "next_story",
+            id="next-story",
         ),
     ],
 )

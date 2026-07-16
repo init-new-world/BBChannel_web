@@ -243,19 +243,47 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
-            story_navigation = None
-            for template_name, action, reason in (
-                ("gotoInterlude", "goto_interlude", "interlude_navigation"),
-                ("gotoStage", "goto_stage", "story_navigation"),
-            ):
-                candidate = _match_optional(
-                    recognition,
-                    screenshot,
-                    f"battle/Interlude/{server}/{template_name}.png",
-                )
-                if candidate is not None and candidate.matched:
-                    story_navigation = (candidate, action, reason)
-                    break
+            story_specs = (
+                (
+                    f"battle/Interlude/{server}/gotoInterlude.png",
+                    "goto_interlude",
+                    "interlude_navigation",
+                ),
+                (
+                    f"battle/Interlude/{server}/gotoStage.png",
+                    "goto_stage",
+                    "story_navigation",
+                ),
+                (
+                    f"battle/MainStory/{server}/nextOne.png",
+                    "next_story",
+                    "main_story_navigation",
+                ),
+            )
+            story_matches = recognition.match_templates(
+                screenshot,
+                [
+                    {
+                        "template_path": template_path,
+                        "threshold": 0.85,
+                        "roi": (0, 360, 1280, 360),
+                        "scales": (1.0, 0.75, 2 / 3, 0.5),
+                    }
+                    for template_path, _action, _reason in story_specs
+                ],
+            )
+            story_navigation = next(
+                (
+                    (match, action, reason)
+                    for match, (_template_path, action, reason) in zip(
+                        story_matches,
+                        story_specs,
+                        strict=True,
+                    )
+                    if match.matched
+                ),
+                None,
+            )
             if story_navigation is not None:
                 candidate, action, reason = story_navigation
                 operation = device_service.tap(

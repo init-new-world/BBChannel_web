@@ -113,3 +113,22 @@ def test_stage_handler_recognizes_crawl_tower_auto_formation():
 
     assert result["stage"] == "prepare"
     assert result["matched_template"] == expected_path
+
+
+def test_stage_handler_recognizes_main_story_next_button():
+    expected_path = "battle/MainStory/CH/nextOne.png"
+
+    class MainStoryRecognition:
+        def match_template(self, _screen, template_path, **_options):
+            return _Match(template_path == expected_path)
+
+    handler = create_stage_handler(
+        _ScriptData(),
+        _Device(),
+        MainStoryRecognition(),
+    )
+
+    result = handler(None, {"setting_name": "demo"})
+
+    assert result["stage"] == "completion"
+    assert result["matched_template"] == expected_path

@@ -48,6 +48,7 @@ def create_stage_handler(
                 + (
                     f"battle/Interlude/{server}/gotoInterlude.png",
                     f"battle/Interlude/{server}/gotoStage.png",
+                    f"battle/MainStory/{server}/nextOne.png",
                 ),
             ),
             (
