@@ -29,6 +29,7 @@ def _run_completion(
     *,
     config: dict | None = None,
     payload: dict | None = None,
+    wait_timeout: float = 3,
 ):
     assets = tmp_path / "assets"
     data = tmp_path / "data"
@@ -46,6 +47,8 @@ def _run_completion(
     friendship_level_10 = _pattern((90, 45), (145, 75, 105))
     friendship_max = _pattern((121, 46), (35, 155, 95))
     friendship_up = _pattern((160, 80), (115, 85, 145))
+    friendship_up_legacy = _pattern((110, 54), (175, 125, 45))
+    friendship_up_legacy_large = _pattern((172, 188), (195, 165, 65))
     finish_without_friend = _pattern((174, 52), (75, 135, 65))
     apply_for_friend = _pattern((308, 69), (165, 65, 105))
     reconnect = _pattern((114, 53), (125, 45, 165))
@@ -55,6 +58,8 @@ def _run_completion(
     friendship_level_10.save(battle_assets / "jblevel10.png")
     friendship_max.save(battle_assets / "jbMax.png")
     friendship_up.save(battle_assets / "relationship_up.png")
+    friendship_up_legacy.save(battle_assets / "jbup.png")
+    friendship_up_legacy_large.save(battle_assets / "jbup1.png")
     finish_without_friend.save(battle_assets / "friend_apply.png")
     apply_for_friend.save(battle_assets / "friend_apply_1.png")
     reconnect.save(battle_assets / "reconnect.png")
@@ -106,7 +111,7 @@ def _run_completion(
             },
             device_key="replay:completion",
         )
-        return manager.wait(job.job_id, timeout=3)
+        return manager.wait(job.job_id, timeout=wait_timeout)
 
 
 def test_completion_advances_results_until_repeat_is_available(tmp_path: Path):
@@ -203,6 +208,34 @@ def test_completion_advances_friendship_level_dialog(tmp_path: Path):
 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["actions"] == ["relationship_up"]
+
+
+def test_completion_advances_legacy_friendship_level_dialogs(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    friendship_frame = base.copy()
+    friendship_frame.paste(_pattern((110, 54), (175, 125, 45)), (400, 250))
+    friendship_large_frame = base.copy()
+    friendship_large_frame.paste(
+        _pattern((172, 188), (195, 165, 65)),
+        (500, 200),
+    )
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (friendship_frame, {"type": "tap", "x": 455, "y": 277}),
+            (friendship_large_frame, {"type": "tap", "x": 586, "y": 294}),
+            (repeat_frame, None),
+        ],
+        payload={"timeout_seconds": 10},
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["actions"] == ["relationship_up", "relationship_up"]
 
 
 @pytest.mark.parametrize(

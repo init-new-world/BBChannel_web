@@ -35,6 +35,8 @@ def create_stage_handler(
                     "friend_apply_1",
                     "jblevel10",
                     "jbMax",
+                    "jbup",
+                    "jbup1",
                     "battleFinish",
                     "battleFinish1",
                     "fight_end",

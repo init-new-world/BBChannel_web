@@ -179,20 +179,20 @@ def create_completion_handler(
                     "attempts": attempts,
                 }
 
-            relationship_up = _match_optional(
+            next_button = _match_optional(
                 recognition,
                 screenshot,
-                f"battle/{server}/relationship_up.png",
+                f"battle/{server}/next.png",
             )
-            if relationship_up is not None and relationship_up.matched:
+            if next_button is not None and next_button.matched:
                 operation = device_service.tap(
-                    *match_touch_point(relationship_up, enabled=random_touch)
+                    *match_touch_point(next_button, enabled=random_touch)
                 )
-                actions.append("relationship_up")
+                actions.append("next")
                 context.emit(
                     "device_action",
-                    "Advanced friendship level dialog.",
-                    data={"role": "relationship_up", "operation": operation.to_dict()},
+                    "Advanced battle settlement.",
+                    data={"role": "next", "operation": operation.to_dict()},
                 )
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
@@ -220,20 +220,25 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
-            next_button = _match_optional(
-                recognition,
-                screenshot,
-                f"battle/{server}/next.png",
-            )
-            if next_button is not None and next_button.matched:
-                operation = device_service.tap(
-                    *match_touch_point(next_button, enabled=random_touch)
+            relationship_up = None
+            for template_name in ("relationship_up", "jbup", "jbup1"):
+                candidate = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/{template_name}.png",
                 )
-                actions.append("next")
+                if candidate is not None and candidate.matched:
+                    relationship_up = candidate
+                    break
+            if relationship_up is not None:
+                operation = device_service.tap(
+                    *match_touch_point(relationship_up, enabled=random_touch)
+                )
+                actions.append("relationship_up")
                 context.emit(
                     "device_action",
-                    "Advanced battle settlement.",
-                    data={"role": "next", "operation": operation.to_dict()},
+                    "Advanced friendship level dialog.",
+                    data={"role": "relationship_up", "operation": operation.to_dict()},
                 )
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
