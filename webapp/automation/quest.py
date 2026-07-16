@@ -66,6 +66,15 @@ def create_free_quest_entry_handler(
                     message="Free quest battle flow was reached.",
                 )
                 return _result(normalized_name, True, stage, None, attempts, actions)
+            if len(actions) >= max_actions:
+                return _result(
+                    normalized_name,
+                    False,
+                    "unknown",
+                    "navigation_limit",
+                    attempts,
+                    actions,
+                )
 
             screenshot = device_service.snapshot()
             quest_report = quest_recognizer.recognize_free_quests(
@@ -159,15 +168,6 @@ def create_free_quest_entry_handler(
                     panel_swipes = 0
                     actions.append("map_red_dot")
 
-            if len(actions) >= max_actions:
-                return _result(
-                    normalized_name,
-                    False,
-                    "unknown",
-                    "navigation_limit",
-                    attempts,
-                    actions,
-                )
             wait_seconds = action_wait_seconds if actions else poll_interval
             context.sleep(randomized_wait_seconds(wait_seconds, random_time))
 

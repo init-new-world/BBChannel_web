@@ -288,6 +288,42 @@ def test_free_quest_entry_job_requires_connected_device(tmp_path: Path):
         assert manager.requires_device(FREE_QUEST_ENTER_JOB_KIND) is True
 
 
+def test_free_quest_entry_checks_stage_after_reaching_action_limit():
+    stages = iter(("unknown", "assist"))
+
+    class Recognizer:
+        def recognize_free_quests(self, _screenshot, _server):
+            candidate = {"center": [700, 360], "cleared": False}
+            return {
+                "candidate_count": 1,
+                "candidates": [candidate],
+                "selected": candidate,
+            }
+
+        def recognize_free_map(self, _screenshot):
+            raise AssertionError("quest row is already visible")
+
+    device = _Device()
+    result = create_free_quest_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_actions": 1,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["stage"] == "assist"
+    assert result["actions"] == ["free_quest"]
+    assert device.taps == [(700, 360)]
+
+
 def test_free_map_swipes_follow_original_left_top_then_snake_pattern():
     assert [_free_map_swipe(index) for index in range(11)] == [
         (193, 93, 1067, 580),
