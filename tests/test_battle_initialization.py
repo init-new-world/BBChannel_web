@@ -51,9 +51,18 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
     enabled = _pattern((60, 58), (35, 155, 85), "down")
     disabled = _pattern((60, 58), (155, 55, 65), "up")
     back = _pattern((120, 50), (65, 95, 145), "up")
+    speed_off = Image.new("RGB", (70, 43), (30, 45, 65))
+    speed_off_draw = ImageDraw.Draw(speed_off)
+    speed_off_draw.polygon((10, 5, 58, 21, 10, 37), fill=(75, 195, 235))
+    np_auto = Image.new("RGB", (59, 77), (35, 50, 75))
+    np_auto_draw = ImageDraw.Draw(np_auto)
+    np_auto_draw.ellipse((7, 8, 51, 52), outline=(235, 185, 55), width=5)
+    np_auto_draw.line((13, 65, 47, 65), fill=(225, 75, 155), width=5)
     menu.save(battle_assets / "fight_menu_button.png")
     enabled.save(battle_assets / "on.png")
     disabled.save(battle_assets / "off.png")
+    speed_off.save(battle_assets / "speed_off.png")
+    np_auto.save(battle_assets / "needSkip.png")
     back.save(battle_assets / "back.png")
 
     base = Image.new("RGB", (1280, 720), (18, 24, 32))
@@ -63,14 +72,26 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
     toggle_frame.paste(disabled, (900, 300))
     toggle_frame.paste(disabled, (900, 400))
     toggle_frame.paste(enabled, (900, 500))
+    toggle_frame.paste(speed_off, (700, 200))
+    toggle_frame.paste(np_auto, (600, 180))
     back_frame = base.copy()
     back_frame.paste(back, (40, 30))
-    frames = [menu_frame, toggle_frame, toggle_frame, toggle_frame, back_frame]
+    frames = [
+        menu_frame,
+        toggle_frame,
+        toggle_frame,
+        toggle_frame,
+        toggle_frame,
+        toggle_frame,
+        back_frame,
+    ]
     expected = [
         {"type": "tap", "x": 1140, "y": 45},
         {"type": "tap", "x": 930, "y": 329},
         {"type": "tap", "x": 930, "y": 429},
         {"type": "tap", "x": 930, "y": 529},
+        {"type": "tap", "x": 735, "y": 221},
+        {"type": "tap", "x": 629, "y": 218},
         {"type": "tap", "x": 100, "y": 55},
     ]
     manifest_frames = []
@@ -104,5 +125,15 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
     assert result == {
         "changed": True,
         "states": [False, False, True],
-        "actions": ["open_menu", "toggle_1", "toggle_2", "toggle_3", "close_menu"],
+        "speed_enabled": False,
+        "np_skip_enabled": False,
+        "actions": [
+            "open_menu",
+            "toggle_1",
+            "toggle_2",
+            "toggle_3",
+            "enable_speed",
+            "enable_np_skip",
+            "close_menu",
+        ],
     }

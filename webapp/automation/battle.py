@@ -20,6 +20,7 @@ from webapp.automation.program import (
     compile_battle_program,
 )
 from webapp.automation.strategy import StrategySelectionError, select_command_cards
+from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.cards import CommandCardRecognizer
 from webapp.services.devices import DeviceService
@@ -83,6 +84,29 @@ def initialize_battle_settings(
             f"Expected three battle settings toggles but recognized {len(toggles)}."
         )
 
+    speed_off = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/speed_off.png",
+    )
+    speed_on = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/speed_on.png",
+    )
+    speed_enabled = _optional_toggle_state(speed_on, speed_off)
+    np_auto = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/needSkip.png",
+    )
+    np_skip = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/needSkip1.png",
+    )
+    np_skip_enabled = _optional_toggle_state(np_skip, np_auto)
+
     initial_states = [enabled for enabled, _match in toggles]
     for index, ((enabled, match), desired) in enumerate(
         zip(toggles, (True, True, False), strict=True),
@@ -92,6 +116,15 @@ def initialize_battle_settings(
             continue
         device_service.tap(*match_touch_point(match, enabled=random_touch))
         actions.append(f"toggle_{index}")
+        context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+
+    if speed_enabled is False and speed_off is not None:
+        device_service.tap(*match_touch_point(speed_off, enabled=random_touch))
+        actions.append("enable_speed")
+        context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+    if np_skip_enabled is False and np_auto is not None:
+        device_service.tap(*match_touch_point(np_auto, enabled=random_touch))
+        actions.append("enable_np_skip")
         context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
 
     screenshot = device_service.snapshot()
@@ -108,17 +141,58 @@ def initialize_battle_settings(
     context.emit(
         "battle_settings",
         "Initial battle settings were normalized.",
-        data={"states": initial_states, "actions": actions},
+        data={
+            "states": initial_states,
+            "speed_enabled": speed_enabled,
+            "np_skip_enabled": np_skip_enabled,
+            "actions": actions,
+        },
     )
     context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
     return {
-        "changed": any(
-            state != desired
-            for state, desired in zip(initial_states, (True, True, False), strict=True)
+        "changed": (
+            any(
+                state != desired
+                for state, desired in zip(
+                    initial_states,
+                    (True, True, False),
+                    strict=True,
+                )
+            )
+            or speed_enabled is False
+            or np_skip_enabled is False
         ),
         "states": initial_states,
+        "speed_enabled": speed_enabled,
+        "np_skip_enabled": np_skip_enabled,
         "actions": actions,
     }
+
+
+def _match_optional_battle_template(
+    recognition: RecognitionService,
+    screenshot: bytes,
+    template_path: str,
+):
+    try:
+        return recognition.match_template(
+            screenshot,
+            template_path,
+            threshold=0.85,
+            scales=(1.0, 0.75, 2 / 3, 0.5),
+        )
+    except AppError as exc:
+        if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+            return None
+        raise
+
+
+def _optional_toggle_state(enabled_match, disabled_match) -> bool | None:
+    if enabled_match is not None and enabled_match.matched:
+        return True
+    if disabled_match is not None and disabled_match.matched:
+        return False
+    return None
 
 
 def _distinct_toggle_matches(candidates):
