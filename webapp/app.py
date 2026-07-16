@@ -26,6 +26,7 @@ from webapp.automation import (
     register_completion_job,
     register_diagnostic_job,
     register_full_run_job,
+    register_free_quest_entry_job,
     register_recovery_job,
     register_stage_job,
 )
@@ -40,6 +41,7 @@ from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
+from webapp.services.quest import QuestRecognizer
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
 from webapp.services.team import TeamRecognizer
@@ -133,6 +135,7 @@ def create_app(
     assist_recognizer = AssistRecognizer(resources, recognition)
     card_recognizer = CommandCardRecognizer(resources, recognition)
     team_recognizer = TeamRecognizer(resources, recognition)
+    quest_recognizer = QuestRecognizer(recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -184,6 +187,13 @@ def create_app(
         script_data,
         device_service,
         recognition,
+    )
+    register_free_quest_entry_job(
+        job_manager,
+        script_data,
+        device_service,
+        quest_recognizer,
+        stage_handler,
     )
     register_recovery_job(
         job_manager,
@@ -239,6 +249,7 @@ def create_app(
     app.state.recognition = recognition
     app.state.assist_recognizer = assist_recognizer
     app.state.card_recognizer = card_recognizer
+    app.state.quest_recognizer = quest_recognizer
     app.state.script_data = script_data
     app.state.job_manager = job_manager
 

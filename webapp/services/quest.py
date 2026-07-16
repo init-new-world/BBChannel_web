@@ -70,6 +70,42 @@ class QuestRecognizer:
             "selected": selected,
         }
 
+    def recognize_free_map(
+        self,
+        screenshot: bytes,
+        *,
+        threshold: float = 0.8,
+    ) -> dict[str, Any]:
+        matches = self._recognition.match_template_all(
+            screenshot,
+            "battle/Free/reddot.png",
+            threshold=threshold,
+            scales=FREE_QUEST_SCALES,
+            mask_path="battle/Free/reddotMask.png",
+            max_results=50,
+        )
+        candidates = []
+        for match in sorted(matches, key=lambda item: (item.center[1], item.center[0])):
+            x, y = match.center
+            if (x < round(345 * FREE_QUEST_LAYOUT_SCALE) and y > 490) or y > round(
+                830 * FREE_QUEST_LAYOUT_SCALE
+            ):
+                continue
+            offset = round(40 * match.scale)
+            candidates.append(
+                {
+                    "center": list(match.center),
+                    "touch": [x - offset, y + offset],
+                    "confidence": match.confidence,
+                    "scale": match.scale,
+                }
+            )
+        return {
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+            "selected": candidates[0] if candidates else None,
+        }
+
     @staticmethod
     def _distinct_matches(matches: list[MatchResult]) -> list[MatchResult]:
         ordered = sorted(matches, key=lambda match: (match.center[1], match.center[0]))

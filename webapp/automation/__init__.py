@@ -22,6 +22,11 @@ from webapp.automation.entry import (
     register_battle_entry_job,
 )
 from webapp.automation.program import compile_battle_program
+from webapp.automation.quest import (
+    FREE_QUEST_ENTER_JOB_KIND,
+    create_free_quest_entry_handler,
+    register_free_quest_entry_job,
+)
 from webapp.automation.recovery import (
     BATTLE_RESTART_GAME_JOB_KIND,
     create_recovery_handler,
@@ -48,12 +53,14 @@ __all__ = [
     "BATTLE_PREPARE_JOB_KIND",
     "BATTLE_RESTART_GAME_JOB_KIND",
     "FULL_RUN_JOB_KIND",
+    "FREE_QUEST_ENTER_JOB_KIND",
     "compile_battle_program",
     "create_assist_handler",
     "create_battle_entry_handler",
     "create_battle_execute_plan_handler",
     "create_completion_handler",
     "create_full_run_handler",
+    "create_free_quest_entry_handler",
     "create_recovery_handler",
     "create_stage_handler",
     "register_assist_job",
@@ -62,6 +69,7 @@ __all__ = [
     "register_battle_entry_job",
     "register_diagnostic_job",
     "register_full_run_job",
+    "register_free_quest_entry_job",
     "register_recovery_job",
     "register_stage_job",
 ]

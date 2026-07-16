@@ -165,3 +165,35 @@ def test_free_quest_recognizer_matches_clear_badge_with_real_opencv(tmp_path: Pa
     assert result["candidates"][0]["center"] == center
     assert result["candidates"][0]["cleared"] is True
     assert result["selected"] is None
+
+
+def test_free_map_recognizer_filters_unsafe_red_dots_and_offsets_touch_point():
+    class MapRecognition:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def match_template_all(self, _screenshot, template_path, **options):
+            self.calls.append({"template_path": template_path, **options})
+            return [
+                _match(template_path, [400, 300], confidence=0.93),
+                _match(template_path, [180, 520], confidence=0.99),
+                _match(template_path, [600, 570], confidence=0.98),
+            ]
+
+    recognition = MapRecognition()
+
+    result = QuestRecognizer(recognition).recognize_free_map(b"screen")
+
+    assert recognition.calls == [
+        {
+            "template_path": "battle/Free/reddot.png",
+            "threshold": 0.8,
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+            "mask_path": "battle/Free/reddotMask.png",
+            "max_results": 50,
+        }
+    ]
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["center"] == [400, 300]
+    assert result["candidates"][0]["touch"] == [373, 327]
+    assert result["selected"] == result["candidates"][0]
