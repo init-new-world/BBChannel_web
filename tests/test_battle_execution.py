@@ -14,6 +14,7 @@ from webapp.automation.battle import (
     _apply_servant_exchange,
     _apply_servant_replacements,
     _execute_hakuno_reroll,
+    _execute_skill_action,
     _execute_strategy_step,
     _evaluate_card_condition,
     _execute_steps,
@@ -138,6 +139,50 @@ def test_execute_steps_adds_independent_configured_random_delays(monkeypatch):
 
     assert taps == [(0, 8), (0, 3)]
     assert sleeps == pytest.approx([0.2, 0.4])
+
+
+@pytest.mark.parametrize(
+    ("speedup_skills", "expected_taps"),
+    [
+        (True, [(70, 590), (1217, 440), (1217, 440)]),
+        (False, [(70, 590)]),
+    ],
+)
+def test_execute_skill_action_honors_animation_speedup_setting(
+    speedup_skills: bool,
+    expected_taps: list[tuple[int, int]],
+):
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    tap_count = _execute_skill_action(
+        Context(),
+        Device(),
+        {
+            "source": {"type": "skill", "command": 1},
+            "steps": [{"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590}],
+        },
+        0,
+        speedup_skills=speedup_skills,
+    )
+
+    assert tap_count == len(expected_taps)
+    assert taps == expected_taps
 
 
 def test_wait_for_battle_ready_recovers_network_prompt():
@@ -394,7 +439,7 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches():
                 "setting_name": "hakuno",
                 "turn_count": 1,
                 "action_count": 1,
-                "tap_count": 9,
+                "tap_count": 11,
             },
         ),
         (
@@ -402,7 +447,7 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches():
             {
                 "setting_name": "hakuno",
                 "action_count": 1,
-                "tap_count": 5,
+                "tap_count": 7,
             },
         ),
     ],
@@ -492,10 +537,12 @@ def test_battle_jobs_run_dynamic_hakuno_reroll(
     assert result.status == JobStatus.SUCCEEDED
     assert result.result == expected_result
     assert cards.calls == 2
-    assert taps[:5] == [
+    assert taps[:7] == [
         (1150, 600),
         (1250, 683),
         (70, 590),
+        (1217, 440),
+        (1217, 440),
         (1150, 600),
         (1250, 683),
     ]
@@ -587,13 +634,15 @@ def test_execute_battle_job_runs_extra_turn_while_round_is_unchanged(tmp_path: P
         result = manager.wait(job.job_id, timeout=2)
 
     assert result.status == JobStatus.SUCCEEDED
-    assert result.result["tap_count"] == 9
+    assert result.result["tap_count"] == 11
     assert taps == [
         (1150, 600),
         (150, 500),
         (375, 500),
         (650, 500),
         (70, 590),
+        (1217, 440),
+        (1217, 440),
         (1150, 600),
         (150, 500),
         (375, 500),
@@ -848,7 +897,7 @@ def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Pa
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     frame[560:588, 1100:1134] = attack
     _write_image(assets / "battle" / "CH" / "attack.png", attack)
-    for index in range(3):
+    for index in range(5):
         _write_image(session / f"{index}.png", frame)
 
     (session / "manifest.json").write_text(
@@ -859,7 +908,9 @@ def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Pa
                 "frames": [
                     {"file": "0.png", "expect": {"type": "tap", "x": 474, "y": 590}},
                     {"file": "1.png", "expect": {"type": "tap", "x": 640, "y": 440}},
-                    {"file": "2.png"},
+                    {"file": "2.png", "expect": {"type": "tap", "x": 1217, "y": 440}},
+                    {"file": "3.png", "expect": {"type": "tap", "x": 1217, "y": 440}},
+                    {"file": "4.png"},
                 ],
             }
         ),
@@ -917,12 +968,14 @@ def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Pa
     assert result.result == {
         "setting_name": "demo",
         "action_count": 1,
-        "tap_count": 2,
+        "tap_count": 4,
     }
     events = manager.database.list_events(job_id)
     assert [event.data["role"] for event in events if event.event_type == "device_action"] == [
         "servant_skill_5",
         "skill_target_2",
+        "skill_animation_skip_1",
+        "skill_animation_skip_2",
     ]
 
 
@@ -1000,6 +1053,8 @@ def test_execute_battle_job_runs_skill_and_command_phase(
         _write_image(assets / "battle" / "CH" / f"{card_type}.png", arts)
     expectations = [
         (battle_frame, {"type": "tap", "x": 70, "y": 590}),
+        (battle_frame, {"type": "tap", "x": 1217, "y": 440}),
+        (battle_frame, {"type": "tap", "x": 1217, "y": 440}),
         (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
         (command_frame, {"type": "tap", "x": 500, "y": 110}),
         (command_frame, {"type": "tap", "x": 150, "y": 500}),
@@ -1075,11 +1130,13 @@ def test_execute_battle_job_runs_skill_and_command_phase(
         "setting_name": "battle",
         "turn_count": 1,
         "action_count": 2,
-        "tap_count": 5,
+        "tap_count": 7,
     }
     events = manager.database.list_events(job.job_id)
     assert [event.data["role"] for event in events if event.event_type == "device_action"] == [
         "servant_skill_1",
+        "skill_animation_skip_1",
+        "skill_animation_skip_2",
         "attack",
         "np_1",
         "face_card_1",

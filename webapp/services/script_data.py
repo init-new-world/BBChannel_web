@@ -454,6 +454,7 @@ class ScriptDataService:
             "random_time": config.get("randomTime", 0),
             "random_touch": bool(config.get("randomTouch")),
             "no_chain": bool(config.get("noChain")),
+            "no_speedup_skill": bool(config.get("noSpeedupSkill")),
             "full_friendship_stop": bool(config.get("fullFriendshipStop")),
             "drop_stop_num": config.get("dropStopNum", 0),
             "drop_image": config.get("dropImage"),

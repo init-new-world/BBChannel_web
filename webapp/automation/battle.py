@@ -35,6 +35,19 @@ from webapp.services.script_data import ScriptDataService
 BATTLE_DRY_RUN_JOB_KIND = "battle.dry-run"
 BATTLE_EXECUTE_PLAN_JOB_KIND = "battle.execute-plan"
 BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
+SKILL_ANIMATION_SKIP_POINT = (1217, 440)
+NAMED_SKILL_COMMANDS = {
+    "Kukulkan",
+    "Barghest",
+    "Soujyuro",
+    "BBDubai",
+    "Hakuno",
+    "VanGoghMiner",
+    "Dante",
+    "Gyokuto",
+    "Charlotte",
+    "Flora",
+}
 
 
 @dataclass(frozen=True)
@@ -274,6 +287,7 @@ def _execute_hakuno_reroll(
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
     card_wait_seconds: float = 0.0,
+    speedup_skills: bool = False,
 ) -> int:
     tap_count = 0
     need_cards = runtime["need_cards"]
@@ -367,6 +381,12 @@ def _execute_hakuno_reroll(
             [runtime["skill_step"]],
             tap_interval,
         )
+        if speedup_skills:
+            tap_count += _execute_skill_animation_speedup(
+                context,
+                device_service,
+                tap_interval,
+            )
     raise AssertionError("Hakuno reroll loop exited unexpectedly.")
 
 
@@ -574,6 +594,7 @@ def create_battle_execute_plan_handler(
         card_wait_seconds = _configured_card_wait(
             plan["run"].get("interval_before_choose_card", 0.5)
         )
+        speedup_skills = not bool(plan["run"].get("no_speedup_skill"))
         tap_interval = _TapTiming(
             tap_interval,
             configured_random_time(plan["run"].get("random_time", 0)),
@@ -691,6 +712,7 @@ def create_battle_execute_plan_handler(
                             tap_interval,
                             special_keys=special_keys,
                             card_wait_seconds=card_wait_seconds,
+                            speedup_skills=speedup_skills,
                         )
                         tap_count += condition_taps
                     execute_conditional_skills = matched == control["execute_when_matched"]
@@ -728,6 +750,7 @@ def create_battle_execute_plan_handler(
                         tap_interval,
                         special_keys=special_keys,
                         card_wait_seconds=card_wait_seconds,
+                        speedup_skills=speedup_skills,
                     )
                     continue
                 _wait_for_battle_ready(
@@ -740,11 +763,12 @@ def create_battle_execute_plan_handler(
                     poll_interval,
                     reconnect_timing=tap_interval,
                 )
-                tap_count += _execute_steps(
+                tap_count += _execute_skill_action(
                     context,
                     device_service,
-                    action["steps"],
+                    action,
                     tap_interval,
+                    speedup_skills=speedup_skills,
                 )
                 state_change = action.get("state_change")
                 if state_change and state_change["type"] == "servant_exchange":
@@ -877,6 +901,7 @@ def create_battle_execute_plan_handler(
                         tap_interval,
                         special_keys=special_keys,
                         card_wait_seconds=card_wait_seconds,
+                        speedup_skills=speedup_skills,
                     )
                 else:
                     raise RuntimeError(
@@ -912,6 +937,7 @@ def _execute_extra_turn(
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
     card_wait_seconds: float = 0.0,
+    speedup_skills: bool = False,
 ) -> int:
     tap_count = 0
     skill_actions = [
@@ -940,6 +966,7 @@ def _execute_extra_turn(
                 tap_interval,
                 special_keys=special_keys,
                 card_wait_seconds=card_wait_seconds,
+                speedup_skills=speedup_skills,
             )
             continue
         _wait_for_battle_ready(
@@ -952,11 +979,12 @@ def _execute_extra_turn(
             poll_interval,
             reconnect_timing=tap_interval,
         )
-        tap_count += _execute_steps(
+        tap_count += _execute_skill_action(
             context,
             device_service,
-            action["steps"],
+            action,
             tap_interval,
+            speedup_skills=speedup_skills,
         )
         state_change = action.get("state_change")
         if state_change and state_change["type"] == "servant_exchange":
@@ -1231,6 +1259,7 @@ def _execute_skills_handler(
         card_wait_seconds = _configured_card_wait(
             plan["run"].get("interval_before_choose_card", 0.5)
         )
+        speedup_skills = not bool(plan["run"].get("no_speedup_skill"))
         tap_interval = _TapTiming(
             tap_interval,
             configured_random_time(plan["run"].get("random_time", 0)),
@@ -1283,6 +1312,7 @@ def _execute_skills_handler(
                     tap_interval,
                     special_keys=special_keys,
                     card_wait_seconds=card_wait_seconds,
+                    speedup_skills=speedup_skills,
                 )
                 continue
             _wait_for_battle_ready(
@@ -1295,11 +1325,12 @@ def _execute_skills_handler(
                 poll_interval,
                 reconnect_timing=tap_interval,
             )
-            tap_count += _execute_steps(
+            tap_count += _execute_skill_action(
                 context,
                 device_service,
-                action["steps"],
+                action,
                 tap_interval,
+                speedup_skills=speedup_skills,
             )
 
         context.checkpoint(
@@ -1361,6 +1392,68 @@ def _execute_steps(
         if wait_after:
             context.sleep(wait_after)
     return len(steps)
+
+
+def _execute_skill_action(
+    context: RunContext,
+    device_service: DeviceService,
+    action: dict[str, Any],
+    tap_interval: float | _TapTiming,
+    *,
+    speedup_skills: bool,
+) -> int:
+    tap_count = _execute_steps(
+        context,
+        device_service,
+        action["steps"],
+        tap_interval,
+    )
+    if not speedup_skills or not _skill_animation_can_be_sped_up(action):
+        return tap_count
+    return tap_count + _execute_skill_animation_speedup(
+        context,
+        device_service,
+        tap_interval,
+    )
+
+
+def _execute_skill_animation_speedup(
+    context: RunContext,
+    device_service: DeviceService,
+    tap_interval: float | _TapTiming,
+) -> int:
+    skip_x, skip_y = SKILL_ANIMATION_SKIP_POINT
+    return _execute_steps(
+        context,
+        device_service,
+        [
+            {
+                "type": "tap",
+                "role": f"skill_animation_skip_{attempt}",
+                "x": skip_x,
+                "y": skip_y,
+            }
+            for attempt in range(1, 3)
+        ],
+        tap_interval,
+    )
+
+
+def _skill_animation_can_be_sped_up(action: dict[str, Any]) -> bool:
+    source = action.get("source")
+    if not isinstance(source, dict) or source.get("type") != "skill":
+        return False
+    command = source.get("command")
+    if isinstance(command, int) and not isinstance(command, bool):
+        return 1 <= command <= 12
+    if not isinstance(command, list) or not command:
+        return False
+    head = command[0]
+    if isinstance(head, int) and not isinstance(head, bool):
+        if head < 0:
+            return -9 <= head <= -1
+        return 1 <= head <= 12 and len(command) != 3
+    return isinstance(head, str) and head in NAMED_SKILL_COMMANDS
 
 
 def _wait_for_battle_ready(
