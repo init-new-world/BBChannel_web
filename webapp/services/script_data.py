@@ -440,6 +440,7 @@ class ScriptDataService:
             "scroll_limit": config.get("scrollLimit"),
             "interval_after_swipe": config.get("intervalAFswipeAssist", 0.5),
             "no_grand_refresh": bool(config.get("noGrandRefresh")),
+            "bond_equip_type": config.get("jbType", "任意"),
             "all_not_skip": bool(config.get("allNotSkip", 1)),
         }
 

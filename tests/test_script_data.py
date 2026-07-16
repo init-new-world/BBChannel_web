@@ -200,6 +200,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
             "scrollLimit": 0.96,
             "intervalAFswipeAssist": 0.7,
             "noGrandRefresh": 1,
+            "jbType": "NP50",
         },
     )
 
@@ -221,6 +222,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
         "scroll_limit": 0.96,
         "interval_after_swipe": 0.7,
         "no_grand_refresh": True,
+        "bond_equip_type": "NP50",
         "all_not_skip": False,
     }
 

@@ -277,11 +277,26 @@ def test_assist_recognizer_grand_only_equip_uses_marker_row_layout(tmp_path: Pat
         center=[560, 120],
         scale=2 / 3,
     )
+    bond_type = MatchResult(
+        template_path="UIimage/jb_np.png",
+        matched=True,
+        confidence=0.91,
+        threshold=0.5,
+        top_left=[258, 278],
+        size=[32, 32],
+        center=[274, 294],
+        scale=2 / 3,
+    )
 
     class RecognitionStub:
         def match_template(self, _screenshot, template_path, **_options):
-            assert template_path == "battle/CH/grand_gnlz.png"
-            return marker
+            if template_path == "battle/CH/grand_gnlz.png":
+                return marker
+            assert template_path == "UIimage/jb_np.png"
+            assert _options["threshold"] == 0.5
+            assert _options["roi"] == (257, 277, 33, 33)
+            assert _options["template_size"] == (48, 48)
+            return bond_type
 
         def match_template_all(self, _screenshot, template_path, **_options):
             assert template_path == "assist/assist_equip/Event CE.png"
@@ -293,6 +308,7 @@ def test_assist_recognizer_grand_only_equip_uses_marker_row_layout(tmp_path: Pat
         {
             "mode": "冠位助战仅礼装",
             "equip_names": ["Event CE"],
+            "bond_equip_type": "NP50",
         },
         server="CH",
     )
@@ -303,6 +319,7 @@ def test_assist_recognizer_grand_only_equip_uses_marker_row_layout(tmp_path: Pat
     assert result["candidates"][0]["selection_point"] == [170, 251]
     assert result["candidates"][0]["bounds"] == [90, 335, 120, 40]
     assert result["candidates"][0]["checks"]["grand_marker"] is True
+    assert result["candidates"][0]["checks"]["bond_equip_type"] == "NP50"
 
 
 def test_assist_recognizer_unrecognized_mode_returns_first_row_candidate(tmp_path: Path):

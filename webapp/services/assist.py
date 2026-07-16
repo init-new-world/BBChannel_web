@@ -10,6 +10,11 @@ ASSIST_FACE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
+GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
+GRAND_BOND_TEMPLATES = {
+    "初始": "UIimage/jb_normal.png",
+    "NP50": "UIimage/jb_np.png",
+}
 
 
 class AssistRecognizer:
@@ -292,6 +297,27 @@ class AssistRecognizer:
                 )
             candidates.append(candidate)
 
+        bond_equip_type = assist.get("bond_equip_type")
+        if mode in GRAND_ASSIST_MODES and bond_equip_type in GRAND_BOND_TEMPLATES:
+            bond_candidates = []
+            for candidate in candidates:
+                bond_match = self._match_grand_bond_type(
+                    screenshot,
+                    candidate["anchor"],
+                    bond_equip_type,
+                )
+                if not bond_match.matched:
+                    continue
+                candidate["checks"].update(
+                    {
+                        "bond_equip_type": bond_equip_type,
+                        "bond_equip_template": bond_match.template_path,
+                        "bond_equip_confidence": bond_match.confidence,
+                    }
+                )
+                bond_candidates.append(candidate)
+            candidates = bond_candidates
+
         candidates.sort(key=lambda candidate: (candidate["anchor"][1], candidate["anchor"][0]))
         return {
             "mode": mode,
@@ -425,6 +451,26 @@ class AssistRecognizer:
             and top >= roi_top
             and left + width <= roi_right
             and top + height <= roi_bottom
+        )
+
+    def _match_grand_bond_type(
+        self,
+        screenshot: bytes,
+        anchor: list[int],
+        bond_equip_type: str,
+    ):
+        anchor_x, anchor_y = anchor
+        left = round(anchor_x + 122 * 1280 / 1788)
+        top = round(anchor_y - 19 * 720 / 1006)
+        right = round(anchor_x + 167 * 1280 / 1788)
+        bottom = round(anchor_y + 26 * 720 / 1006)
+        return self._recognition.match_template(
+            screenshot,
+            GRAND_BOND_TEMPLATES[bond_equip_type],
+            threshold=0.5,
+            roi=(left, top, right - left, bottom - top),
+            scales=ASSIST_EQUIP_SCALES,
+            template_size=(48, 48),
         )
 
     def match_refresh_button(

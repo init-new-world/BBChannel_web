@@ -31,6 +31,7 @@ class RecognitionService:
         roi: Sequence[int] | None = None,
         scales: Sequence[float] | None = None,
         mask_path: str | None = None,
+        template_size: Sequence[int] | None = None,
     ) -> MatchResult:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
         return self._match_decoded(
@@ -40,6 +41,7 @@ class RecognitionService:
             roi=roi,
             scales=scales,
             mask_path=mask_path,
+            template_size=template_size,
         )
 
     def match_templates(
@@ -188,6 +190,7 @@ class RecognitionService:
         roi: object = None,
         scales: object = None,
         mask_path: str | None = None,
+        template_size: object = None,
     ) -> MatchResult:
         cv, numpy = self._require_opencv()
         template_image, template_mask, explicit_mask = self._load_template(
@@ -207,9 +210,15 @@ class RecognitionService:
 
         best: tuple[float, tuple[int, int], int, int, float] | None = None
         template_height, template_width = template_image.shape[:2]
+        base_width, base_height = self._normalize_template_size(
+            template_size,
+            template_width,
+            template_height,
+            template_path,
+        )
         for scale in normalized_scales:
-            scaled_width = max(round(template_width * scale), 1)
-            scaled_height = max(round(template_height * scale), 1)
+            scaled_width = max(round(base_width * scale), 1)
+            scaled_height = max(round(base_height * scale), 1)
             if scaled_width > roi_width or scaled_height > roi_height:
                 continue
             scaled_template, scaled_mask = self._scale_template(
@@ -217,7 +226,6 @@ class RecognitionService:
                 template_mask,
                 scaled_width,
                 scaled_height,
-                scale,
             )
             matches = self._template_matches(
                 search_image,
@@ -302,7 +310,6 @@ class RecognitionService:
                 template_mask,
                 scaled_width,
                 scaled_height,
-                scale,
             )
             matches = self._template_matches(
                 search_image,
@@ -387,13 +394,16 @@ class RecognitionService:
         template_mask,
         width: int,
         height: int,
-        scale: float,
     ):
         cv, _ = self._require_opencv()
         template_height, template_width = template_image.shape[:2]
         if width == template_width and height == template_height:
             return template_image, template_mask
-        interpolation = cv.INTER_AREA if scale < 1 else cv.INTER_LINEAR
+        interpolation = (
+            cv.INTER_AREA
+            if width < template_width and height < template_height
+            else cv.INTER_LINEAR
+        )
         scaled_template = cv.resize(
             template_image,
             (width, height),
@@ -488,6 +498,31 @@ class RecognitionService:
         if not values or any(value <= 0 or not math.isfinite(value) for value in values):
             raise RecognitionService._invalid_scales(template_path, scales)
         return list(dict.fromkeys(values))
+
+    @staticmethod
+    def _normalize_template_size(
+        template_size: object,
+        source_width: int,
+        source_height: int,
+        template_path: str,
+    ) -> tuple[int, int]:
+        if template_size is None:
+            return source_width, source_height
+        try:
+            values = [int(value) for value in template_size]  # type: ignore[union-attr]
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Template size must contain two positive integers.",
+                {"template_path": template_path, "template_size": template_size},
+            ) from exc
+        if len(values) != 2 or any(value <= 0 for value in values):
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Template size must contain two positive integers.",
+                {"template_path": template_path, "template_size": template_size},
+            )
+        return values[0], values[1]
 
     @staticmethod
     def _invalid_scales(template_path: str, scales: object) -> AppError:

@@ -118,6 +118,29 @@ def test_match_template_selects_best_scale(tmp_path: Path):
     assert result.size == [24, 20]
 
 
+def test_match_template_supports_explicit_template_size(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = _pattern((10, 20))
+    template.save(resources.assets_dir / "forced-size.png")
+    resized = template.resize((30, 30), Image.Resampling.BILINEAR)
+    screenshot = Image.new("RGB", (100, 70), (8, 12, 18))
+    screenshot.paste(resized, (41, 23))
+
+    result = RecognitionService(resources).match_template(
+        _png_bytes(screenshot),
+        "forced-size.png",
+        threshold=0.9,
+        template_size=(30, 30),
+    )
+
+    assert result.matched is True
+    assert result.top_left == [41, 23]
+    assert result.size == [30, 30]
+
+
 def test_match_template_uses_alpha_channel_as_mask(tmp_path: Path):
     pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService
