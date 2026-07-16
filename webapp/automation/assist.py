@@ -169,11 +169,13 @@ def create_assist_handler(
         scrolls_since_refresh = 0
         refreshes = 0
         unavailable = 0
+        empty_lists = 0
         while True:
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
+            screenshot = snapshot_without_reconnect()
             recognition = assist_recognizer.recognize(
-                snapshot_without_reconnect(),
+                screenshot,
                 plan["assist"],
                 server=plan["server"],
             )
@@ -257,10 +259,28 @@ def create_assist_handler(
                     "refreshes": refreshes,
                     "reconnects": reconnects,
                     "unavailable": unavailable,
+                    "empty_lists": empty_lists,
                     "class_selection": class_selection,
                     "selected": selected,
                     "tap": selection_operation.to_dict(),
                 }
+            try:
+                no_assist = assist_recognizer.match_no_assist(
+                    screenshot,
+                    plan["server"],
+                )
+            except AppError as exc:
+                if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
+                    raise
+                no_assist = None
+            if no_assist is not None and no_assist.matched:
+                empty_lists += 1
+                scrolls_since_refresh = max_scrolls
+                context.emit(
+                    "recognition",
+                    "Filtered assist list is empty; refresh will be attempted.",
+                    data={"role": "assist_empty", "empty_list": empty_lists},
+                )
             if scrolls_since_refresh < max_scrolls:
                 context.checkpoint("scroll_assist", progress=progress)
                 operation = device_service.swipe(1120, 620, 1120, 250, 500)

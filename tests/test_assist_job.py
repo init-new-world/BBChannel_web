@@ -172,6 +172,97 @@ def test_assist_handler_retries_when_selected_candidate_is_unavailable():
     assert result["selected"]["anchor"] == [100, 225]
 
 
+def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
+    state = {"screen": "empty"}
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["screen"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            transitions = {
+                "empty": "refresh_confirmation",
+                "refresh_confirmation": "candidate",
+                "candidate": "team",
+            }
+            state["screen"] = transitions[state["screen"]]
+            return Operation()
+
+    class Match:
+        size = (120, 60)
+
+        def __init__(self, matched, center=(640, 420)):
+            self.matched = matched
+            self.center = center
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match(False)
+
+        def match_no_assist(self, screenshot, _server):
+            return Match(screenshot == b"empty")
+
+        def match_refresh_button(self, screenshot, _server):
+            return Match(screenshot == b"empty", (1130, 65))
+
+        def match_refresh_confirmation(self, screenshot, _server):
+            return Match(screenshot == b"refresh_confirmation", (615, 410))
+
+        def match_not_available(self, _screenshot, _server):
+            return Match(False)
+
+        def recognize(self, screenshot, _assist, *, server):
+            candidates = (
+                [{"anchor": [70, 225], "scale": 1.0, "checks": {}}]
+                if screenshot == b"candidate"
+                else []
+            )
+            return {
+                "candidate_count": len(candidates),
+                "servant_name": "Support",
+                "candidates": candidates,
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True},
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {
+            "setting_name": "demo",
+            "tap_wait_seconds": 0,
+            "refresh_wait_seconds": 0,
+        },
+    )
+
+    assert taps == [(1130, 65), (615, 410), (340, 165)]
+    assert result["attempts"] == 2
+    assert result["scrolls"] == 0
+    assert result["refreshes"] == 1
+    assert result["empty_lists"] == 1
+
+
 def test_assist_handler_selects_configured_class_before_recognition():
     taps = []
 
