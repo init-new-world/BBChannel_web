@@ -95,6 +95,7 @@ const els = {
   battleActionDelay: document.querySelector("#battle-action-delay"),
   fullRunEntryMode: document.querySelector("#full-run-entry-mode"),
   fullRunCount: document.querySelector("#full-run-count"),
+  fullRunRestartLimit: document.querySelector("#full-run-restart-limit"),
   fullRunMapSwipes: document.querySelector("#full-run-map-swipes"),
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
@@ -698,6 +699,7 @@ async function startFullRun() {
   await enqueueJob("battle.run", {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
+    max_restarts: readNumber(els.fullRunRestartLimit),
     entry_mode: els.fullRunEntryMode.value,
     entry: {
       max_map_swipes: readNumber(els.fullRunMapSwipes),
