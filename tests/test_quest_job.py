@@ -2,6 +2,7 @@ from pathlib import Path
 
 from webapp.automation.quest import (
     FREE_QUEST_ENTER_JOB_KIND,
+    _free_map_swipe,
     create_free_quest_entry_handler,
     register_free_quest_entry_job,
 )
@@ -17,6 +18,7 @@ class _ScriptData:
 class _Device:
     def __init__(self) -> None:
         self.taps = []
+        self.swipes = []
         self.snapshots = 0
 
     def snapshot(self):
@@ -26,6 +28,10 @@ class _Device:
     def tap(self, x, y):
         self.taps.append((x, y))
         return OperationResult(ok=True, action="tap", data={"x": x, "y": y})
+
+    def swipe(self, x1, y1, x2, y2, duration_ms):
+        self.swipes.append((x1, y1, x2, y2, duration_ms))
+        return OperationResult(ok=True, action="swipe")
 
 
 class _Context:
@@ -118,7 +124,7 @@ def test_free_quest_entry_stops_when_visible_quests_are_all_clear():
         device,
         Recognizer(),
         lambda _context, _payload: {"stage": "unknown"},
-    )(_Context(), {"setting_name": "demo"})
+    )(_Context(), {"setting_name": "demo", "max_map_swipes": 0})
 
     assert result["entered"] is False
     assert result["reason"] == "visible_quests_cleared"
@@ -140,11 +146,79 @@ def test_free_quest_entry_reports_when_no_visible_map_target_exists():
         _Device(),
         Recognizer(),
         lambda _context, _payload: {"stage": "unknown"},
-    )(_Context(), {"setting_name": "demo"})
+    )(_Context(), {"setting_name": "demo", "max_map_swipes": 0})
 
     assert result["entered"] is False
     assert result["reason"] == "no_visible_free_quest"
     assert result["stage"] == "unknown"
+
+
+def test_free_quest_entry_scrolls_map_before_recognizing_quest():
+    stages = iter(("unknown", "unknown", "assist"))
+
+    class Recognizer:
+        def recognize_free_quests(self, screenshot, _server):
+            if screenshot == b"screen-1":
+                return {"candidate_count": 0, "candidates": [], "selected": None}
+            candidate = {"center": [700, 360], "cleared": False}
+            return {
+                "candidate_count": 1,
+                "candidates": [candidate],
+                "selected": candidate,
+            }
+
+        def recognize_free_map(self, _screenshot):
+            return {"candidate_count": 0, "candidates": [], "selected": None}
+
+    device = _Device()
+    result = create_free_quest_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_map_swipes": 2,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["actions"] == ["map_swipe", "free_quest"]
+    assert device.swipes == [(193, 93, 1067, 580, 1500)]
+    assert device.taps == [(700, 360)]
+
+
+def test_free_quest_entry_stops_after_map_scan_limit():
+    class Recognizer:
+        def recognize_free_quests(self, _screenshot, _server):
+            return {"candidate_count": 0, "candidates": [], "selected": None}
+
+        def recognize_free_map(self, _screenshot):
+            return {"candidate_count": 0, "candidates": [], "selected": None}
+
+    device = _Device()
+    result = create_free_quest_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": "unknown"},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_map_swipes": 1,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["entered"] is False
+    assert result["reason"] == "map_scan_exhausted"
+    assert result["attempts"] == 2
+    assert result["actions"] == ["map_swipe"]
+    assert device.swipes == [(193, 93, 1067, 580, 1500)]
 
 
 def test_free_quest_entry_job_requires_connected_device(tmp_path: Path):
@@ -159,3 +233,19 @@ def test_free_quest_entry_job_requires_connected_device(tmp_path: Path):
 
         assert manager.has_kind(FREE_QUEST_ENTER_JOB_KIND)
         assert manager.requires_device(FREE_QUEST_ENTER_JOB_KIND) is True
+
+
+def test_free_map_swipes_follow_original_left_top_then_snake_pattern():
+    assert [_free_map_swipe(index) for index in range(11)] == [
+        (193, 93, 1067, 580),
+        (193, 93, 1067, 580),
+        (193, 93, 1067, 580),
+        (640, 360, 213, 360),
+        (640, 360, 213, 360),
+        (640, 360, 213, 360),
+        (640, 360, 640, 120),
+        (640, 360, 1067, 360),
+        (640, 360, 1067, 360),
+        (640, 360, 1067, 360),
+        (640, 360, 640, 120),
+    ]

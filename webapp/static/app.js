@@ -95,6 +95,7 @@ const els = {
   battleActionDelay: document.querySelector("#battle-action-delay"),
   fullRunEntryMode: document.querySelector("#full-run-entry-mode"),
   fullRunCount: document.querySelector("#full-run-count"),
+  fullRunMapSwipes: document.querySelector("#full-run-map-swipes"),
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   startFullRun: document.querySelector("#start-full-run"),
@@ -198,6 +199,7 @@ function bindEvents() {
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.startBattlePlan.addEventListener("click", startBattlePlan);
+  els.fullRunEntryMode.addEventListener("change", updateControls);
   els.startFullRun.addEventListener("click", startFullRun);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
@@ -697,6 +699,9 @@ async function startFullRun() {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
     entry_mode: els.fullRunEntryMode.value,
+    entry: {
+      max_map_swipes: readNumber(els.fullRunMapSwipes),
+    },
     prepare: {
       apple: els.fullRunApple.value,
       team_check_mode: els.fullRunTeamCheck.value,
@@ -1110,6 +1115,7 @@ function updateControls() {
   els.startFullRun.disabled = !state.connected
     || !state.selectedSettingProgram?.execution?.battle?.ready
     || hasRunningJob;
+  els.fullRunMapSwipes.disabled = els.fullRunEntryMode.value !== "free_quest";
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)

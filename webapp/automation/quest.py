@@ -34,6 +34,7 @@ def create_free_quest_entry_handler(
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(payload, "action_wait_seconds", 1, 0, 30)
         max_actions = _integer(payload, "max_actions", 20, 1, 200)
+        max_map_swipes = _integer(payload, "max_map_swipes", 15, 0, 100)
         plan = script_data.get_setting_plan(normalized_name)
         server = str(plan["server"]).upper()
         run_options = plan.get("run", {})
@@ -42,6 +43,7 @@ def create_free_quest_entry_handler(
         started = monotonic()
         attempts = 0
         actions: list[str] = []
+        map_swipes = 0
 
         while monotonic() - started <= timeout_seconds:
             attempts += 1
@@ -100,22 +102,42 @@ def create_free_quest_entry_handler(
                 )
                 selected_map_target = map_report.get("selected")
                 if not isinstance(selected_map_target, dict):
-                    return _result(
-                        normalized_name,
-                        False,
-                        "unknown",
-                        "no_visible_free_quest",
-                        attempts,
-                        actions,
+                    if map_swipes >= max_map_swipes:
+                        reason = (
+                            "no_visible_free_quest"
+                            if max_map_swipes == 0
+                            else "map_scan_exhausted"
+                        )
+                        return _result(
+                            normalized_name,
+                            False,
+                            "unknown",
+                            reason,
+                            attempts,
+                            actions,
+                        )
+                    swipe = _free_map_swipe(map_swipes)
+                    operation = device_service.swipe(*swipe, 1500)
+                    context.emit(
+                        "device_action",
+                        "Scrolled the free quest map.",
+                        data={
+                            "role": "map_swipe",
+                            "scan_index": map_swipes,
+                            "operation": operation.to_dict(),
+                        },
                     )
-                _tap_candidate(
-                    context,
-                    device_service,
-                    selected_map_target["touch"],
-                    "map_red_dot",
-                    random_touch,
-                )
-                actions.append("map_red_dot")
+                    map_swipes += 1
+                    actions.append("map_swipe")
+                else:
+                    _tap_candidate(
+                        context,
+                        device_service,
+                        selected_map_target["touch"],
+                        "map_red_dot",
+                        random_touch,
+                    )
+                    actions.append("map_red_dot")
 
             if len(actions) >= max_actions:
                 return _result(
@@ -171,6 +193,20 @@ def _tap_candidate(
         "Advanced free quest navigation.",
         data={"role": role, "x": x, "y": y, "operation": operation.to_dict()},
     )
+
+
+def _free_map_swipe(index: int) -> tuple[int, int, int, int]:
+    if index < 3:
+        return 193, 93, 1067, 580
+
+    snake_index = index - 3
+    row = snake_index // 4
+    step = snake_index % 4
+    if step == 3:
+        return 640, 360, 640, 120
+    if row % 2 == 0:
+        return 640, 360, 213, 360
+    return 640, 360, 1067, 360
 
 
 def _result(
