@@ -9,6 +9,7 @@ from webapp.services.resources import ResourceService
 ASSIST_FACE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
+GRAND_LAYOUT_SCALE = 2 / 3
 
 
 class AssistRecognizer:
@@ -52,7 +53,8 @@ class AssistRecognizer:
             }
 
         only_servant = mode == "仅从者"
-        only_equip = mode == "仅礼装"
+        grand_only_equip = mode == "冠位助战仅礼装"
+        only_equip = mode == "仅礼装" or grand_only_equip
         canonical_name = assist.get("servant_canonical_name")
         templates = [] if only_equip else self._servant_templates(canonical_name)
         equip_templates = (
@@ -145,11 +147,16 @@ class AssistRecognizer:
             )
         ]
 
-        candidates = (
-            self._equip_only_candidates(equip_matches)
-            if only_equip
-            else []
-        )
+        if grand_only_equip:
+            grand_marker = self.match_grand_marker(screenshot, server)
+            candidates = self._grand_equip_candidates(
+                grand_marker,
+                equip_matches,
+            )
+        elif only_equip:
+            candidates = self._equip_only_candidates(equip_matches)
+        else:
+            candidates = []
         if only_equip and check_limit_break:
             matched_candidates = []
             for candidate in candidates:
@@ -340,6 +347,85 @@ class AssistRecognizer:
                 continue
             candidates.append(candidate)
         return candidates
+
+    @classmethod
+    def _grand_equip_candidates(
+        cls,
+        marker: Any,
+        equip_matches: dict[str, list[Any]],
+    ) -> list[dict[str, Any]]:
+        if not marker.matched:
+            return []
+
+        marker_x, marker_y = marker.center
+        candidates: list[dict[str, Any]] = []
+        for row_offset in range(-2, 3):
+            row_y = marker_y + row_offset * 300 * GRAND_LAYOUT_SCALE
+            if (
+                row_y < 35 * GRAND_LAYOUT_SCALE
+                or row_y > 1080 * GRAND_LAYOUT_SCALE
+            ):
+                continue
+            anchor_x = marker_x - 347904 / 1788 * GRAND_LAYOUT_SCALE
+            anchor_y = row_y + 107460 / 1006 * GRAND_LAYOUT_SCALE
+            equip_roi = (
+                round(anchor_x - 120 * 1280 / 1788),
+                round(anchor_y + 50 * 720 / 1006),
+                round(anchor_x + 75 * 1280 / 1788),
+                round(anchor_y + 130 * 720 / 1006),
+            )
+            row_matches = [
+                (equip_name, match)
+                for equip_name, matches in equip_matches.items()
+                for match in matches
+                if cls._bounds_inside(match, equip_roi)
+            ]
+            if not row_matches:
+                continue
+            equip_name, equip_match = max(
+                row_matches,
+                key=lambda item: item[1].confidence,
+            )
+            anchor = [round(anchor_x), round(anchor_y)]
+            candidates.append(
+                {
+                    "bounds": [*equip_match.top_left, *equip_match.size],
+                    "anchor": anchor,
+                    "confidence": equip_match.confidence,
+                    "template_path": equip_match.template_path,
+                    "scale": GRAND_LAYOUT_SCALE,
+                    "selection_point": [
+                        anchor[0],
+                        round(
+                            max(
+                                270 * GRAND_LAYOUT_SCALE,
+                                anchor_y - 60 * GRAND_LAYOUT_SCALE,
+                            )
+                        ),
+                    ],
+                    "checks": {
+                        "equip_name": equip_name,
+                        "equip_template": equip_match.template_path,
+                        "equip_confidence": equip_match.confidence,
+                        "grand_marker": True,
+                        "grand_marker_template": marker.template_path,
+                        "grand_marker_confidence": marker.confidence,
+                    },
+                }
+            )
+        return candidates
+
+    @staticmethod
+    def _bounds_inside(match: Any, roi: tuple[int, int, int, int]) -> bool:
+        left, top = match.top_left
+        width, height = match.size
+        roi_left, roi_top, roi_right, roi_bottom = roi
+        return (
+            left >= roi_left
+            and top >= roi_top
+            and left + width <= roi_right
+            and top + height <= roi_bottom
+        )
 
     def match_refresh_button(
         self,

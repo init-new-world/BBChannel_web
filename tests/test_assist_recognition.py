@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
+from webapp.core.models import MatchResult
 from webapp.services.assist import AssistRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
@@ -236,6 +237,72 @@ def test_assist_recognizer_only_equip_mode_requires_limit_break_marker(tmp_path:
     assert result["candidate_count"] == 1
     assert result["candidates"][0]["anchor"] == [100, 95]
     assert result["candidates"][0]["checks"]["full_limit_break"] is True
+
+
+def test_assist_recognizer_grand_only_equip_uses_marker_row_layout(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assist_equips = assets / "assist" / "assist_equip"
+    assist_equips.mkdir(parents=True)
+    data.mkdir()
+    (assist_equips / "Event CE.png").touch()
+
+    marker = MatchResult(
+        template_path="battle/CH/grand_gnlz.png",
+        matched=True,
+        confidence=0.96,
+        threshold=0.7,
+        top_left=[260, 210],
+        size=[80, 20],
+        center=[300, 220],
+        scale=2 / 3,
+    )
+    matching_equip = MatchResult(
+        template_path="assist/assist_equip/Event CE.png",
+        matched=True,
+        confidence=0.94,
+        threshold=0.85,
+        top_left=[90, 335],
+        size=[120, 40],
+        center=[150, 355],
+        scale=2 / 3,
+    )
+    unrelated_equip = MatchResult(
+        template_path="assist/assist_equip/Event CE.png",
+        matched=True,
+        confidence=0.99,
+        threshold=0.85,
+        top_left=[500, 100],
+        size=[120, 40],
+        center=[560, 120],
+        scale=2 / 3,
+    )
+
+    class RecognitionStub:
+        def match_template(self, _screenshot, template_path, **_options):
+            assert template_path == "battle/CH/grand_gnlz.png"
+            return marker
+
+        def match_template_all(self, _screenshot, template_path, **_options):
+            assert template_path == "assist/assist_equip/Event CE.png"
+            return [unrelated_equip, matching_equip]
+
+    resources = ResourceService(assets, data)
+    result = AssistRecognizer(resources, RecognitionStub()).recognize(
+        b"frame",
+        {
+            "mode": "冠位助战仅礼装",
+            "equip_names": ["Event CE"],
+        },
+        server="CH",
+    )
+
+    assert result["templates"] == []
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [170, 291]
+    assert result["candidates"][0]["selection_point"] == [170, 251]
+    assert result["candidates"][0]["bounds"] == [90, 335, 120, 40]
+    assert result["candidates"][0]["checks"]["grand_marker"] is True
 
 
 def test_assist_recognizer_unrecognized_mode_returns_first_row_candidate(tmp_path: Path):
