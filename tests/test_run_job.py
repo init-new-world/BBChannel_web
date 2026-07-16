@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from webapp.automation.run import (
     FULL_RUN_JOB_KIND,
     create_full_run_handler,
@@ -393,3 +395,152 @@ def test_full_run_stops_when_free_quest_entry_cannot_find_a_target(tmp_path: Pat
     assert result.result["reason"] == "no_visible_free_quest"
     assert result.result["entry"] == entry_result
     assert calls == []
+
+
+def test_full_run_recovers_timeout_and_resumes_current_battle_stage():
+    calls: list[str] = []
+    battle_attempts = 0
+
+    def ordinary(name: str, result=None):
+        def execute(_context, _payload):
+            calls.append(name)
+            return dict(result or {})
+
+        return execute
+
+    def battle(_context, _payload):
+        nonlocal battle_attempts
+        calls.append("battle")
+        battle_attempts += 1
+        if battle_attempts == 1:
+            raise TimeoutError("battle controls did not recover")
+        return {"executed": True}
+
+    handler = create_full_run_handler(
+        _ScriptData(game_crash_restart=True),
+        ordinary("assist"),
+        ordinary("prepare", {"ready": True}),
+        battle,
+        ordinary("complete", {"complete": True, "drop_count": 0}),
+        recover_game=ordinary(
+            "recover",
+            {"recovered": True, "stage": "battle", "attempts": 2},
+        ),
+    )
+
+    result = handler(_Context(), {"setting_name": "demo", "max_restarts": 2})
+
+    assert calls == [
+        "assist",
+        "prepare",
+        "battle",
+        "recover",
+        "battle",
+        "complete",
+    ]
+    assert result["runs_completed"] == 1
+    assert result["restart_count"] == 1
+    assert result["recoveries"] == [
+        {
+            "trigger_stage": "battle",
+            "error": "battle controls did not recover",
+            "recovered": True,
+            "stage": "battle",
+            "attempts": 2,
+        }
+    ]
+
+
+def test_full_run_raises_timeout_after_restart_limit_is_exhausted():
+    recovery_calls = 0
+
+    def timeout_battle(_context, _payload):
+        raise TimeoutError("battle remains stuck")
+
+    def recover(_context, _payload):
+        nonlocal recovery_calls
+        recovery_calls += 1
+        return {"recovered": True, "stage": "battle"}
+
+    handler = create_full_run_handler(
+        _ScriptData(game_crash_restart=True),
+        lambda _context, _payload: {},
+        lambda _context, _payload: {"ready": True},
+        timeout_battle,
+        lambda _context, _payload: {"complete": True},
+        recover_game=recover,
+    )
+
+    with pytest.raises(TimeoutError, match="battle remains stuck"):
+        handler(_Context(), {"setting_name": "demo", "max_restarts": 1})
+
+    assert recovery_calls == 1
+
+
+def test_full_run_does_not_recover_timeout_when_restart_is_disabled():
+    recovery_calls = 0
+
+    def timeout_assist(_context, _payload):
+        raise TimeoutError("assist remains unavailable")
+
+    def recover(_context, _payload):
+        nonlocal recovery_calls
+        recovery_calls += 1
+        return {"recovered": True, "stage": "assist"}
+
+    handler = create_full_run_handler(
+        _ScriptData(game_crash_restart=False),
+        timeout_assist,
+        lambda _context, _payload: {"ready": True},
+        lambda _context, _payload: {},
+        lambda _context, _payload: {"complete": True},
+        recover_game=recover,
+    )
+
+    with pytest.raises(TimeoutError, match="assist remains unavailable"):
+        handler(_Context(), {"setting_name": "demo", "max_restarts": 2})
+
+    assert recovery_calls == 0
+
+
+def test_full_run_rejects_recovery_outside_the_battle_flow():
+    def timeout_battle(_context, _payload):
+        raise TimeoutError("battle timed out")
+
+    handler = create_full_run_handler(
+        _ScriptData(game_crash_restart=True),
+        lambda _context, _payload: {},
+        lambda _context, _payload: {"ready": True},
+        timeout_battle,
+        lambda _context, _payload: {"complete": True},
+        recover_game=lambda _context, _payload: {
+            "recovered": True,
+            "stage": "unknown",
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Game recovery did not reach the battle flow",
+    ):
+        handler(_Context(), {"setting_name": "demo", "max_restarts": 1})
+
+
+@pytest.mark.parametrize("max_restarts", [-1, 21, True, 1.5])
+def test_full_run_validates_restart_limit(max_restarts):
+    handler = create_full_run_handler(
+        _ScriptData(game_crash_restart=True),
+        lambda _context, _payload: {},
+        lambda _context, _payload: {"ready": True},
+        lambda _context, _payload: {},
+        lambda _context, _payload: {"complete": True},
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="max_restarts must be between 0 and 20",
+    ):
+        handler(
+            _Context(),
+            {"setting_name": "demo", "max_restarts": max_restarts},
+        )

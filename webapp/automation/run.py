@@ -43,6 +43,13 @@ def create_full_run_handler(
         entry_mode = payload.get("entry_mode", "current")
         if entry_mode not in {"current", "free_quest"}:
             raise ValueError("entry_mode must be current or free_quest.")
+        max_restarts = payload.get("max_restarts", 3)
+        if (
+            isinstance(max_restarts, bool)
+            or not isinstance(max_restarts, int)
+            or not 0 <= max_restarts <= 20
+        ):
+            raise ValueError("max_restarts must be between 0 and 20.")
 
         normalized_name = setting_name.strip()
         run_options = script_data.get_setting_plan(normalized_name)["run"]
@@ -77,9 +84,61 @@ def create_full_run_handler(
         clear_runs = 0
         run_number = 1
         entry_result: dict[str, Any] | None = None
+        restart_count = 0
+        recoveries: list[dict[str, Any]] = []
+        resume_stage: str | None = None
         resume = payload.get("resume", True)
         if not isinstance(resume, bool):
             raise ValueError("resume must be a boolean.")
+
+        battle_stages = {"assist", "prepare", "battle", "completion"}
+
+        def execute_stage(
+            stage_name: str,
+            stage_handler: StageHandler,
+            stage_payload: dict[str, Any],
+        ) -> tuple[dict[str, Any], str | None]:
+            nonlocal restart_count
+            try:
+                return stage_handler(context, stage_payload) or {}, None
+            except TimeoutError as exc:
+                if (
+                    not game_crash_restart
+                    or recover_game is None
+                    or restart_count >= max_restarts
+                ):
+                    raise
+                context.checkpoint(
+                    "run.recover_game",
+                    progress=min(completed_runs / max(max_runs, 1), 0.95),
+                    message=f"Recovering after {stage_name} timeout.",
+                )
+                recovered = recover_game(
+                    context,
+                    {
+                        **stage_options["recovery"],
+                        "setting_name": normalized_name,
+                    },
+                ) or {}
+                restart_count += 1
+                recovered_stage = str(recovered.get("stage") or "unknown")
+                recoveries.append(
+                    {
+                        "trigger_stage": stage_name,
+                        "error": str(exc),
+                        **recovered,
+                    }
+                )
+                if recovered.get("recovered") is False:
+                    raise RuntimeError(
+                        str(recovered.get("reason") or "Game recovery failed.")
+                    ) from exc
+                if recovered_stage not in battle_stages:
+                    raise RuntimeError(
+                        "Game recovery did not reach the battle flow."
+                    ) from exc
+                return {}, recovered_stage
+
         initial_stage = "assist"
         if entry_mode == "free_quest":
             if enter_free_quest is None:
@@ -109,6 +168,7 @@ def create_full_run_handler(
                 initial_stage == "unknown"
                 and game_crash_restart
                 and recover_game is not None
+                and restart_count < max_restarts
             ):
                 recovered = recover_game(
                     context,
@@ -117,8 +177,16 @@ def create_full_run_handler(
                         "setting_name": normalized_name,
                     },
                 ) or {}
+                restart_count += 1
                 initial_stage = str(recovered.get("stage") or "unknown")
-            if initial_stage not in {"assist", "prepare", "battle", "completion"}:
+                recoveries.append(
+                    {
+                        "trigger_stage": "initial",
+                        "error": "Current battle flow stage was not recognized.",
+                        **recovered,
+                    }
+                )
+            if initial_stage not in battle_stages:
                 raise RuntimeError("Current battle flow stage was not recognized.")
 
         if stopped:
@@ -136,14 +204,19 @@ def create_full_run_handler(
                 "cleared_ap": False,
                 "drop_count": 0,
                 "entry": entry_result,
+                "restart_count": restart_count,
+                "recoveries": recoveries,
                 "runs": [],
             }
-        if initial_stage not in {"assist", "prepare", "battle", "completion"}:
+        if initial_stage not in battle_stages:
             raise RuntimeError("Free quest entry did not reach the battle flow.")
 
         while run_number <= max_runs or (clear_ap and clear_runs < max_clear_runs):
             clearing_ap = run_number > max_runs
-            current_stage = initial_stage if run_number == 1 else "assist"
+            current_stage = resume_stage or (
+                initial_stage if run_number == 1 else "assist"
+            )
+            resume_stage = None
             progress = min(completed_runs / max(max_runs, 1), 0.95)
             assist_result = {}
             if current_stage == "assist":
@@ -152,10 +225,13 @@ def create_full_run_handler(
                     progress=progress,
                     message=f"Selecting assist for run {run_number}.",
                 )
-                assist_result = select_assist(
-                    context,
+                assist_result, resume_stage = execute_stage(
+                    "assist",
+                    select_assist,
                     {"setting_name": normalized_name, **stage_options["assist"]},
-                ) or {}
+                )
+                if resume_stage is not None:
+                    continue
 
             prepare_result = {"ready": True}
             if current_stage in {"assist", "prepare"}:
@@ -164,8 +240,9 @@ def create_full_run_handler(
                     progress=progress,
                     message=f"Preparing run {run_number}.",
                 )
-                prepare_result = prepare_battle(
-                    context,
+                prepare_result, resume_stage = execute_stage(
+                    "prepare",
+                    prepare_battle,
                     {
                         **stage_options["prepare"],
                         "setting_name": normalized_name,
@@ -176,7 +253,9 @@ def create_full_run_handler(
                             else "off"
                         ),
                     },
-                ) or {}
+                )
+                if resume_stage is not None:
+                    continue
             if prepare_result.get("ready") is False:
                 prepare_reason = str(
                     prepare_result.get("reason") or "battle_not_ready"
@@ -197,14 +276,17 @@ def create_full_run_handler(
                     progress=progress,
                     message=f"Executing run {run_number}.",
                 )
-                battle_result = execute_battle(
-                    context,
+                battle_result, resume_stage = execute_stage(
+                    "battle",
+                    execute_battle,
                     {
                         **stage_options["battle"],
                         "setting_name": normalized_name,
                         "initialize_settings": first_battle_set and run_number == 1,
                     },
-                ) or {}
+                )
+                if resume_stage is not None:
+                    continue
                 if interval_after_fight:
                     context.sleep(interval_after_fight)
 
@@ -213,8 +295,9 @@ def create_full_run_handler(
                 progress=progress,
                 message=f"Completing run {run_number}.",
             )
-            completion_result = complete_battle(
-                context,
+            completion_result, resume_stage = execute_stage(
+                "completion",
+                complete_battle,
                 {
                     **stage_options["completion"],
                     "setting_name": normalized_name,
@@ -225,7 +308,9 @@ def create_full_run_handler(
                     ),
                     "initial_drop_count": drop_count,
                 },
-            ) or {}
+            )
+            if resume_stage is not None:
+                continue
             raw_drop_count = completion_result.get("drop_count", drop_count)
             if isinstance(raw_drop_count, int) and not isinstance(raw_drop_count, bool):
                 drop_count = max(raw_drop_count, 0)
@@ -265,6 +350,8 @@ def create_full_run_handler(
             "cleared_ap": cleared_ap,
             "drop_count": drop_count,
             "entry": entry_result,
+            "restart_count": restart_count,
+            "recoveries": recoveries,
             "runs": run_results,
         }
 
