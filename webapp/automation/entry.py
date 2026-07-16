@@ -52,6 +52,7 @@ def create_battle_entry_handler(
             ("battle_ready", f"battle/{server}/phase_1.png"),
             ("apple_decide", f"battle/{server}/apple_decide.png"),
             ("apple_close", f"battle/{server}/apple_close.png"),
+            ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png"),
             ("team_decide", f"battle/{server}/teamDecide.png"),
             ("start_task", f"battle/{server}/start_task.png"),
             ("start_battle", f"battle/{server}/start_battle.png"),

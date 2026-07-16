@@ -150,6 +150,84 @@ def test_available_apple_only_falls_back_when_enabled():
     assert fallback.checked == ["gold", "silver"]
 
 
+def test_battle_prepare_uses_crawl_tower_auto_formation():
+    class ScriptDataStub:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "run": {
+                    "random_touch": False,
+                    "random_time": 0,
+                    "allow_other_apple": False,
+                },
+            }
+
+    class DeviceStub:
+        def __init__(self):
+            self.frames = iter((b"formation", b"battle"))
+            self.taps = []
+
+        def snapshot(self):
+            return next(self.frames)
+
+        def tap(self, x, y):
+            self.taps.append((x, y))
+
+            class Operation:
+                def to_dict(self):
+                    return {"ok": True}
+
+            return Operation()
+
+    class RecognitionStub:
+        def match_template(self, screenshot, template_path, **_options):
+            matched = (
+                screenshot == b"formation"
+                and template_path == "battle/CrawlTower/CH/zdbc.png"
+            ) or (
+                screenshot == b"battle"
+                and template_path == "battle/CH/attack.png"
+            )
+            return MatchResult(
+                template_path=template_path,
+                matched=matched,
+                confidence=1.0 if matched else 0.0,
+                threshold=0.85,
+                top_left=[500, 400],
+                size=[200, 60],
+                center=[600, 430],
+            )
+
+    class ContextStub:
+        def checkpoint(self, *_args, **_kwargs):
+            pass
+
+        def emit(self, *_args, **_kwargs):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    device = DeviceStub()
+    result = create_battle_entry_handler(
+        ScriptDataStub(),
+        device,
+        RecognitionStub(),
+    )(
+        ContextStub(),
+        {
+            "setting_name": "tower",
+            "timeout_seconds": 1,
+            "poll_interval": 0,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["ready"] is True
+    assert result["actions"] == ["auto_formation"]
+    assert device.taps == [(600, 430)]
+
+
 def test_battle_prepare_job_confirms_team_starts_quest_and_waits_for_battle(tmp_path: Path):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"

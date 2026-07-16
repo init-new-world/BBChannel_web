@@ -73,7 +73,8 @@ def create_stage_handler(
                         "start_task",
                         "start_battle",
                     )
-                ),
+                )
+                + (f"battle/CrawlTower/{server}/zdbc.png",),
             ),
             (
                 "assist",

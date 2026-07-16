@@ -94,3 +94,22 @@ def test_stage_handler_recognizes_post_battle_story_navigation(template: str):
 
     assert result["stage"] == "completion"
     assert result["matched_template"] == expected_path
+
+
+def test_stage_handler_recognizes_crawl_tower_auto_formation():
+    expected_path = "battle/CrawlTower/CH/zdbc.png"
+
+    class CrawlTowerRecognition:
+        def match_template(self, _screen, template_path, **_options):
+            return _Match(template_path == expected_path)
+
+    handler = create_stage_handler(
+        _ScriptData(),
+        _Device(),
+        CrawlTowerRecognition(),
+    )
+
+    result = handler(None, {"setting_name": "demo"})
+
+    assert result["stage"] == "prepare"
+    assert result["matched_template"] == expected_path
