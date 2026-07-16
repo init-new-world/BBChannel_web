@@ -100,10 +100,7 @@ class ScriptDataService:
             "assist": self._plan_assist(config),
             "run": self._plan_run(config),
             "special_keys": self._plan_special_keys(config),
-            "master": {
-                "equip": config.get("master_equip"),
-                "sex": config.get("master_sex"),
-            },
+            "master": self._plan_master(config),
             "rounds": rounds,
             "summary": {
                 **detail["summary"],
@@ -354,44 +351,79 @@ class ScriptDataService:
         return count
 
     def _plan_servants(self, config: dict[str, Any]) -> list[dict[str, Any]]:
-        catalog_by_name: dict[str, dict[str, Any]] = {}
+        catalog_by_name: dict[str, tuple[str, dict[str, Any]]] = {}
         server = config.get("server")
         if isinstance(server, str) and server.upper() in VALID_SERVERS:
             for canonical_name, details in self._load_servant_catalog(server.upper()).items():
                 if not isinstance(details, dict):
                     continue
-                catalog_by_name[canonical_name] = details
+                catalog_by_name[canonical_name] = (canonical_name, details)
                 aliases = details.get("other_name")
                 if isinstance(aliases, list):
                     for alias in aliases:
                         if isinstance(alias, str):
-                            catalog_by_name[alias] = details
+                            catalog_by_name[alias] = (canonical_name, details)
 
-        def metadata(name: Any) -> tuple[str | None, str | None]:
-            details = catalog_by_name.get(name) if isinstance(name, str) else None
-            if details is None:
-                return None, None
+        def metadata(
+            name: Any,
+        ) -> tuple[str | None, str | None, str | None, str | None]:
+            catalog_entry = catalog_by_name.get(name) if isinstance(name, str) else None
+            if catalog_entry is None:
+                return None, None, None, None
+            canonical_name, details = catalog_entry
             sn = details.get("SN")
             np_color = details.get("NPcolor")
+            servant_class = details.get("class")
             return (
+                canonical_name,
+                servant_class if isinstance(servant_class, str) else None,
                 str(sn) if isinstance(sn, (str, int)) else None,
                 np_color if isinstance(np_color, str) else None,
             )
 
+        configured_used = config.get("usedServant", [0, 1, 2])
+        if not isinstance(configured_used, list):
+            configured_used = []
+        used_slots = {
+            slot
+            for slot in configured_used
+            if isinstance(slot, int)
+            and not isinstance(slot, bool)
+            and 0 <= slot < 6
+        }
         servants = []
         for slot in range(6):
             name = config.get(f"servant_{slot}_name")
-            sn, np_color = metadata(name)
+            canonical_name, servant_class, sn, np_color = metadata(name)
             servants.append(
                 {
                     "slot": slot,
                     "name": name,
+                    "canonical_name": canonical_name,
+                    "class": servant_class,
                     "active": slot < 3 and bool(name),
+                    "used": slot in used_slots and bool(name),
                     "sn": sn,
                     "np_color": np_color,
                 }
             )
         return servants
+
+    def _plan_master(self, config: dict[str, Any]) -> dict[str, Any]:
+        equip = config.get("master_equip")
+        equip_name = next(
+            (
+                master["name"]
+                for master in self.list_masters()["masters"]
+                if str(master.get("sn")) == str(equip)
+            ),
+            None,
+        )
+        return {
+            "equip": equip,
+            "name": equip_name,
+            "sex": config.get("master_sex"),
+        }
 
     def _plan_assist(self, config: dict[str, Any]) -> dict[str, Any]:
         slot = config.get("assistIdx")

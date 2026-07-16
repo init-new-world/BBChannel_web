@@ -91,6 +91,7 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
             },
         },
     )
+    _write_json(tmp_path / "master_info.json", {"Chaldea": {"SN": 7}})
     strategy = _strategy_payload()
     _write_json(
         tmp_path / "settings" / "demo.json",
@@ -127,14 +128,68 @@ def test_get_setting_plan_normalizes_round_turn_actions(tmp_path: Path):
     assert plan["server"] == "CH"
     assert plan["validation"]["ok"] is True
     assert plan["servants"] == [
-        {"slot": 0, "name": "Servant A", "active": True, "sn": "100", "np_color": "A"},
-        {"slot": 1, "name": "B", "active": True, "sn": "101", "np_color": "Q"},
-        {"slot": 2, "name": None, "active": False, "sn": None, "np_color": None},
-        {"slot": 3, "name": None, "active": False, "sn": None, "np_color": None},
-        {"slot": 4, "name": None, "active": False, "sn": None, "np_color": None},
-        {"slot": 5, "name": None, "active": False, "sn": None, "np_color": None},
+        {
+            "slot": 0,
+            "name": "Servant A",
+            "canonical_name": "Servant A",
+            "class": "Caster",
+            "active": True,
+            "used": True,
+            "sn": "100",
+            "np_color": "A",
+        },
+        {
+            "slot": 1,
+            "name": "B",
+            "canonical_name": "Support B",
+            "class": "Rider",
+            "active": True,
+            "used": True,
+            "sn": "101",
+            "np_color": "Q",
+        },
+        {
+            "slot": 2,
+            "name": None,
+            "canonical_name": None,
+            "class": None,
+            "active": False,
+            "used": False,
+            "sn": None,
+            "np_color": None,
+        },
+        {
+            "slot": 3,
+            "name": None,
+            "canonical_name": None,
+            "class": None,
+            "active": False,
+            "used": False,
+            "sn": None,
+            "np_color": None,
+        },
+        {
+            "slot": 4,
+            "name": None,
+            "canonical_name": None,
+            "class": None,
+            "active": False,
+            "used": False,
+            "sn": None,
+            "np_color": None,
+        },
+        {
+            "slot": 5,
+            "name": None,
+            "canonical_name": None,
+            "class": None,
+            "active": False,
+            "used": False,
+            "sn": None,
+            "np_color": None,
+        },
     ]
-    assert plan["master"] == {"equip": 7, "sex": 1}
+    assert plan["master"] == {"equip": 7, "name": "Chaldea", "sex": 1}
     assert plan["rounds"][0]["round"] == 1
     assert plan["rounds"][0]["extra_skill"] == [["extra", 1]]
     assert plan["rounds"][0]["extra_strategy"] == [strategy]
