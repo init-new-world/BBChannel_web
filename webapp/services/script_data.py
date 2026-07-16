@@ -439,6 +439,7 @@ class ScriptDataService:
             "skill_levels": skill_levels[:3] if isinstance(skill_levels, list) else [],
             "scroll_limit": config.get("scrollLimit"),
             "interval_after_swipe": config.get("intervalAFswipeAssist", 0.5),
+            "no_grand_refresh": bool(config.get("noGrandRefresh")),
             "all_not_skip": bool(config.get("allNotSkip", 1)),
         }
 

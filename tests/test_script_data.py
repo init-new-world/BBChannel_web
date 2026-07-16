@@ -199,6 +199,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
             "skillsLevel": [10, 9, 8, 0, 0, 0],
             "scrollLimit": 0.96,
             "intervalAFswipeAssist": 0.7,
+            "noGrandRefresh": 1,
         },
     )
 
@@ -219,6 +220,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
         "skill_levels": [10, 9, 8],
         "scroll_limit": 0.96,
         "interval_after_swipe": 0.7,
+        "no_grand_refresh": True,
         "all_not_skip": False,
     }
 

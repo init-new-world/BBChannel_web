@@ -425,6 +425,21 @@ class AssistRecognizer:
             scales=ASSIST_EQUIP_SCALES,
         )
 
+    def match_grand_marker(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.7,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/grand_gnlz.png",
+            threshold=threshold,
+            roi=(133, 157, 254, 563),
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
     def match_refresh_confirmation(
         self,
         screenshot: bytes,

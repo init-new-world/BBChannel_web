@@ -16,6 +16,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 ASSIST_SELECT_JOB_KIND = "assist.select"
+GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -190,6 +191,7 @@ def create_assist_handler(
         unavailable = 0
         empty_lists = 0
         scroll_limit_hits = 0
+        grand_boundary_hits = 0
         while True:
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
@@ -291,6 +293,7 @@ def create_assist_handler(
                     "unavailable": unavailable,
                     "empty_lists": empty_lists,
                     "scroll_limit_hits": scroll_limit_hits,
+                    "grand_boundary_hits": grand_boundary_hits,
                     "scroll_limit": scroll_limit,
                     "class_selection": class_selection,
                     "selected": selected,
@@ -314,32 +317,51 @@ def create_assist_handler(
                     data={"role": "assist_empty", "empty_list": empty_lists},
                 )
             elif scrolls_since_refresh < max_scrolls:
-                try:
-                    scrollbar = assist_recognizer.match_scrollbar(
+                if (
+                    plan["assist"].get("mode") in GRAND_ASSIST_MODES
+                    and plan["assist"].get("no_grand_refresh")
+                    and not assist_recognizer.match_grand_marker(
                         screenshot,
                         plan["server"],
-                    )
-                except AppError as exc:
-                    if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
-                        raise
-                    scrollbar = None
-                if (
-                    scrollbar is not None
-                    and scrollbar.matched
-                    and scrollbar.top_left[1] >= scroll_limit * 720
+                    ).matched
                 ):
-                    scroll_limit_hits += 1
+                    grand_boundary_hits += 1
                     scrolls_since_refresh = max_scrolls
                     context.emit(
                         "recognition",
-                        "Assist scroll limit reached; refresh will be attempted.",
+                        "Grand assist boundary reached; refresh will be attempted.",
                         data={
-                            "role": "assist_scroll_limit",
-                            "scroll_limit": scroll_limit,
-                            "scrollbar_y": scrollbar.top_left[1],
-                            "scroll_limit_hit": scroll_limit_hits,
+                            "role": "assist_grand_boundary",
+                            "grand_boundary_hit": grand_boundary_hits,
                         },
                     )
+                if scrolls_since_refresh < max_scrolls:
+                    try:
+                        scrollbar = assist_recognizer.match_scrollbar(
+                            screenshot,
+                            plan["server"],
+                        )
+                    except AppError as exc:
+                        if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
+                            raise
+                        scrollbar = None
+                    if (
+                        scrollbar is not None
+                        and scrollbar.matched
+                        and scrollbar.top_left[1] >= scroll_limit * 720
+                    ):
+                        scroll_limit_hits += 1
+                        scrolls_since_refresh = max_scrolls
+                        context.emit(
+                            "recognition",
+                            "Assist scroll limit reached; refresh will be attempted.",
+                            data={
+                                "role": "assist_scroll_limit",
+                                "scroll_limit": scroll_limit,
+                                "scrollbar_y": scrollbar.top_left[1],
+                                "scroll_limit_hit": scroll_limit_hits,
+                            },
+                        )
             if scrolls_since_refresh < max_scrolls:
                 context.checkpoint("scroll_assist", progress=progress)
                 operation = device_service.swipe(1120, 620, 1120, 250, 500)
