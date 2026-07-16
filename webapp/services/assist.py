@@ -278,6 +278,20 @@ class AssistRecognizer:
             scales=ASSIST_EQUIP_SCALES,
         )
 
+    def match_scrollbar(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/scrollbar.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
     def match_refresh_confirmation(
         self,
         screenshot: bytes,

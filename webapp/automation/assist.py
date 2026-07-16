@@ -96,6 +96,19 @@ def create_assist_handler(
             raise ValueError("max_unavailable must be between 0 and 100.")
 
         plan = script_data.get_setting_plan(setting_name.strip())
+        scroll_limit = payload.get(
+            "scroll_limit",
+            plan["assist"].get("scroll_limit", 0.96),
+        )
+        if scroll_limit is None:
+            scroll_limit = 0.96
+        if (
+            isinstance(scroll_limit, bool)
+            or not isinstance(scroll_limit, (int, float))
+            or not 0 <= scroll_limit <= 1
+        ):
+            raise ValueError("scroll_limit must be between 0 and 1.")
+        scroll_limit = float(scroll_limit)
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
         reconnects = 0
@@ -170,6 +183,7 @@ def create_assist_handler(
         refreshes = 0
         unavailable = 0
         empty_lists = 0
+        scroll_limit_hits = 0
         while True:
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
@@ -260,6 +274,8 @@ def create_assist_handler(
                     "reconnects": reconnects,
                     "unavailable": unavailable,
                     "empty_lists": empty_lists,
+                    "scroll_limit_hits": scroll_limit_hits,
+                    "scroll_limit": scroll_limit,
                     "class_selection": class_selection,
                     "selected": selected,
                     "tap": selection_operation.to_dict(),
@@ -281,6 +297,33 @@ def create_assist_handler(
                     "Filtered assist list is empty; refresh will be attempted.",
                     data={"role": "assist_empty", "empty_list": empty_lists},
                 )
+            elif scrolls_since_refresh < max_scrolls:
+                try:
+                    scrollbar = assist_recognizer.match_scrollbar(
+                        screenshot,
+                        plan["server"],
+                    )
+                except AppError as exc:
+                    if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
+                        raise
+                    scrollbar = None
+                if (
+                    scrollbar is not None
+                    and scrollbar.matched
+                    and scrollbar.top_left[1] >= scroll_limit * 720
+                ):
+                    scroll_limit_hits += 1
+                    scrolls_since_refresh = max_scrolls
+                    context.emit(
+                        "recognition",
+                        "Assist scroll limit reached; refresh will be attempted.",
+                        data={
+                            "role": "assist_scroll_limit",
+                            "scroll_limit": scroll_limit,
+                            "scrollbar_y": scrollbar.top_left[1],
+                            "scroll_limit_hit": scroll_limit_hits,
+                        },
+                    )
             if scrolls_since_refresh < max_scrolls:
                 context.checkpoint("scroll_assist", progress=progress)
                 operation = device_service.swipe(1120, 620, 1120, 250, 500)

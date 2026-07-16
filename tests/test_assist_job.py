@@ -172,8 +172,19 @@ def test_assist_handler_retries_when_selected_candidate_is_unavailable():
     assert result["selected"]["anchor"] == [100, 225]
 
 
-def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
-    state = {"screen": "empty"}
+@pytest.mark.parametrize(
+    ("initial_screen", "expected_empty_lists", "expected_scroll_limit_hits"),
+    [
+        ("empty", 1, 0),
+        ("scroll_bottom", 0, 1),
+    ],
+)
+def test_assist_handler_refreshes_immediately_when_list_cannot_scroll_further(
+    initial_screen: str,
+    expected_empty_lists: int,
+    expected_scroll_limit_hits: int,
+):
+    state = {"screen": initial_screen}
     taps = []
 
     class Operation:
@@ -188,6 +199,7 @@ def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
             taps.append((x, y))
             transitions = {
                 "empty": "refresh_confirmation",
+                "scroll_bottom": "refresh_confirmation",
                 "refresh_confirmation": "candidate",
                 "candidate": "team",
             }
@@ -197,9 +209,10 @@ def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
     class Match:
         size = (120, 60)
 
-        def __init__(self, matched, center=(640, 420)):
+        def __init__(self, matched, center=(640, 420), top_left=(580, 390)):
             self.matched = matched
             self.center = center
+            self.top_left = top_left
 
     class Recognizer:
         def match_reconnect(self, _screenshot, _server):
@@ -208,8 +221,17 @@ def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
         def match_no_assist(self, screenshot, _server):
             return Match(screenshot == b"empty")
 
+        def match_scrollbar(self, screenshot, _server):
+            return Match(
+                screenshot == b"scroll_bottom",
+                top_left=(1200, 700),
+            )
+
         def match_refresh_button(self, screenshot, _server):
-            return Match(screenshot == b"empty", (1130, 65))
+            return Match(
+                screenshot in {b"empty", b"scroll_bottom"},
+                (1130, 65),
+            )
 
         def match_refresh_confirmation(self, screenshot, _server):
             return Match(screenshot == b"refresh_confirmation", (615, 410))
@@ -233,7 +255,7 @@ def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
         def get_setting_plan(self, _name):
             return {
                 "server": "CH",
-                "assist": {"all_not_skip": True},
+                "assist": {"all_not_skip": True, "scroll_limit": 0.96},
                 "run": {"random_time": 0, "random_touch": False},
             }
 
@@ -260,7 +282,8 @@ def test_assist_handler_refreshes_immediately_when_filtered_list_is_empty():
     assert result["attempts"] == 2
     assert result["scrolls"] == 0
     assert result["refreshes"] == 1
-    assert result["empty_lists"] == 1
+    assert result["empty_lists"] == expected_empty_lists
+    assert result["scroll_limit_hits"] == expected_scroll_limit_hits
 
 
 def test_assist_handler_selects_configured_class_before_recognition():
