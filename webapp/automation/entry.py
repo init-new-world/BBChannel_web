@@ -14,6 +14,7 @@ from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
 from webapp.services.recognition import RecognitionService
 from webapp.services.script_data import ScriptDataService
+from webapp.services.team import TeamRecognizer
 
 
 BATTLE_PREPARE_JOB_KIND = "battle.prepare"
@@ -23,6 +24,7 @@ def create_battle_entry_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,
+    team_recognizer: TeamRecognizer | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -38,6 +40,9 @@ def create_battle_entry_handler(
         recover_ap = payload.get("recover_ap", True)
         if not isinstance(recover_ap, bool):
             raise ValueError("recover_ap must be a boolean.")
+        team_check_mode = payload.get("team_check_mode", "warn")
+        if team_check_mode not in {"off", "warn", "strict"}:
+            raise ValueError("team_check_mode must be off, warn, or strict.")
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
@@ -54,6 +59,7 @@ def create_battle_entry_handler(
         started = monotonic()
         attempts = 0
         actions: list[str] = []
+        team_verification = None
 
         while monotonic() - started <= timeout_seconds:
             elapsed = monotonic() - started
@@ -106,7 +112,29 @@ def create_battle_entry_handler(
                     "ready": True,
                     "actions": actions,
                     "attempts": attempts,
+                    "team_verification": team_verification,
                 }
+            if (
+                matched_role == "team_decide"
+                and team_recognizer is not None
+                and team_check_mode != "off"
+                and team_verification is None
+            ):
+                team_verification = team_recognizer.recognize(screenshot, plan)
+                context.emit(
+                    "team_verification",
+                    "Battle team verification completed.",
+                    data=team_verification,
+                )
+                if not team_verification["ok"] and team_check_mode == "strict":
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "ready": False,
+                        "reason": "team_mismatch",
+                        "actions": actions,
+                        "attempts": attempts,
+                        "team_verification": team_verification,
+                    }
             if matched_role == "apple_close" and matched_result is not None:
                 if not recover_ap:
                     operation = device_service.tap(
@@ -178,12 +206,18 @@ def register_battle_entry_job(
     script_data: ScriptDataService,
     device_service: DeviceService,
     recognition: RecognitionService,
+    team_recognizer: TeamRecognizer | None = None,
 ) -> None:
     if job_manager.has_kind(BATTLE_PREPARE_JOB_KIND):
         return
     job_manager.register(
         BATTLE_PREPARE_JOB_KIND,
-        create_battle_entry_handler(script_data, device_service, recognition),
+        create_battle_entry_handler(
+            script_data,
+            device_service,
+            recognition,
+            team_recognizer,
+        ),
         requires_device=True,
     )
 

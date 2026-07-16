@@ -7,8 +7,10 @@ from PIL import Image, ImageDraw
 from webapp.automation.entry import (
     BATTLE_PREPARE_JOB_KIND,
     _available_apple,
+    create_battle_entry_handler,
     register_battle_entry_job,
 )
+from webapp.core.models import MatchResult
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
@@ -33,6 +35,95 @@ class _AppleRecognition:
         apple_name = template_path.rsplit("/", 1)[-1].removesuffix(".png")
         self.checked.append(apple_name)
         return _AppleMatch(apple_name == self.available)
+
+
+def test_battle_prepare_strict_team_check_stops_before_confirmation():
+    class ScriptDataStub:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "run": {
+                    "random_touch": False,
+                    "random_time": 0,
+                    "allow_other_apple": False,
+                },
+                "servants": [],
+                "master": {"equip": None, "name": None},
+            }
+
+    class DeviceStub:
+        def __init__(self):
+            self.taps = []
+
+        def snapshot(self):
+            return b"team"
+
+        def tap(self, x, y):
+            self.taps.append((x, y))
+            raise AssertionError("strict team mismatch must not confirm the team")
+
+    class RecognitionStub:
+        def match_template(self, _screenshot, template_path, **_options):
+            matched = template_path.endswith("teamDecide.png")
+            return MatchResult(
+                template_path=template_path,
+                matched=matched,
+                confidence=1.0 if matched else 0.0,
+                threshold=0.85,
+                top_left=[600, 500],
+                size=[80, 40],
+                center=[640, 520],
+            )
+
+    report = {
+        "ok": False,
+        "mismatch_count": 1,
+        "unverified_count": 0,
+        "servants": [],
+        "master": {"status": "mismatch"},
+    }
+
+    class TeamRecognizerStub:
+        def recognize(self, screenshot, plan):
+            assert screenshot == b"team"
+            assert plan["server"] == "CH"
+            return report
+
+    class ContextStub:
+        def __init__(self):
+            self.events = []
+
+        def checkpoint(self, *_args, **_kwargs):
+            pass
+
+        def emit(self, event_type, message, *, data=None):
+            self.events.append((event_type, message, data))
+
+        def sleep(self, _seconds):
+            pass
+
+    device = DeviceStub()
+    context = ContextStub()
+    result = create_battle_entry_handler(
+        ScriptDataStub(),
+        device,
+        RecognitionStub(),
+        TeamRecognizerStub(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "team_check_mode": "strict",
+            "timeout_seconds": 1,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["ready"] is False
+    assert result["reason"] == "team_mismatch"
+    assert result["team_verification"] == report
+    assert device.taps == []
+    assert context.events[-1][0] == "team_verification"
 
 
 def test_available_apple_only_falls_back_when_enabled():

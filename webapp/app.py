@@ -42,6 +42,7 @@ from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
+from webapp.services.team import TeamRecognizer
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -131,6 +132,7 @@ def create_app(
     recognition = RecognitionService(resources)
     assist_recognizer = AssistRecognizer(resources, recognition)
     card_recognizer = CommandCardRecognizer(resources, recognition)
+    team_recognizer = TeamRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -151,6 +153,7 @@ def create_app(
         script_data,
         device_service,
         recognition,
+        team_recognizer,
     )
     register_completion_job(
         job_manager,
@@ -192,7 +195,12 @@ def create_app(
         job_manager,
         script_data,
         create_assist_handler(script_data, device_service, assist_recognizer),
-        create_battle_entry_handler(script_data, device_service, recognition),
+        create_battle_entry_handler(
+            script_data,
+            device_service,
+            recognition,
+            team_recognizer,
+        ),
         create_battle_execute_plan_handler(
             script_data,
             device_service,
