@@ -87,6 +87,13 @@ def create_assist_handler(
             or not 0 <= max_reconnects <= 100
         ):
             raise ValueError("max_reconnects must be between 0 and 100.")
+        max_unavailable = payload.get("max_unavailable", 5)
+        if (
+            isinstance(max_unavailable, bool)
+            or not isinstance(max_unavailable, int)
+            or not 0 <= max_unavailable <= 100
+        ):
+            raise ValueError("max_unavailable must be between 0 and 100.")
 
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
@@ -161,6 +168,7 @@ def create_assist_handler(
         scrolls = 0
         scrolls_since_refresh = 0
         refreshes = 0
+        unavailable = 0
         while True:
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
@@ -180,7 +188,79 @@ def create_assist_handler(
                 },
             )
             if recognition["candidates"]:
-                break
+                selected = dict(recognition["candidates"][0])
+                scale = float(selected["scale"])
+                tap_point = list(
+                    randomized_touch_point(
+                        (
+                            round(selected["anchor"][0] + 270 * scale),
+                            round(selected["anchor"][1] - 60 * scale),
+                        ),
+                        enabled=random_touch,
+                    )
+                )
+                selected["tap_point"] = tap_point
+                context.checkpoint("select_assist", progress=0.75)
+                selection_operation = device_service.tap(*tap_point)
+                context.emit(
+                    "device_action",
+                    "Selected assist candidate.",
+                    data={
+                        "role": "assist_candidate",
+                        "x": tap_point[0],
+                        "y": tap_point[1],
+                    },
+                )
+                context.sleep(
+                    randomized_wait_seconds(tap_wait_seconds, random_time)
+                )
+                try:
+                    not_available = assist_recognizer.match_not_available(
+                        snapshot_without_reconnect(),
+                        plan["server"],
+                    )
+                except AppError as exc:
+                    if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
+                        raise
+                    not_available = None
+                if not_available is not None and not_available.matched:
+                    if unavailable >= max_unavailable:
+                        raise RuntimeError(
+                            "Assist unavailable candidate limit was reached."
+                        )
+                    close_operation = device_service.tap(
+                        *match_touch_point(not_available, enabled=random_touch)
+                    )
+                    unavailable += 1
+                    context.emit(
+                        "device_action",
+                        "Closed an unavailable assist candidate prompt.",
+                        data={
+                            "role": "assist_unavailable",
+                            "unavailable": unavailable,
+                            "operation": close_operation.to_dict(),
+                        },
+                    )
+                    context.sleep(
+                        randomized_wait_seconds(tap_wait_seconds, random_time)
+                    )
+                    continue
+                context.checkpoint(
+                    "complete",
+                    progress=1.0,
+                    message="Assist selected.",
+                )
+                return {
+                    "setting_name": setting_name.strip(),
+                    "attempts": attempts,
+                    "scrolls": scrolls,
+                    "refreshes": refreshes,
+                    "reconnects": reconnects,
+                    "unavailable": unavailable,
+                    "class_selection": class_selection,
+                    "selected": selected,
+                    "tap": selection_operation.to_dict(),
+                }
             if scrolls_since_refresh < max_scrolls:
                 context.checkpoint("scroll_assist", progress=progress)
                 operation = device_service.swipe(1120, 620, 1120, 250, 500)
@@ -228,38 +308,6 @@ def create_assist_handler(
                 data={"role": "assist_refresh", "refresh": refreshes},
             )
             context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
-
-        selected = dict(recognition["candidates"][0])
-        scale = float(selected["scale"])
-        tap_point = list(
-            randomized_touch_point(
-                (
-                    round(selected["anchor"][0] + 270 * scale),
-                    round(selected["anchor"][1] - 60 * scale),
-                ),
-                enabled=random_touch,
-            )
-        )
-        selected["tap_point"] = tap_point
-        context.checkpoint("select_assist", progress=0.75)
-        operation = device_service.tap(*tap_point)
-        context.emit(
-            "device_action",
-            "Selected assist candidate.",
-            data={"role": "assist_candidate", "x": tap_point[0], "y": tap_point[1]},
-        )
-        context.sleep(randomized_wait_seconds(tap_wait_seconds, random_time))
-        context.checkpoint("complete", progress=1.0, message="Assist selected.")
-        return {
-            "setting_name": setting_name.strip(),
-            "attempts": attempts,
-            "scrolls": scrolls,
-            "refreshes": refreshes,
-            "reconnects": reconnects,
-            "class_selection": class_selection,
-            "selected": selected,
-            "tap": operation.to_dict(),
-        }
 
     return handler
 

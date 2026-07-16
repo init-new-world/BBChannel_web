@@ -90,6 +90,88 @@ def test_assist_handler_stops_after_network_reconnect_limit():
         )
 
 
+def test_assist_handler_retries_when_selected_candidate_is_unavailable():
+    state = {"screen": "candidate_1"}
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["screen"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            transitions = {
+                "candidate_1": "unavailable",
+                "unavailable": "candidate_2",
+                "candidate_2": "team",
+            }
+            state["screen"] = transitions[state["screen"]]
+            return Operation()
+
+    class Match:
+        center = (640, 420)
+        size = (160, 60)
+
+        def __init__(self, matched):
+            self.matched = matched
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match(False)
+
+        def match_not_available(self, screenshot, _server):
+            return Match(screenshot == b"unavailable")
+
+        def recognize(self, screenshot, _assist, *, server):
+            anchors = {
+                b"candidate_1": [70, 225],
+                b"candidate_2": [100, 225],
+            }
+            anchor = anchors[screenshot]
+            return {
+                "candidate_count": 1,
+                "servant_name": "Support",
+                "candidates": [
+                    {"anchor": anchor, "scale": 1.0, "checks": {}}
+                ],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True},
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {
+            "setting_name": "demo",
+            "tap_wait_seconds": 0,
+            "max_unavailable": 2,
+        },
+    )
+
+    assert taps == [(340, 165), (640, 420), (370, 165)]
+    assert result["unavailable"] == 1
+    assert result["selected"]["anchor"] == [100, 225]
+
+
 def test_assist_handler_selects_configured_class_before_recognition():
     taps = []
 
@@ -110,6 +192,9 @@ def test_assist_handler_selects_configured_class_before_recognition():
 
     class Recognizer:
         def match_reconnect(self, _screenshot, _server):
+            return Match()
+
+        def match_not_available(self, _screenshot, _server):
             return Match()
 
         def match_recommended_header(self, _screenshot, _server):
