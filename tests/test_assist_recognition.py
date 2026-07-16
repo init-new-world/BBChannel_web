@@ -113,6 +113,159 @@ def test_assist_recognizer_filters_candidates_by_equip_name(tmp_path: Path):
     )
 
 
+def test_assist_recognizer_only_servant_mode_ignores_equip_name(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    servant_faces.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (30, 50, 80))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.ellipse((8, 5, 51, 48), fill=(220, 180, 90))
+    portrait_draw.line((4, 55, 55, 4), fill=(20, 220, 170), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    screenshot = Image.new("RGB", (420, 300), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "mode": "仅从者",
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "equip_names": ["Missing CE"],
+            "full_limit_break": True,
+        },
+        threshold=0.99,
+    )
+
+    assert result["mode"] == "仅从者"
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 95]
+    assert result["candidates"][0]["checks"] == {}
+
+
+def test_assist_recognizer_only_equip_mode_finds_candidate_without_servant_face(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assist_equips = assets / "assist" / "assist_equip"
+    assist_equips.mkdir(parents=True)
+    data.mkdir()
+
+    equip = Image.new("RGB", (50, 20), (110, 30, 70))
+    equip_draw = ImageDraw.Draw(equip)
+    equip_draw.rectangle((3, 3, 46, 16), outline=(245, 220, 80), width=2)
+    equip_draw.line((5, 15, 44, 4), fill=(40, 210, 250), width=2)
+    equip.save(assist_equips / "Event CE.png")
+    screenshot = Image.new("RGB", (420, 380), (18, 24, 32))
+    screenshot.paste(equip, (90, 290))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "mode": "仅礼装",
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "equip_names": ["Event CE"],
+        },
+        threshold=0.99,
+    )
+
+    assert result["mode"] == "仅礼装"
+    assert result["templates"] == []
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 255]
+    assert result["candidates"][0]["selection_point"] == [370, 195]
+    assert result["candidates"][0]["checks"]["equip_name"] == "Event CE"
+
+
+def test_assist_recognizer_only_equip_mode_requires_limit_break_marker(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assist_assets = assets / "assist"
+    assist_equips = assist_assets / "assist_equip"
+    assist_equips.mkdir(parents=True)
+    data.mkdir()
+
+    equip = Image.new("RGB", (50, 20), (110, 30, 70))
+    equip_draw = ImageDraw.Draw(equip)
+    equip_draw.rectangle((3, 3, 46, 16), outline=(245, 220, 80), width=2)
+    equip_draw.line((5, 15, 44, 4), fill=(40, 210, 250), width=2)
+    equip.save(assist_equips / "Event CE.png")
+    marker = Image.new("RGB", (15, 15), (100, 30, 130))
+    marker_draw = ImageDraw.Draw(marker)
+    marker_draw.ellipse((1, 1, 13, 13), fill=(250, 215, 50))
+    marker_draw.line((2, 12, 12, 2), fill=(40, 80, 230), width=2)
+    marker.save(assist_assets / "满破标记.png")
+
+    screenshot = Image.new("RGB", (420, 380), (18, 24, 32))
+    screenshot.paste(equip, (90, 130))
+    screenshot.paste(marker, (155, 170))
+    screenshot.paste(equip, (90, 290))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "mode": "仅礼装",
+            "equip_names": ["Event CE"],
+            "full_limit_break": True,
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 95]
+    assert result["candidates"][0]["checks"]["full_limit_break"] is True
+
+
+def test_assist_recognizer_unrecognized_mode_returns_first_row_candidate(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assets.mkdir()
+    data.mkdir()
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(Image.new("RGB", (1280, 720), (18, 24, 32))),
+        {
+            "mode": "不识别",
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "equip_names": ["Missing CE"],
+        },
+    )
+
+    assert result["mode"] == "不识别"
+    assert result["templates"] == []
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["selection_point"] == [387, 285]
+    assert result["candidates"][0]["checks"] == {}
+
+
 def test_assist_recognizer_filters_candidates_by_limit_break_marker(tmp_path: Path):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"

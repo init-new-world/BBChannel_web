@@ -212,12 +212,22 @@ def create_assist_handler(
             if recognition["candidates"]:
                 selected = dict(recognition["candidates"][0])
                 scale = float(selected["scale"])
+                selection_point = selected.get("selection_point")
+                if not (
+                    isinstance(selection_point, list)
+                    and len(selection_point) == 2
+                    and all(
+                        isinstance(coordinate, int) and not isinstance(coordinate, bool)
+                        for coordinate in selection_point
+                    )
+                ):
+                    selection_point = [
+                        round(selected["anchor"][0] + 270 * scale),
+                        round(selected["anchor"][1] - 60 * scale),
+                    ]
                 tap_point = list(
                     randomized_touch_point(
-                        (
-                            round(selected["anchor"][0] + 270 * scale),
-                            round(selected["anchor"][1] - 60 * scale),
-                        ),
+                        (selection_point[0], selection_point[1]),
                         enabled=random_touch,
                     )
                 )

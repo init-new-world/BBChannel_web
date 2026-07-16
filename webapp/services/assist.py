@@ -8,6 +8,7 @@ from webapp.services.resources import ResourceService
 
 ASSIST_FACE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+FIRST_ASSIST_SELECTION_POINT = (387, 285)
 
 
 class AssistRecognizer:
@@ -27,9 +28,36 @@ class AssistRecognizer:
         server: str = "CH",
         threshold: float = 0.85,
     ) -> dict[str, Any]:
+        mode = assist.get("mode") or "从者礼装"
+        if mode == "不识别":
+            selection_x, selection_y = FIRST_ASSIST_SELECTION_POINT
+            return {
+                "mode": mode,
+                "servant_name": assist.get("servant_name"),
+                "servant_canonical_name": assist.get("servant_canonical_name"),
+                "servant_sn": assist.get("servant_sn"),
+                "templates": [],
+                "candidates": [
+                    {
+                        "bounds": [67, 207, 640, 156],
+                        "anchor": [selection_x - 270, selection_y + 60],
+                        "confidence": 1.0,
+                        "template_path": None,
+                        "scale": 1.0,
+                        "selection_point": [selection_x, selection_y],
+                        "checks": {},
+                    }
+                ],
+                "candidate_count": 1,
+            }
+
+        only_servant = mode == "仅从者"
+        only_equip = mode == "仅礼装"
         canonical_name = assist.get("servant_canonical_name")
-        templates = self._servant_templates(canonical_name)
-        equip_templates = self._equip_templates(assist.get("equip_names"))
+        templates = [] if only_equip else self._servant_templates(canonical_name)
+        equip_templates = (
+            {} if only_servant else self._equip_templates(assist.get("equip_names"))
+        )
         equip_matches = {
             equip_name: [
                 match
@@ -44,6 +72,7 @@ class AssistRecognizer:
             ]
             for equip_name, template_paths in equip_templates.items()
         }
+        check_limit_break = bool(assist.get("full_limit_break")) and not only_servant
         limit_break_matches = (
             self._recognition.match_template_all(
                 screenshot,
@@ -52,7 +81,7 @@ class AssistRecognizer:
                 scales=ASSIST_EQUIP_SCALES,
                 max_results=20,
             )
-            if assist.get("full_limit_break")
+            if check_limit_break
             else []
         )
         friend_matches = (
@@ -63,20 +92,22 @@ class AssistRecognizer:
                 scales=ASSIST_EQUIP_SCALES,
                 max_results=20,
             )
-            if assist.get("friend_only")
+            if assist.get("friend_only") and not only_equip
             else []
         )
         required_np_level = assist.get("np_level")
         np_level_matches = (
             self._np_level_matches(screenshot, server, threshold)
-            if isinstance(required_np_level, int)
+            if not only_equip
+            and isinstance(required_np_level, int)
             and not isinstance(required_np_level, bool)
             and required_np_level > 1
             else []
         )
         required_servant_level = assist.get("servant_level")
         check_servant_level = (
-            isinstance(required_servant_level, int)
+            not only_equip
+            and isinstance(required_servant_level, int)
             and not isinstance(required_servant_level, bool)
             and required_servant_level > 1
         )
@@ -99,7 +130,7 @@ class AssistRecognizer:
         )
         skill_level_matches = (
             self._skill_level_matches(screenshot, threshold)
-            if normalized_skill_levels
+            if normalized_skill_levels and not only_equip
             else []
         )
         matches = [
@@ -114,7 +145,29 @@ class AssistRecognizer:
             )
         ]
 
-        candidates: list[dict[str, Any]] = []
+        candidates = (
+            self._equip_only_candidates(equip_matches)
+            if only_equip
+            else []
+        )
+        if only_equip and check_limit_break:
+            matched_candidates = []
+            for candidate in candidates:
+                limit_break_match = self._candidate_limit_break_match(
+                    candidate["anchor"],
+                    limit_break_matches,
+                )
+                if limit_break_match is None:
+                    continue
+                candidate["checks"].update(
+                    {
+                        "full_limit_break": True,
+                        "limit_break_template": limit_break_match.template_path,
+                        "limit_break_confidence": limit_break_match.confidence,
+                    }
+                )
+                matched_candidates.append(candidate)
+            candidates = matched_candidates
         for match in sorted(matches, key=lambda result: result.confidence, reverse=True):
             candidate = {
                 "bounds": [*match.top_left, *match.size],
@@ -136,7 +189,7 @@ class AssistRecognizer:
                     "equip_template": match.template_path,
                     "equip_confidence": match.confidence,
                 }
-            if assist.get("full_limit_break"):
+            if check_limit_break:
                 limit_break_match = self._candidate_limit_break_match(
                     candidate["anchor"],
                     limit_break_matches,
@@ -150,7 +203,7 @@ class AssistRecognizer:
                         "limit_break_confidence": limit_break_match.confidence,
                     }
                 )
-            if assist.get("friend_only"):
+            if assist.get("friend_only") and not only_equip:
                 friend_match = self._candidate_friend_match(
                     candidate["anchor"],
                     friend_matches,
@@ -202,7 +255,7 @@ class AssistRecognizer:
                         ],
                     }
                 )
-            if normalized_skill_levels:
+            if normalized_skill_levels and not only_equip:
                 recognized_skills = self._candidate_skill_levels(
                     candidate["anchor"],
                     skill_level_matches,
@@ -234,6 +287,7 @@ class AssistRecognizer:
 
         candidates.sort(key=lambda candidate: (candidate["anchor"][1], candidate["anchor"][0]))
         return {
+            "mode": mode,
             "servant_name": assist.get("servant_name"),
             "servant_canonical_name": canonical_name,
             "servant_sn": assist.get("servant_sn"),
@@ -241,6 +295,51 @@ class AssistRecognizer:
             "candidates": candidates,
             "candidate_count": len(candidates),
         }
+
+    @classmethod
+    def _equip_only_candidates(
+        cls,
+        equip_matches: dict[str, list[Any]],
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        matches = sorted(
+            (
+                (equip_name, match)
+                for equip_name, named_matches in equip_matches.items()
+                for match in named_matches
+            ),
+            key=lambda item: item[1].confidence,
+            reverse=True,
+        )
+        for equip_name, match in matches:
+            scale = float(match.scale)
+            center_x, center_y = match.center
+            candidate = {
+                "bounds": [*match.top_left, *match.size],
+                "anchor": [
+                    round(center_x - 15 * scale),
+                    round(center_y - 45 * scale),
+                ],
+                "confidence": match.confidence,
+                "template_path": match.template_path,
+                "scale": scale,
+                "selection_point": [
+                    round(center_x + 255 * scale),
+                    round(center_y - 105 * scale),
+                ],
+                "checks": {
+                    "equip_name": equip_name,
+                    "equip_template": match.template_path,
+                    "equip_confidence": match.confidence,
+                },
+            }
+            if any(
+                cls._overlaps(candidate["bounds"], found["bounds"])
+                for found in candidates
+            ):
+                continue
+            candidates.append(candidate)
+        return candidates
 
     def match_refresh_button(
         self,

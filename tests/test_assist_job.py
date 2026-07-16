@@ -108,6 +108,72 @@ def test_assist_handler_rejects_invalid_configured_swipe_interval():
         handler(None, {"setting_name": "demo"})
 
 
+def test_assist_handler_uses_recognized_selection_point():
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        matched = False
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match()
+
+        def match_not_available(self, _screenshot, _server):
+            return Match()
+
+        def recognize(self, _screenshot, _assist, *, server):
+            return {
+                "candidate_count": 1,
+                "servant_name": "Support",
+                "candidates": [
+                    {
+                        "anchor": [10, 20],
+                        "scale": 1.0,
+                        "selection_point": [900, 123],
+                        "checks": {},
+                    }
+                ],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True},
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {"setting_name": "demo", "tap_wait_seconds": 0},
+    )
+
+    assert taps == [(900, 123)]
+    assert result["selected"]["tap_point"] == [900, 123]
+
+
 def test_assist_handler_retries_when_selected_candidate_is_unavailable():
     state = {"screen": "candidate_1"}
     taps = []
