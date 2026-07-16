@@ -435,6 +435,7 @@ class ScriptDataService:
             "full_limit_break": bool(config.get("fullEquip")),
             "friend_only": bool(config.get("onlyFriendAssist")),
             "np_level": config.get("NPlevel"),
+            "servant_level": config.get("servantLevel", 1),
             "skill_levels": skill_levels[:3] if isinstance(skill_levels, list) else [],
             "scroll_limit": config.get("scrollLimit"),
             "interval_after_swipe": config.get("intervalAFswipeAssist", 0.5),

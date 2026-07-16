@@ -266,6 +266,98 @@ def test_assist_recognizer_filters_candidates_by_np_level(tmp_path: Path):
     )
 
 
+def test_assist_recognizer_filters_candidates_by_servant_level(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    digit_assets = assets / "assist" / "full_skill"
+    servant_faces.mkdir(parents=True)
+    digit_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 65, 95))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((7, 7, 52, 52), fill=(190, 80, 210))
+    portrait_draw.line((6, 53, 53, 6), fill=(60, 230, 170), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+
+    digits = {}
+    for digit, color in {
+        0: (170, 55, 85),
+        1: (55, 145, 85),
+        8: (65, 85, 180),
+        9: (145, 65, 165),
+    }.items():
+        image = Image.new("RGB", (9, 14), color)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((1, 1, 7, 12), outline=(245, 220, 70), width=1)
+        draw.line((2 + digit % 3, 11, 7, 2 + digit % 4), fill=(40, 220, 235))
+        image.save(digit_assets / f"num{digit}.png")
+        digits[digit] = image
+
+    screenshot = Image.new("RGB", (260, 340), (18, 24, 32))
+    screenshot.paste(portrait, (70, 70))
+    screenshot.paste(portrait, (70, 230))
+    for x, digit in zip((68, 79, 105, 116), (8, 0, 9, 0), strict=True):
+        screenshot.paste(digits[digit], (x, 35))
+    for x, digit in zip((57, 68, 79, 105, 116, 127), (1, 0, 0, 1, 0, 0), strict=True):
+        screenshot.paste(digits[digit], (x, 195))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+            "servant_level": 90,
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 260]
+    assert result["candidates"][0]["checks"]["servant_level"] == 100
+    assert result["candidates"][0]["checks"]["servant_level_cap"] == 100
+
+
+def test_assist_recognizer_rejects_servant_level_when_digits_are_missing(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    servant_faces.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 65, 95))
+    draw = ImageDraw.Draw(portrait)
+    draw.rectangle((7, 7, 52, 52), fill=(190, 80, 210))
+    draw.line((6, 53, 53, 6), fill=(60, 230, 170), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    screenshot = Image.new("RGB", (260, 180), (18, 24, 32))
+    screenshot.paste(portrait, (70, 90))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_level": 90,
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 0
+
+
 def test_assist_recognizer_requires_all_requested_level_ten_skills(tmp_path: Path):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"

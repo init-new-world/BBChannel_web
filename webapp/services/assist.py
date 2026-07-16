@@ -74,6 +74,17 @@ class AssistRecognizer:
             and required_np_level > 1
             else []
         )
+        required_servant_level = assist.get("servant_level")
+        check_servant_level = (
+            isinstance(required_servant_level, int)
+            and not isinstance(required_servant_level, bool)
+            and required_servant_level > 1
+        )
+        servant_level_matches = (
+            self._servant_level_digit_matches(screenshot, server, threshold)
+            if check_servant_level
+            else []
+        )
         required_skill_levels = assist.get("skill_levels")
         normalized_skill_levels = (
             required_skill_levels[:3]
@@ -166,6 +177,29 @@ class AssistRecognizer:
                         "np_level": np_level,
                         "np_level_template": match.template_path,
                         "np_level_confidence": match.confidence,
+                    }
+                )
+            if check_servant_level:
+                servant_level = self._candidate_servant_level(
+                    candidate["bounds"],
+                    servant_level_matches,
+                )
+                if (
+                    servant_level is None
+                    or servant_level["level"] > servant_level["cap"]
+                    or servant_level["level"] < required_servant_level
+                ):
+                    continue
+                candidate["checks"].update(
+                    {
+                        "servant_level": servant_level["level"],
+                        "servant_level_cap": servant_level["cap"],
+                        "servant_level_templates": [
+                            match.template_path for _, match in servant_level["matches"]
+                        ],
+                        "servant_level_confidences": [
+                            match.confidence for _, match in servant_level["matches"]
+                        ],
                     }
                 )
             if normalized_skill_levels:
@@ -407,6 +441,46 @@ class AssistRecognizer:
             )
         return matches
 
+    def _servant_level_digit_matches(
+        self,
+        screenshot: bytes,
+        server: str,
+        threshold: float,
+    ) -> list[tuple[int, Any]]:
+        prefix = "assist/full_skill"
+        if server.upper() == "CNTW":
+            prefix = f"{prefix}/CNTW"
+        entries = self._resources.template_index(prefix=prefix, limit=1000)["entries"]
+        expected_parent = prefix.count("/")
+        paths_by_digit: dict[int, tuple[str, str | None]] = {}
+        paths_by_stem = {
+            str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]: str(entry["path"])
+            for entry in entries
+            if str(entry["path"]).count("/") == expected_parent + 1
+        }
+        for digit in range(10):
+            stem = f"num{digit}"
+            template_path = paths_by_stem.get(stem)
+            if template_path is None:
+                continue
+            paths_by_digit[digit] = (
+                template_path,
+                paths_by_stem.get(f"{stem}mask"),
+            )
+
+        return [
+            (digit, match)
+            for digit, (template_path, mask_path) in paths_by_digit.items()
+            for match in self._recognition.match_template_all(
+                screenshot,
+                template_path,
+                threshold=threshold,
+                scales=ASSIST_EQUIP_SCALES,
+                mask_path=mask_path,
+                max_results=50,
+            )
+        ]
+
     @staticmethod
     def _candidate_equip_match(anchor: list[int], equip_matches: dict[str, list[Any]]):
         anchor_x, anchor_y = anchor
@@ -487,6 +561,60 @@ class AssistRecognizer:
             max(group, key=lambda item: item[1].confidence)
             for group in groups
         ]
+
+    @classmethod
+    def _candidate_servant_level(
+        cls,
+        bounds: list[int],
+        matches: list[tuple[int, Any]],
+    ) -> dict[str, Any] | None:
+        x, y, width, height = bounds
+        anchor_x = x + width / 2
+        anchor_y = y + height / 2
+        nearby = [
+            item
+            for item in matches
+            if anchor_x - 0.75 * width <= item[1].center[0] <= anchor_x + 0.75 * width
+            and anchor_y - 1.25 * height <= item[1].center[1] <= anchor_y - 0.35 * height
+        ]
+        selected: list[tuple[int, Any]] = []
+        for item in sorted(nearby, key=lambda candidate: candidate[1].confidence, reverse=True):
+            if any(cls._match_overlaps(item[1], found[1]) for found in selected):
+                continue
+            selected.append(item)
+        selected.sort(key=lambda item: item[1].center[0])
+        if len(selected) < 2:
+            return None
+
+        gaps = [
+            selected[index + 1][1].center[0] - selected[index][1].center[0]
+            for index in range(len(selected) - 1)
+        ]
+        split_at = max(range(len(gaps)), key=gaps.__getitem__) + 1
+        digit_width = sum(item[1].size[0] for item in selected) / len(selected)
+        if gaps[split_at - 1] < digit_width * 1.5:
+            if len(selected) % 2:
+                return None
+            split_at = len(selected) // 2
+        current_digits = selected[:split_at]
+        cap_digits = selected[split_at:]
+        if not current_digits or not cap_digits:
+            return None
+        return {
+            "level": cls._digits_to_int(current_digits),
+            "cap": cls._digits_to_int(cap_digits),
+            "matches": selected,
+        }
+
+    @staticmethod
+    def _digits_to_int(matches: list[tuple[int, Any]]) -> int:
+        return int("".join(str(digit) for digit, _ in matches))
+
+    @staticmethod
+    def _match_overlaps(first: Any, second: Any) -> bool:
+        first_bounds = [*first.top_left, *first.size]
+        second_bounds = [*second.top_left, *second.size]
+        return AssistRecognizer._overlaps(first_bounds, second_bounds)
 
     @staticmethod
     def _overlaps(first: list[int], second: list[int]) -> bool:
