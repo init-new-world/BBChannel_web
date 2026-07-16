@@ -93,6 +93,7 @@ const els = {
   battleScriptName: document.querySelector("#battle-script-name"),
   battleProgramStatus: document.querySelector("#battle-program-status"),
   battleActionDelay: document.querySelector("#battle-action-delay"),
+  fullRunEntryMode: document.querySelector("#full-run-entry-mode"),
   fullRunCount: document.querySelector("#full-run-count"),
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
@@ -695,6 +696,7 @@ async function startFullRun() {
   await enqueueJob("battle.run", {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
+    entry_mode: els.fullRunEntryMode.value,
     prepare: {
       apple: els.fullRunApple.value,
       team_check_mode: els.fullRunTeamCheck.value,

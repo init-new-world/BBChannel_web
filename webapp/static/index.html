@@ -141,6 +141,13 @@
             <div id="battle-script-name" class="job-kind">No script selected</div>
             <div id="battle-program-status" class="status-line">No program</div>
             <label class="input-row">
+              <span>Start from</span>
+              <select id="full-run-entry-mode" class="field" aria-label="Battle entry mode">
+                <option value="current">Current screen</option>
+                <option value="free_quest">Free quest</option>
+              </select>
+            </label>
+            <label class="input-row">
               <span>Run count</span>
               <input id="full-run-count" class="field number-field" type="number" min="1" max="10000" step="1" value="1">
             </label>

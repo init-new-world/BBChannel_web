@@ -303,3 +303,93 @@ def test_full_run_recovers_unknown_initial_stage_when_enabled(tmp_path: Path):
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["runs_completed"] == 1
     assert calls == ["detect", "recover", "battle", "complete"]
+
+
+def test_full_run_enters_free_quest_before_starting_battle_flow(tmp_path: Path):
+    calls: list[tuple[str, dict]] = []
+
+    def stage(name: str, result=None):
+        def execute(_context, payload):
+            calls.append((name, dict(payload)))
+            return dict(result or {})
+
+        return execute
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(),
+            stage("assist"),
+            stage("prepare", {"ready": True}),
+            stage("battle"),
+            stage("complete", {"complete": True, "drop_count": 0}),
+            detect_stage=stage("detect", {"stage": "unknown"}),
+            enter_free_quest=stage(
+                "enter_free_quest",
+                {"entered": True, "stage": "assist", "reason": None},
+            ),
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {
+                "setting_name": "demo",
+                "max_runs": 1,
+                "entry_mode": "free_quest",
+                "entry": {"max_actions": 8},
+            },
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 1
+    assert result.result["entry"]["stage"] == "assist"
+    assert [name for name, _payload in calls] == [
+        "enter_free_quest",
+        "assist",
+        "prepare",
+        "battle",
+        "complete",
+    ]
+    assert calls[0][1] == {"max_actions": 8, "setting_name": "demo"}
+
+
+def test_full_run_stops_when_free_quest_entry_cannot_find_a_target(tmp_path: Path):
+    calls: list[str] = []
+
+    def unused(name: str):
+        def execute(_context, _payload):
+            calls.append(name)
+            return {}
+
+        return execute
+
+    entry_result = {
+        "entered": False,
+        "stage": "unknown",
+        "reason": "no_visible_free_quest",
+        "actions": [],
+    }
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(),
+            unused("assist"),
+            unused("prepare"),
+            unused("battle"),
+            unused("complete"),
+            enter_free_quest=lambda _context, _payload: dict(entry_result),
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {"setting_name": "demo", "entry_mode": "free_quest"},
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 0
+    assert result.result["stopped"] is True
+    assert result.result["reason"] == "no_visible_free_quest"
+    assert result.result["entry"] == entry_result
+    assert calls == []

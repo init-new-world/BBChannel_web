@@ -19,6 +19,7 @@ def create_full_run_handler(
     complete_battle: StageHandler,
     detect_stage: StageHandler | None = None,
     recover_game: StageHandler | None = None,
+    enter_free_quest: StageHandler | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -39,6 +40,9 @@ def create_full_run_handler(
             or not 1 <= max_clear_runs <= 10000
         ):
             raise ValueError("max_clear_runs must be between 1 and 10000.")
+        entry_mode = payload.get("entry_mode", "current")
+        if entry_mode not in {"current", "free_quest"}:
+            raise ValueError("entry_mode must be current or free_quest.")
 
         normalized_name = setting_name.strip()
         run_options = script_data.get_setting_plan(normalized_name)["run"]
@@ -55,7 +59,14 @@ def create_full_run_handler(
         game_crash_restart = bool(run_options.get("game_crash_restart"))
         stage_options = {
             name: _stage_options(payload, name)
-            for name in ("assist", "prepare", "battle", "completion", "recovery")
+            for name in (
+                "entry",
+                "assist",
+                "prepare",
+                "battle",
+                "completion",
+                "recovery",
+            )
         }
         drop_count = 0
         run_results: list[dict[str, Any]] = []
@@ -65,11 +76,33 @@ def create_full_run_handler(
         completed_runs = 0
         clear_runs = 0
         run_number = 1
+        entry_result: dict[str, Any] | None = None
         resume = payload.get("resume", True)
         if not isinstance(resume, bool):
             raise ValueError("resume must be a boolean.")
         initial_stage = "assist"
-        if resume and detect_stage is not None:
+        if entry_mode == "free_quest":
+            if enter_free_quest is None:
+                raise RuntimeError("Free quest entry is not available.")
+            context.checkpoint(
+                "run.enter_free_quest",
+                progress=0.0,
+                message="Entering a visible free quest.",
+            )
+            entry_result = enter_free_quest(
+                context,
+                {
+                    **stage_options["entry"],
+                    "setting_name": normalized_name,
+                },
+            ) or {}
+            initial_stage = str(entry_result.get("stage") or "unknown")
+            if not entry_result.get("entered"):
+                stopped = True
+                stop_reason = str(
+                    entry_result.get("reason") or "free_quest_entry_failed"
+                )
+        elif resume and detect_stage is not None:
             detected = detect_stage(context, {"setting_name": normalized_name}) or {}
             initial_stage = str(detected.get("stage") or "unknown")
             if (
@@ -87,6 +120,26 @@ def create_full_run_handler(
                 initial_stage = str(recovered.get("stage") or "unknown")
             if initial_stage not in {"assist", "prepare", "battle", "completion"}:
                 raise RuntimeError("Current battle flow stage was not recognized.")
+
+        if stopped:
+            context.checkpoint(
+                "complete",
+                progress=1.0,
+                message="Full run stopped before entering battle.",
+            )
+            return {
+                "setting_name": normalized_name,
+                "runs_completed": 0,
+                "max_runs": max_runs,
+                "stopped": True,
+                "reason": stop_reason,
+                "cleared_ap": False,
+                "drop_count": 0,
+                "entry": entry_result,
+                "runs": [],
+            }
+        if initial_stage not in {"assist", "prepare", "battle", "completion"}:
+            raise RuntimeError("Free quest entry did not reach the battle flow.")
 
         while run_number <= max_runs or (clear_ap and clear_runs < max_clear_runs):
             clearing_ap = run_number > max_runs
@@ -211,6 +264,7 @@ def create_full_run_handler(
             "reason": stop_reason,
             "cleared_ap": cleared_ap,
             "drop_count": drop_count,
+            "entry": entry_result,
             "runs": run_results,
         }
 
@@ -226,6 +280,7 @@ def register_full_run_job(
     complete_battle: StageHandler,
     detect_stage: StageHandler | None = None,
     recover_game: StageHandler | None = None,
+    enter_free_quest: StageHandler | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
         return
@@ -239,6 +294,7 @@ def register_full_run_job(
             complete_battle,
             detect_stage,
             recover_game,
+            enter_free_quest,
         ),
         requires_device=True,
     )

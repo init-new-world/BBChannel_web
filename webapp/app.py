@@ -18,6 +18,7 @@ from webapp.automation import (
     create_battle_entry_handler,
     create_battle_execute_plan_handler,
     create_completion_handler,
+    create_free_quest_entry_handler,
     create_recovery_handler,
     create_stage_handler,
     register_assist_job,
@@ -225,6 +226,12 @@ def create_app(
         ),
         detect_stage=stage_handler,
         recover_game=recovery_handler,
+        enter_free_quest=create_free_quest_entry_handler(
+            script_data,
+            device_service,
+            quest_recognizer,
+            stage_handler,
+        ),
     )
 
     def active_device_key() -> str | None:
