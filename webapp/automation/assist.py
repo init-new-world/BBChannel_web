@@ -8,6 +8,7 @@ from webapp.automation.interaction import (
     randomized_touch_point,
     randomized_wait_seconds,
 )
+from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
@@ -79,15 +80,58 @@ def create_assist_handler(
             or not 0 <= refresh_wait_seconds <= 10
         ):
             raise ValueError("refresh_wait_seconds must be between 0 and 10.")
+        max_reconnects = payload.get("max_reconnects", 5)
+        if (
+            isinstance(max_reconnects, bool)
+            or not isinstance(max_reconnects, int)
+            or not 0 <= max_reconnects <= 100
+        ):
+            raise ValueError("max_reconnects must be between 0 and 100.")
 
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
+        reconnects = 0
+
+        def snapshot_without_reconnect() -> bytes:
+            nonlocal reconnects
+            while True:
+                screenshot = device_service.snapshot()
+                try:
+                    reconnect = assist_recognizer.match_reconnect(
+                        screenshot,
+                        plan["server"],
+                    )
+                except AppError as exc:
+                    if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+                        return screenshot
+                    raise
+                if not reconnect.matched:
+                    return screenshot
+                if reconnects >= max_reconnects:
+                    raise RuntimeError("Assist network reconnect limit was reached.")
+                operation = device_service.tap(
+                    *match_touch_point(reconnect, enabled=random_touch)
+                )
+                reconnects += 1
+                context.emit(
+                    "device_action",
+                    "Requested a network reconnection while selecting assist.",
+                    data={
+                        "role": "reconnect",
+                        "reconnect": reconnects,
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(
+                    randomized_wait_seconds(tap_wait_seconds, random_time)
+                )
+
         class_selection = None
         if not plan["assist"].get("all_not_skip"):
             servant_class = plan["assist"].get("servant_class")
             if isinstance(servant_class, str) and servant_class:
-                screenshot = device_service.snapshot()
+                screenshot = snapshot_without_reconnect()
                 recommended = assist_recognizer.match_recommended_header(
                     screenshot,
                     plan["server"],
@@ -121,7 +165,7 @@ def create_assist_handler(
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
             recognition = assist_recognizer.recognize(
-                device_service.snapshot(),
+                snapshot_without_reconnect(),
                 plan["assist"],
                 server=plan["server"],
             )
@@ -158,7 +202,7 @@ def create_assist_handler(
 
             context.checkpoint("refresh_assist", progress=progress)
             refresh_button = assist_recognizer.match_refresh_button(
-                device_service.snapshot(),
+                snapshot_without_reconnect(),
                 plan["server"],
             )
             if not refresh_button.matched:
@@ -168,7 +212,7 @@ def create_assist_handler(
             )
             context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
             refresh_confirmation = assist_recognizer.match_refresh_confirmation(
-                device_service.snapshot(),
+                snapshot_without_reconnect(),
                 plan["server"],
             )
             if not refresh_confirmation.matched:
@@ -211,6 +255,7 @@ def create_assist_handler(
             "attempts": attempts,
             "scrolls": scrolls,
             "refreshes": refreshes,
+            "reconnects": reconnects,
             "class_selection": class_selection,
             "selected": selected,
             "tap": operation.to_dict(),

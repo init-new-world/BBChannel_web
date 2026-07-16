@@ -27,6 +27,69 @@ def test_assist_class_point_uses_standard_and_recommended_tab_layouts():
     assert _assist_class_point("MoonCancer", recommended=False) == (632, 128)
 
 
+def test_assist_handler_stops_after_network_reconnect_limit():
+    reconnect_checks = 0
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, _x, _y):
+            return Operation()
+
+    class Match:
+        center = (640, 420)
+        size = (120, 60)
+
+        def __init__(self, matched):
+            self.matched = matched
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            nonlocal reconnect_checks
+            reconnect_checks += 1
+            return Match(reconnect_checks == 1)
+
+        def recognize(self, _screenshot, _assist, *, server):
+            return {
+                "candidate_count": 1,
+                "servant_name": "Support",
+                "candidates": [
+                    {"anchor": [70, 225], "scale": 1.0, "checks": {}}
+                ],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True},
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    handler = create_assist_handler(ScriptData(), Device(), Recognizer())
+
+    with pytest.raises(RuntimeError, match="reconnect limit"):
+        handler(
+            Context(),
+            {"setting_name": "demo", "max_reconnects": 0},
+        )
+
+
 def test_assist_handler_selects_configured_class_before_recognition():
     taps = []
 
@@ -46,6 +109,9 @@ def test_assist_handler_selects_configured_class_before_recognition():
         matched = False
 
     class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match()
+
         def match_recommended_header(self, _screenshot, _server):
             return Match()
 
@@ -99,8 +165,10 @@ def test_assist_select_job_taps_first_matching_candidate(tmp_path: Path):
     data = tmp_path / "data"
     session = tmp_path / "replays" / "assist"
     servant_faces = assets / "servantface"
+    battle_assets = assets / "battle" / "CH"
     settings = data / "settings"
     servant_faces.mkdir(parents=True)
+    battle_assets.mkdir(parents=True)
     settings.mkdir(parents=True)
     session.mkdir(parents=True)
 
@@ -109,9 +177,18 @@ def test_assist_select_job_taps_first_matching_candidate(tmp_path: Path):
     portrait_draw.rectangle((7, 7, 52, 52), fill=(205, 90, 175))
     portrait_draw.line((5, 53, 54, 6), fill=(45, 225, 190), width=4)
     portrait.save(servant_faces / "Support_1.png")
-    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
-    frame.paste(portrait, (70, 225))
-    frame.save(session / "0.png")
+    reconnect = Image.new("RGB", (114, 53), (25, 35, 45))
+    reconnect_draw = ImageDraw.Draw(reconnect)
+    reconnect_draw.ellipse((8, 5, 48, 45), outline=(235, 195, 55), width=4)
+    reconnect_draw.ellipse((65, 5, 105, 45), outline=(55, 205, 235), width=4)
+    reconnect_draw.line((30, 26, 84, 26), fill=(230, 75, 125), width=5)
+    reconnect.save(battle_assets / "reconnect.png")
+    reconnect_frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    reconnect_frame.paste(reconnect, (580, 380))
+    candidate_frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    candidate_frame.paste(portrait, (70, 225))
+    reconnect_frame.save(session / "0.png")
+    candidate_frame.save(session / "1.png")
     (session / "manifest.json").write_text(
         json.dumps(
             {
@@ -120,8 +197,12 @@ def test_assist_select_job_taps_first_matching_candidate(tmp_path: Path):
                 "frames": [
                     {
                         "file": "0.png",
+                        "expect": {"type": "tap", "x": 637, "y": 406},
+                    },
+                    {
+                        "file": "1.png",
                         "expect": {"type": "tap", "x": 370, "y": 195},
-                    }
+                    },
                 ],
             }
         ),
@@ -173,6 +254,7 @@ def test_assist_select_job_taps_first_matching_candidate(tmp_path: Path):
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["setting_name"] == "assist"
     assert result.result["attempts"] == 1
+    assert result.result["reconnects"] == 1
     assert result.result["scrolls"] == 0
     assert result.result["selected"]["anchor"] == [100, 255]
     assert result.result["selected"]["tap_point"] == [370, 195]
