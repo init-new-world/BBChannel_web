@@ -20,6 +20,7 @@ from webapp.automation.battle import (
     _frontline_servants,
     _matches_hakuno_needs,
     _wait_for_battle_ready,
+    _wait_for_command_cards,
     _wait_for_battle_transition,
     register_battle_jobs,
 )
@@ -190,6 +191,51 @@ def test_wait_for_battle_ready_recovers_network_prompt():
     )
 
     assert taps == [(640, 420)]
+
+
+def test_wait_for_command_cards_settles_and_returns_fresh_screenshot():
+    frames = iter((b"first", b"fresh"))
+    snapshots = []
+    sleeps = []
+
+    class Device:
+        def snapshot(self):
+            screenshot = next(frames)
+            snapshots.append(screenshot)
+            return screenshot
+
+    class Match:
+        matched = True
+        confidence = 1.0
+
+        def to_dict(self):
+            return {"matched": True, "confidence": 1.0}
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [Match() for _ in candidates]
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, seconds):
+            sleeps.append(seconds)
+
+    screenshot = _wait_for_command_cards(
+        Context(),
+        Device(),
+        Recognition(),
+        ["battle/CH/Arts.png"],
+        0.75,
+        1.0,
+        0.01,
+        settle_seconds=0.6,
+    )
+
+    assert screenshot == b"fresh"
+    assert snapshots == [b"first", b"fresh"]
+    assert sleeps == [0.6]
 
 
 @pytest.mark.parametrize(
@@ -377,6 +423,7 @@ def test_battle_jobs_run_dynamic_hakuno_reroll(
             {
                 "server": "CH",
                 "servant_0_name": "Hakuno",
+                "intervalBFchooseCard": 0,
                 "round1_turns": 1,
                 "round1_turn0_skill": [["Hakuno", 1, [["1B", "2A"]]]],
             }

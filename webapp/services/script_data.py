@@ -448,6 +448,7 @@ class ScriptDataService:
             "allow_other_apple": bool(config.get("allowOtherApple")),
             "first_battle_set": bool(config.get("firstBattleSet")),
             "interval_before_fight": config.get("intervalBF", 0),
+            "interval_before_choose_card": config.get("intervalBFchooseCard", 0.5),
             "interval_after_fight": config.get("intervalAF", 0),
             "random_time": config.get("randomTime", 0),
             "random_touch": bool(config.get("randomTouch")),

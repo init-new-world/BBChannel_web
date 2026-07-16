@@ -269,6 +269,7 @@ def _execute_hakuno_reroll(
     poll_interval: float,
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
+    card_wait_seconds: float = 0.0,
 ) -> int:
     tap_count = 0
     need_cards = runtime["need_cards"]
@@ -306,6 +307,7 @@ def _execute_hakuno_reroll(
             timeout_seconds,
             poll_interval,
             reconnect_timing=tap_interval,
+            settle_seconds=card_wait_seconds,
         )
         recognized = _recognize_command_cards(
             card_recognizer,
@@ -565,6 +567,9 @@ def create_battle_execute_plan_handler(
         )
         plan = script_data.get_setting_plan(setting_name)
         special_keys = plan.get("special_keys", [])
+        card_wait_seconds = _configured_card_wait(
+            plan["run"].get("interval_before_choose_card", 0.5)
+        )
         tap_interval = _TapTiming(
             tap_interval,
             configured_random_time(plan["run"].get("random_time", 0)),
@@ -681,6 +686,7 @@ def create_battle_execute_plan_handler(
                             poll_interval,
                             tap_interval,
                             special_keys=special_keys,
+                            card_wait_seconds=card_wait_seconds,
                         )
                         tap_count += condition_taps
                     execute_conditional_skills = matched == control["execute_when_matched"]
@@ -717,6 +723,7 @@ def create_battle_execute_plan_handler(
                         poll_interval,
                         tap_interval,
                         special_keys=special_keys,
+                        card_wait_seconds=card_wait_seconds,
                     )
                     continue
                 _wait_for_battle_ready(
@@ -780,6 +787,7 @@ def create_battle_execute_plan_handler(
                 timeout_seconds,
                 poll_interval,
                 reconnect_timing=tap_interval,
+                settle_seconds=card_wait_seconds,
             )
             for step in command_steps[1:]:
                 if step.get("type") == "tap":
@@ -864,6 +872,7 @@ def create_battle_execute_plan_handler(
                         poll_interval,
                         tap_interval,
                         special_keys=special_keys,
+                        card_wait_seconds=card_wait_seconds,
                     )
                 else:
                     raise RuntimeError(
@@ -898,6 +907,7 @@ def _execute_extra_turn(
     poll_interval: float,
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
+    card_wait_seconds: float = 0.0,
 ) -> int:
     tap_count = 0
     skill_actions = [
@@ -925,6 +935,7 @@ def _execute_extra_turn(
                 poll_interval,
                 tap_interval,
                 special_keys=special_keys,
+                card_wait_seconds=card_wait_seconds,
             )
             continue
         _wait_for_battle_ready(
@@ -981,6 +992,7 @@ def _execute_extra_turn(
         timeout_seconds,
         poll_interval,
         reconnect_timing=tap_interval,
+        settle_seconds=card_wait_seconds,
     )
     for step in command_steps[1:]:
         if step.get("type") == "tap":
@@ -1132,6 +1144,7 @@ def _evaluate_card_condition(
     poll_interval: float,
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
+    card_wait_seconds: float = 0.0,
 ) -> tuple[bool, int]:
     if card_recognizer is None:
         raise ValueError("Command card recognition is not configured.")
@@ -1151,6 +1164,7 @@ def _evaluate_card_condition(
         timeout_seconds,
         poll_interval,
         reconnect_timing=tap_interval,
+        settle_seconds=card_wait_seconds,
     )
     recognized = _recognize_command_cards(
         card_recognizer,
@@ -1199,6 +1213,9 @@ def _execute_skills_handler(
         )
         plan = script_data.get_setting_plan(setting_name)
         special_keys = plan.get("special_keys", [])
+        card_wait_seconds = _configured_card_wait(
+            plan["run"].get("interval_before_choose_card", 0.5)
+        )
         tap_interval = _TapTiming(
             tap_interval,
             configured_random_time(plan["run"].get("random_time", 0)),
@@ -1250,6 +1267,7 @@ def _execute_skills_handler(
                     poll_interval,
                     tap_interval,
                     special_keys=special_keys,
+                    card_wait_seconds=card_wait_seconds,
                 )
                 continue
             _wait_for_battle_ready(
@@ -1384,9 +1402,11 @@ def _wait_for_command_cards(
     timeout_seconds: float,
     poll_interval: float,
     reconnect_timing: float | _TapTiming | None = None,
+    settle_seconds: float = 0.0,
 ) -> bytes:
     started = monotonic()
     attempts = 0
+    settled = settle_seconds <= 0
     candidates = [
         {"template_path": template_path, "threshold": threshold}
         for template_path in template_paths
@@ -1418,7 +1438,12 @@ def _wait_for_command_cards(
                 "matches": [match.to_dict() for match in matches],
             },
         )
-        if any(match.matched for match in matches):
+        matched = any(match.matched for match in matches)
+        if matched and not settled:
+            context.sleep(settle_seconds)
+            settled = True
+            continue
+        if matched:
             return screenshot
         if monotonic() - started >= timeout_seconds:
             raise TimeoutError(
@@ -1474,6 +1499,15 @@ def _action_delay(payload: dict[str, Any]) -> float:
     if delay < 0 or delay > 10:
         raise ValueError("action_delay_seconds must be between 0 and 10.")
     return delay
+
+
+def _configured_card_wait(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("intervalBFchooseCard must be a number.")
+    result = float(value)
+    if result < 0 or result > 600:
+        raise ValueError("intervalBFchooseCard must be between 0 and 600.")
+    return result
 
 
 def _number(
