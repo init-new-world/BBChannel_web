@@ -117,6 +117,11 @@ def create_full_run_handler(
                         **stage_options["prepare"],
                         "setting_name": normalized_name,
                         "recover_ap": not clearing_ap,
+                        "team_check_mode": (
+                            stage_options["prepare"].get("team_check_mode", "warn")
+                            if run_number == 1
+                            else "off"
+                        ),
                     },
                 ) or {}
             if prepare_result.get("ready") is False:

@@ -73,7 +73,11 @@ def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Pat
         )
         job = manager.start(
             FULL_RUN_JOB_KIND,
-            {"setting_name": "demo", "max_runs": 2},
+            {
+                "setting_name": "demo",
+                "max_runs": 2,
+                "prepare": {"team_check_mode": "strict"},
+            },
             device_key="replay:demo",
         )
         result = manager.wait(job.job_id, timeout=3)
@@ -95,6 +99,11 @@ def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Pat
     assert [payload["repeat"] for payload in completion_payloads] == [True, False]
     battle_payloads = [payload for name, payload in calls if name == "battle"]
     assert [payload["initialize_settings"] for payload in battle_payloads] == [True, False]
+    prepare_payloads = [payload for name, payload in calls if name == "prepare"]
+    assert [payload["team_check_mode"] for payload in prepare_payloads] == [
+        "strict",
+        "off",
+    ]
 
 
 def test_full_run_stops_when_completion_requests_it(tmp_path: Path):

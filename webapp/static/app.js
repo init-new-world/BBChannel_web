@@ -95,6 +95,7 @@ const els = {
   battleActionDelay: document.querySelector("#battle-action-delay"),
   fullRunCount: document.querySelector("#full-run-count"),
   fullRunApple: document.querySelector("#full-run-apple"),
+  fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   startFullRun: document.querySelector("#start-full-run"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
@@ -696,6 +697,7 @@ async function startFullRun() {
     max_runs: readNumber(els.fullRunCount),
     prepare: {
       apple: els.fullRunApple.value,
+      team_check_mode: els.fullRunTeamCheck.value,
     },
     battle: {
       tap_interval_seconds: Number(els.battleActionDelay.value),

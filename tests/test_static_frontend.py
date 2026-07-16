@@ -48,7 +48,9 @@ def test_operator_console_references_api_controls():
     assert 'id="start-battle-plan"' in index
     assert 'id="full-run-count"' in index
     assert 'id="full-run-apple"' in index
+    assert 'id="full-run-team-check"' in index
     assert 'id="start-full-run"' in index
+    assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
     assert 'id="pause-job"' in index
