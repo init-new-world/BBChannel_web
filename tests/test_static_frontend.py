@@ -57,6 +57,8 @@ def test_operator_console_references_api_controls():
     assert "entry_mode: els.fullRunEntryMode.value" in script
     assert "max_map_swipes: readNumber(els.fullRunMapSwipes)" in script
     assert "max_restarts: readNumber(els.fullRunRestartLimit)" in script
+    assert "state.selectedSettingPlan?.run?.game_crash_restart" in script
+    assert "result.restart_count" in script
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
     assert 'id="pause-job"' in index

@@ -295,6 +295,7 @@ async function loadSelectedSettingPlan() {
     state.selectedSettingProgram = null;
     renderSettingPlan(null);
     renderBattleProgram(null);
+    updateControls();
     return;
   }
 
@@ -312,6 +313,7 @@ async function loadSelectedSettingPlan() {
     renderBattleProgram(null);
     showError(error);
   }
+  updateControls();
 }
 
 async function loadStrategies(preferredName = "") {
@@ -943,6 +945,9 @@ function renderJobResult(job) {
     } else if (result.reason) {
       lines.push(`Stopped: ${String(result.reason).replaceAll("_", " ")}`);
     }
+    if (result.restart_count) {
+      lines.push(`${result.restart_count} game ${result.restart_count === 1 ? "restart" : "restarts"}`);
+    }
     els.jobResult.textContent = lines.join(" · ");
     return;
   }
@@ -1117,6 +1122,7 @@ function updateControls() {
   els.startFullRun.disabled = !state.connected
     || !state.selectedSettingProgram?.execution?.battle?.ready
     || hasRunningJob;
+  els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
   els.fullRunMapSwipes.disabled = els.fullRunEntryMode.value !== "free_quest";
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
