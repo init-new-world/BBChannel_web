@@ -221,6 +221,59 @@ def test_free_quest_entry_stops_after_map_scan_limit():
     assert device.swipes == [(193, 93, 1067, 580, 1500)]
 
 
+def test_free_quest_entry_scrolls_open_quest_panel_before_resuming_map_scan():
+    stages = iter(("unknown", "unknown", "unknown", "assist"))
+
+    class Recognizer:
+        def __init__(self) -> None:
+            self.map_calls = 0
+
+        def recognize_free_quests(self, screenshot, _server):
+            if screenshot == b"screen-3":
+                candidate = {"center": [700, 360], "cleared": False}
+                return {
+                    "candidate_count": 1,
+                    "candidates": [candidate],
+                    "selected": candidate,
+                }
+            return {"candidate_count": 0, "candidates": [], "selected": None}
+
+        def recognize_free_map(self, _screenshot):
+            self.map_calls += 1
+            candidate = {"center": [400, 300], "touch": [373, 327]}
+            return {
+                "candidate_count": 1,
+                "candidates": [candidate],
+                "selected": candidate,
+            }
+
+    device = _Device()
+    recognizer = Recognizer()
+    result = create_free_quest_entry_handler(
+        _ScriptData(),
+        device,
+        recognizer,
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "max_panel_swipes": 5,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["actions"] == [
+        "map_red_dot",
+        "quest_panel_swipe",
+        "free_quest",
+    ]
+    assert device.taps == [(373, 327), (700, 360)]
+    assert device.swipes == [(967, 553, 967, 133, 200)]
+    assert recognizer.map_calls == 1
+
+
 def test_free_quest_entry_job_requires_connected_device(tmp_path: Path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_free_quest_entry_job(

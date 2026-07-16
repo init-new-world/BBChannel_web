@@ -35,6 +35,7 @@ def create_free_quest_entry_handler(
         action_wait_seconds = _number(payload, "action_wait_seconds", 1, 0, 30)
         max_actions = _integer(payload, "max_actions", 20, 1, 200)
         max_map_swipes = _integer(payload, "max_map_swipes", 15, 0, 100)
+        max_panel_swipes = _integer(payload, "max_panel_swipes", 5, 0, 20)
         plan = script_data.get_setting_plan(normalized_name)
         server = str(plan["server"]).upper()
         run_options = plan.get("run", {})
@@ -44,6 +45,8 @@ def create_free_quest_entry_handler(
         attempts = 0
         actions: list[str] = []
         map_swipes = 0
+        panel_open = False
+        panel_swipes = 0
 
         while monotonic() - started <= timeout_seconds:
             attempts += 1
@@ -76,6 +79,7 @@ def create_free_quest_entry_handler(
             )
             selected_quest = quest_report.get("selected")
             if isinstance(selected_quest, dict):
+                panel_open = False
                 _tap_candidate(
                     context,
                     device_service,
@@ -93,7 +97,21 @@ def create_free_quest_entry_handler(
                     attempts,
                     actions,
                 )
+            elif panel_open and panel_swipes < max_panel_swipes:
+                operation = device_service.swipe(967, 553, 967, 133, 200)
+                context.emit(
+                    "device_action",
+                    "Scrolled the open free quest panel.",
+                    data={
+                        "role": "quest_panel_swipe",
+                        "scan_index": panel_swipes,
+                        "operation": operation.to_dict(),
+                    },
+                )
+                panel_swipes += 1
+                actions.append("quest_panel_swipe")
             else:
+                panel_open = False
                 map_report = quest_recognizer.recognize_free_map(screenshot)
                 context.emit(
                     "quest_recognition",
@@ -137,6 +155,8 @@ def create_free_quest_entry_handler(
                         "map_red_dot",
                         random_touch,
                     )
+                    panel_open = max_panel_swipes > 0
+                    panel_swipes = 0
                     actions.append("map_red_dot")
 
             if len(actions) >= max_actions:
