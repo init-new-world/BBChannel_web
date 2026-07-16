@@ -182,6 +182,7 @@ def create_app(
         script_data,
         device_service,
         stage_handler,
+        recognition,
     )
     register_stage_job(
         job_manager,
@@ -201,6 +202,7 @@ def create_app(
         script_data,
         device_service,
         stage_handler,
+        recognition,
     )
     register_full_run_job(
         job_manager,
