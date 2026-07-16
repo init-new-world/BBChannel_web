@@ -35,9 +35,11 @@ def _run_completion(
     data = tmp_path / "data"
     session = tmp_path / "replays" / "completion"
     battle_assets = assets / "battle" / "CH"
+    interlude_assets = assets / "battle" / "Interlude" / "CH"
     drop_assets = assets / "drop"
     settings = data / "settings"
     battle_assets.mkdir(parents=True)
+    interlude_assets.mkdir(parents=True)
     drop_assets.mkdir(parents=True)
     settings.mkdir(parents=True)
     session.mkdir(parents=True)
@@ -52,6 +54,8 @@ def _run_completion(
     finish_without_friend = _pattern((174, 52), (75, 135, 65))
     apply_for_friend = _pattern((308, 69), (165, 65, 105))
     reconnect = _pattern((114, 53), (125, 45, 165))
+    goto_interlude = _pattern((180, 48), (95, 75, 165))
+    goto_stage = _pattern((220, 52), (155, 105, 45))
     drop_item = _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
@@ -63,6 +67,8 @@ def _run_completion(
     finish_without_friend.save(battle_assets / "friend_apply.png")
     apply_for_friend.save(battle_assets / "friend_apply_1.png")
     reconnect.save(battle_assets / "reconnect.png")
+    goto_interlude.save(interlude_assets / "gotoInterlude.png")
+    goto_stage.save(interlude_assets / "gotoStage.png")
     drop_item.save(drop_assets / "item.png")
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
@@ -325,3 +331,54 @@ def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
     assert result.result["stopped"] is True
     assert result.result["reason"] == "drop_limit"
     assert result.result["drop_count"] == 3
+
+
+@pytest.mark.parametrize(
+    ("template_size", "template_color", "reason", "action"),
+    [
+        pytest.param(
+            (180, 48),
+            (95, 75, 165),
+            "interlude_navigation",
+            "goto_interlude",
+            id="goto-interlude",
+        ),
+        pytest.param(
+            (220, 52),
+            (155, 105, 45),
+            "story_navigation",
+            "goto_stage",
+            id="goto-stage",
+        ),
+    ],
+)
+def test_completion_handles_post_battle_story_navigation(
+    tmp_path: Path,
+    template_size: tuple[int, int],
+    template_color: tuple[int, int, int],
+    reason: str,
+    action: str,
+):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern(template_size, template_color), (700, 540))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (
+                frame,
+                {
+                    "type": "tap",
+                    "x": 700 + template_size[0] // 2,
+                    "y": 540 + template_size[1] // 2,
+                },
+            )
+        ],
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is True
+    assert result.result["stopped"] is True
+    assert result.result["reason"] == reason
+    assert result.result["actions"] == [action]

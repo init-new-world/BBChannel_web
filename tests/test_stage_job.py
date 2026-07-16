@@ -74,3 +74,23 @@ def test_detect_stage_job_is_device_scoped(tmp_path: Path):
 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["stage"] == "battle"
+
+
+@pytest.mark.parametrize("template", ["gotoInterlude", "gotoStage"])
+def test_stage_handler_recognizes_post_battle_story_navigation(template: str):
+    expected_path = f"battle/Interlude/CH/{template}.png"
+
+    class InterludeRecognition:
+        def match_template(self, _screen, template_path, **_options):
+            return _Match(template_path == expected_path)
+
+    handler = create_stage_handler(
+        _ScriptData(),
+        _Device(),
+        InterludeRecognition(),
+    )
+
+    result = handler(None, {"setting_name": "demo"})
+
+    assert result["stage"] == "completion"
+    assert result["matched_template"] == expected_path

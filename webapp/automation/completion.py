@@ -243,6 +243,49 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
+            story_navigation = None
+            for template_name, action, reason in (
+                ("gotoInterlude", "goto_interlude", "interlude_navigation"),
+                ("gotoStage", "goto_stage", "story_navigation"),
+            ):
+                candidate = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/Interlude/{server}/{template_name}.png",
+                )
+                if candidate is not None and candidate.matched:
+                    story_navigation = (candidate, action, reason)
+                    break
+            if story_navigation is not None:
+                candidate, action, reason = story_navigation
+                operation = device_service.tap(
+                    *match_touch_point(candidate, enabled=random_touch)
+                )
+                actions.append(action)
+                context.emit(
+                    "device_action",
+                    "Opened post-battle story content.",
+                    data={"role": action, "operation": operation.to_dict()},
+                )
+                context.sleep(
+                    randomized_wait_seconds(action_wait_seconds, random_time)
+                )
+                context.checkpoint(
+                    "complete",
+                    progress=1.0,
+                    message="Battle settlement opened story content.",
+                )
+                return {
+                    "setting_name": setting_name.strip(),
+                    "complete": True,
+                    "repeated": False,
+                    "stopped": True,
+                    "reason": reason,
+                    "drop_count": drop_count,
+                    "actions": actions,
+                    "attempts": attempts,
+                }
+
             context.emit(
                 "recognition",
                 "Battle settlement state checked.",

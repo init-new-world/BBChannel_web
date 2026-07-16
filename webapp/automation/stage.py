@@ -24,34 +24,72 @@ def create_stage_handler(
         plan = script_data.get_setting_plan(setting_name.strip())
         server = str(plan["server"]).upper()
         screenshot = device_service.snapshot()
+        battle_root = f"battle/{server}"
         stage_templates = (
             (
                 "completion",
-                (
-                    "run_again",
-                    "next",
-                    "relationship_up",
-                    "friend_apply",
-                    "friend_apply_1",
-                    "jblevel10",
-                    "jbMax",
-                    "jbup",
-                    "jbup1",
-                    "battleFinish",
-                    "battleFinish1",
-                    "fight_end",
+                tuple(
+                    f"{battle_root}/{template_name}.png"
+                    for template_name in (
+                        "run_again",
+                        "next",
+                        "relationship_up",
+                        "friend_apply",
+                        "friend_apply_1",
+                        "jblevel10",
+                        "jbMax",
+                        "jbup",
+                        "jbup1",
+                        "battleFinish",
+                        "battleFinish1",
+                        "fight_end",
+                    )
+                )
+                + (
+                    f"battle/Interlude/{server}/gotoInterlude.png",
+                    f"battle/Interlude/{server}/gotoStage.png",
                 ),
             ),
-            ("battle", ("attack", "phase_1", "phase_2", "phase_3")),
+            (
+                "battle",
+                tuple(
+                    f"{battle_root}/{template_name}.png"
+                    for template_name in (
+                        "attack",
+                        "phase_1",
+                        "phase_2",
+                        "phase_3",
+                    )
+                ),
+            ),
             (
                 "prepare",
-                ("apple_close", "apple_decide", "teamDecide", "start_task", "start_battle"),
+                tuple(
+                    f"{battle_root}/{template_name}.png"
+                    for template_name in (
+                        "apple_close",
+                        "apple_decide",
+                        "teamDecide",
+                        "start_task",
+                        "start_battle",
+                    )
+                ),
             ),
-            ("assist", ("listupdatebtn", "assist_exists", "assist", "assist1")),
+            (
+                "assist",
+                tuple(
+                    f"{battle_root}/{template_name}.png"
+                    for template_name in (
+                        "listupdatebtn",
+                        "assist_exists",
+                        "assist",
+                        "assist1",
+                    )
+                ),
+            ),
         )
-        for stage, template_names in stage_templates:
-            for template_name in template_names:
-                template_path = f"battle/{server}/{template_name}.png"
+        for stage, template_paths in stage_templates:
+            for template_path in template_paths:
                 try:
                     result = recognition.match_template(
                         screenshot,
