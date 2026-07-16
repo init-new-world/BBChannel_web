@@ -100,6 +100,7 @@ const els = {
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   startFullRun: document.querySelector("#start-full-run"),
+  restartGame: document.querySelector("#restart-game"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -202,6 +203,7 @@ function bindEvents() {
   els.startBattlePlan.addEventListener("click", startBattlePlan);
   els.fullRunEntryMode.addEventListener("change", updateControls);
   els.startFullRun.addEventListener("click", startFullRun);
+  els.restartGame.addEventListener("click", restartGame);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -716,6 +718,16 @@ async function startFullRun() {
   });
 }
 
+async function restartGame() {
+  const settingName = els.settingSelect.value;
+  if (!settingName || !state.selectedSettingPlan?.run?.game_crash_restart) {
+    return;
+  }
+  await enqueueJob("battle.restart-game", {
+    setting_name: settingName,
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -951,6 +963,19 @@ function renderJobResult(job) {
     els.jobResult.textContent = lines.join(" · ");
     return;
   }
+  if (job.kind === "battle.restart-game") {
+    if (result.recovered) {
+      const actionCount = result.actions?.length || 0;
+      const actionLabel = actionCount === 1 ? "action" : "actions";
+      els.jobResult.textContent = [
+        `Recovered to ${result.stage || "battle flow"}`,
+        `${actionCount} navigation ${actionLabel}`,
+      ].join(" · ");
+    } else {
+      els.jobResult.textContent = `Recovery skipped: ${String(result.reason || "unknown").replaceAll("_", " ")}`;
+    }
+    return;
+  }
   els.jobResult.textContent = "Completed";
 }
 
@@ -1121,6 +1146,9 @@ function updateControls() {
     || hasRunningJob;
   els.startFullRun.disabled = !state.connected
     || !state.selectedSettingProgram?.execution?.battle?.ready
+    || hasRunningJob;
+  els.restartGame.disabled = !state.connected
+    || !state.selectedSettingPlan?.run?.game_crash_restart
     || hasRunningJob;
   els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
   els.fullRunMapSwipes.disabled = els.fullRunEntryMode.value !== "free_quest";

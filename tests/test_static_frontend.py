@@ -53,12 +53,14 @@ def test_operator_console_references_api_controls():
     assert 'id="full-run-apple"' in index
     assert 'id="full-run-team-check"' in index
     assert 'id="start-full-run"' in index
+    assert 'id="restart-game"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
     assert "max_map_swipes: readNumber(els.fullRunMapSwipes)" in script
     assert "max_restarts: readNumber(els.fullRunRestartLimit)" in script
     assert "state.selectedSettingPlan?.run?.game_crash_restart" in script
     assert "result.restart_count" in script
+    assert 'enqueueJob("battle.restart-game"' in script
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
     assert 'id="pause-job"' in index
