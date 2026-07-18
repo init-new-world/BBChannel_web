@@ -29,6 +29,7 @@ from webapp.automation import (
     register_chocolate_run_job,
     register_completion_job,
     register_diagnostic_job,
+    register_digdig_execute_job,
     register_digdig_inspect_job,
     register_expball_inspect_job,
     register_expball_storage_job,
@@ -173,6 +174,12 @@ def create_app(
         chocolate_recognizer,
     )
     register_digdig_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        digdig_recognizer,
+    )
+    register_digdig_execute_job(
         job_manager,
         script_data,
         device_service,

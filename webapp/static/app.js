@@ -104,6 +104,7 @@ const els = {
   inspectChocolate: document.querySelector("#inspect-chocolate"),
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
+  executeDigdig: document.querySelector("#execute-digdig"),
   inspectExpball: document.querySelector("#inspect-expball"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
@@ -214,6 +215,7 @@ function bindEvents() {
   els.inspectChocolate.addEventListener("click", inspectChocolate);
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
+  els.executeDigdig.addEventListener("click", executeDigdig);
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
@@ -771,6 +773,16 @@ async function inspectDigdig() {
   });
 }
 
+async function executeDigdig() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.digdig.execute", {
+    setting_name: settingName,
+  });
+}
+
 async function inspectExpball() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -1084,6 +1096,15 @@ function renderJobResult(job) {
     els.jobResult.textContent = details.join(" · ");
     return;
   }
+  if (job.kind === "event.digdig.execute") {
+    const actionCount = result.actions?.length || 0;
+    els.jobResult.textContent = [
+      result.completed ? "Dig selection executed" : "Dig execution stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.inspect") {
     const details = [
       `EXP ${humanizeResultValue(result.flow || "unknown")}`,
@@ -1303,6 +1324,10 @@ function updateControls() {
     || !els.settingSelect.value
     || hasRunningJob;
   els.inspectDigdig.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsDigdig
+    || hasRunningJob;
+  els.executeDigdig.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsDigdig
     || hasRunningJob;
