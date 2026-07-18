@@ -105,6 +105,7 @@ const els = {
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   inspectExpball: document.querySelector("#inspect-expball"),
+  runExpballSummon: document.querySelector("#run-expball-summon"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -212,6 +213,7 @@ function bindEvents() {
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.inspectExpball.addEventListener("click", inspectExpball);
+  els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -776,6 +778,16 @@ async function inspectExpball() {
   });
 }
 
+async function runExpballSummon() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.summon", {
+    setting_name: settingName,
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -1210,6 +1222,10 @@ function updateControls() {
     || !supportsCHOrCNTW
     || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsCHOrCNTW
+    || hasRunningJob;
+  els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsCHOrCNTW
     || hasRunningJob;
