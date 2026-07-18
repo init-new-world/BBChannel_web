@@ -105,6 +105,7 @@ const els = {
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   inspectExpball: document.querySelector("#inspect-expball"),
+  fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
@@ -787,6 +788,7 @@ async function runExpballSummon() {
   }
   await enqueueJob("event.expball.summon", {
     setting_name: settingName,
+    max_summons: readNumber(els.fpSummonBatches),
   });
 }
 
@@ -1241,6 +1243,7 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsCHOrCNTW
     || hasRunningJob;
+  els.fpSummonBatches.disabled = !supportsCHOrCNTW || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsCHOrCNTW

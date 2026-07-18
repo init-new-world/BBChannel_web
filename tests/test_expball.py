@@ -330,6 +330,38 @@ def test_expball_summon_stops_when_device_rejects_tap():
     assert device.taps == [(800, 610)]
 
 
+def test_expball_summon_defaults_to_ten_batches():
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                center=(800, 610),
+            )
+
+    device = _Device()
+    result = create_expball_summon_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "max_same_state": 20,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "summon_limit"
+    assert result["summons"] == 10
+    assert len(device.taps) == 10
+
+
 def test_expball_storage_selects_all_executes_and_confirms():
     reports = iter(
         (
