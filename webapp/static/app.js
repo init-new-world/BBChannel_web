@@ -1151,7 +1151,9 @@ function updateControls() {
     || !state.selectedSettingPlan?.run?.game_crash_restart
     || hasRunningJob;
   els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
-  els.fullRunMapSwipes.disabled = els.fullRunEntryMode.value !== "free_quest";
+  els.fullRunMapSwipes.disabled = !["free_quest", "main_story"].includes(
+    els.fullRunEntryMode.value,
+  );
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)

@@ -49,6 +49,7 @@ def test_operator_console_references_api_controls():
     assert 'id="full-run-count"' in index
     assert 'id="full-run-restart-limit"' in index
     assert 'id="full-run-entry-mode"' in index
+    assert '<option value="main_story">Main story</option>' in index
     assert 'id="full-run-map-swipes"' in index
     assert 'id="full-run-apple"' in index
     assert 'id="full-run-team-check"' in index
@@ -56,6 +57,8 @@ def test_operator_console_references_api_controls():
     assert 'id="restart-game"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
+    assert '!["free_quest", "main_story"].includes(' in script
+    assert "els.fullRunEntryMode.value" in script
     assert "max_map_swipes: readNumber(els.fullRunMapSwipes)" in script
     assert "max_restarts: readNumber(els.fullRunRestartLimit)" in script
     assert "state.selectedSettingPlan?.run?.game_crash_restart" in script

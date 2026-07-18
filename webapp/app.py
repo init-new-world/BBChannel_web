@@ -19,6 +19,7 @@ from webapp.automation import (
     create_battle_execute_plan_handler,
     create_completion_handler,
     create_free_quest_entry_handler,
+    create_main_story_entry_handler,
     create_recovery_handler,
     create_stage_handler,
     register_assist_job,
@@ -28,6 +29,7 @@ from webapp.automation import (
     register_diagnostic_job,
     register_full_run_job,
     register_free_quest_entry_job,
+    register_main_story_entry_job,
     register_recovery_job,
     register_stage_job,
 )
@@ -197,6 +199,13 @@ def create_app(
         quest_recognizer,
         stage_handler,
     )
+    register_main_story_entry_job(
+        job_manager,
+        script_data,
+        device_service,
+        quest_recognizer,
+        stage_handler,
+    )
     register_recovery_job(
         job_manager,
         script_data,
@@ -229,6 +238,12 @@ def create_app(
         detect_stage=stage_handler,
         recover_game=recovery_handler,
         enter_free_quest=create_free_quest_entry_handler(
+            script_data,
+            device_service,
+            quest_recognizer,
+            stage_handler,
+        ),
+        enter_main_story=create_main_story_entry_handler(
             script_data,
             device_service,
             quest_recognizer,

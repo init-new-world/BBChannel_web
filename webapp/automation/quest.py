@@ -16,6 +16,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 FREE_QUEST_ENTER_JOB_KIND = "battle.enter-free-quest"
+MAIN_STORY_ENTER_JOB_KIND = "battle.enter-main-story"
 _BATTLE_FLOW_STAGES = {"assist", "prepare", "battle", "completion"}
 
 
@@ -190,6 +191,141 @@ def register_free_quest_entry_job(
     job_manager.register(
         FREE_QUEST_ENTER_JOB_KIND,
         create_free_quest_entry_handler(
+            script_data,
+            device_service,
+            quest_recognizer,
+            detect_stage,
+        ),
+        requires_device=True,
+    )
+
+
+def create_main_story_entry_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    quest_recognizer: QuestRecognizer,
+    detect_stage: StageHandler,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        timeout_seconds = _number(payload, "timeout_seconds", 60, 0.1, 600)
+        poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
+        action_wait_seconds = _number(payload, "action_wait_seconds", 1, 0, 30)
+        max_actions = _integer(payload, "max_actions", 20, 1, 200)
+        max_map_swipes = _integer(payload, "max_map_swipes", 15, 0, 100)
+        plan = script_data.get_setting_plan(normalized_name)
+        server = str(plan["server"]).upper()
+        run_options = plan.get("run", {})
+        random_touch = bool(run_options.get("random_touch"))
+        random_time = configured_random_time(run_options.get("random_time", 0))
+        started = monotonic()
+        attempts = 0
+        actions: list[str] = []
+        map_swipes = 0
+
+        while monotonic() - started <= timeout_seconds:
+            attempts += 1
+            context.checkpoint(
+                "enter_main_story",
+                progress=min((monotonic() - started) / timeout_seconds, 0.95),
+            )
+            stage_result = detect_stage(
+                context,
+                {"setting_name": normalized_name},
+            ) or {}
+            stage = str(stage_result.get("stage") or "unknown")
+            if stage in _BATTLE_FLOW_STAGES:
+                context.checkpoint(
+                    "complete",
+                    progress=1.0,
+                    message="Main story battle flow was reached.",
+                )
+                return _result(normalized_name, True, stage, None, attempts, actions)
+            if len(actions) >= max_actions:
+                return _result(
+                    normalized_name,
+                    False,
+                    "unknown",
+                    "navigation_limit",
+                    attempts,
+                    actions,
+                )
+
+            screenshot = device_service.snapshot()
+            report = quest_recognizer.recognize_main_story_quests(
+                screenshot,
+                server,
+            )
+            context.emit(
+                "quest_recognition",
+                "Visible main story quests were recognized.",
+                data=report,
+            )
+            selected = report.get("selected")
+            if isinstance(selected, dict):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    selected["center"],
+                    "main_story_quest",
+                    random_touch,
+                )
+                actions.append("main_story_quest")
+            elif map_swipes < max_map_swipes:
+                swipe = _free_map_swipe(map_swipes)
+                operation = device_service.swipe(*swipe, 1500)
+                context.emit(
+                    "device_action",
+                    "Scrolled the main story map.",
+                    data={
+                        "role": "map_swipe",
+                        "scan_index": map_swipes,
+                        "operation": operation.to_dict(),
+                    },
+                )
+                map_swipes += 1
+                actions.append("map_swipe")
+            else:
+                reason = (
+                    "no_visible_main_story"
+                    if max_map_swipes == 0
+                    else "map_scan_exhausted"
+                )
+                return _result(
+                    normalized_name,
+                    False,
+                    "unknown",
+                    reason,
+                    attempts,
+                    actions,
+                )
+
+            wait_seconds = action_wait_seconds if actions else poll_interval
+            context.sleep(randomized_wait_seconds(wait_seconds, random_time))
+
+        raise TimeoutError(
+            "Main story battle flow was not reached within "
+            f"{timeout_seconds:.2f} seconds."
+        )
+
+    return handler
+
+
+def register_main_story_entry_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    quest_recognizer: QuestRecognizer,
+    detect_stage: StageHandler,
+) -> None:
+    if job_manager.has_kind(MAIN_STORY_ENTER_JOB_KIND):
+        return
+    job_manager.register(
+        MAIN_STORY_ENTER_JOB_KIND,
+        create_main_story_entry_handler(
             script_data,
             device_service,
             quest_recognizer,

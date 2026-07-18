@@ -356,6 +356,53 @@ def test_full_run_enters_free_quest_before_starting_battle_flow(tmp_path: Path):
     assert calls[0][1] == {"max_actions": 8, "setting_name": "demo"}
 
 
+def test_full_run_enters_main_story_before_starting_battle_flow(tmp_path: Path):
+    calls: list[tuple[str, dict]] = []
+
+    def stage(name: str, result=None):
+        def execute(_context, payload):
+            calls.append((name, dict(payload)))
+            return dict(result or {})
+
+        return execute
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(),
+            stage("assist"),
+            stage("prepare", {"ready": True}),
+            stage("battle"),
+            stage("complete", {"complete": True, "drop_count": 0}),
+            enter_main_story=stage(
+                "enter_main_story",
+                {"entered": True, "stage": "prepare", "reason": None},
+            ),
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {
+                "setting_name": "demo",
+                "max_runs": 1,
+                "entry_mode": "main_story",
+                "entry": {"max_map_swipes": 6},
+            },
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 1
+    assert result.result["entry"]["stage"] == "prepare"
+    assert [name for name, _payload in calls] == [
+        "enter_main_story",
+        "prepare",
+        "battle",
+        "complete",
+    ]
+    assert calls[0][1] == {"max_map_swipes": 6, "setting_name": "demo"}
+
+
 def test_full_run_stops_when_free_quest_entry_cannot_find_a_target(tmp_path: Path):
     calls: list[str] = []
 

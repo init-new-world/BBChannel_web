@@ -114,6 +114,41 @@ class QuestRecognizer:
             "selected": candidates[0] if candidates else None,
         }
 
+    def recognize_main_story_quests(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.8,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+
+        template_root = f"battle/MainStory/{normalized_server}"
+        matches = self._recognition.match_template_all(
+            screenshot,
+            f"{template_root}/reddot.png",
+            threshold=threshold,
+            scales=FREE_QUEST_SCALES,
+            mask_path=f"{template_root}/reddotMask.png",
+            max_results=50,
+        )
+        candidates = [
+            {
+                "center": list(match.center),
+                "confidence": match.confidence,
+                "scale": match.scale,
+            }
+            for match in self._distinct_matches(matches)
+        ]
+        return {
+            "server": normalized_server,
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+            "selected": candidates[0] if candidates else None,
+        }
+
     @staticmethod
     def _distinct_matches(matches: list[MatchResult]) -> list[MatchResult]:
         ordered = sorted(matches, key=lambda match: (match.center[1], match.center[0]))

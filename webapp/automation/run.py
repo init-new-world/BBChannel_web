@@ -20,6 +20,7 @@ def create_full_run_handler(
     detect_stage: StageHandler | None = None,
     recover_game: StageHandler | None = None,
     enter_free_quest: StageHandler | None = None,
+    enter_main_story: StageHandler | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -41,8 +42,10 @@ def create_full_run_handler(
         ):
             raise ValueError("max_clear_runs must be between 1 and 10000.")
         entry_mode = payload.get("entry_mode", "current")
-        if entry_mode not in {"current", "free_quest"}:
-            raise ValueError("entry_mode must be current or free_quest.")
+        if entry_mode not in {"current", "free_quest", "main_story"}:
+            raise ValueError(
+                "entry_mode must be current, free_quest, or main_story."
+            )
         max_restarts = payload.get("max_restarts", 3)
         if (
             isinstance(max_restarts, bool)
@@ -161,6 +164,27 @@ def create_full_run_handler(
                 stop_reason = str(
                     entry_result.get("reason") or "free_quest_entry_failed"
                 )
+        elif entry_mode == "main_story":
+            if enter_main_story is None:
+                raise RuntimeError("Main story entry is not available.")
+            context.checkpoint(
+                "run.enter_main_story",
+                progress=0.0,
+                message="Entering a visible main story quest.",
+            )
+            entry_result = enter_main_story(
+                context,
+                {
+                    **stage_options["entry"],
+                    "setting_name": normalized_name,
+                },
+            ) or {}
+            initial_stage = str(entry_result.get("stage") or "unknown")
+            if not entry_result.get("entered"):
+                stopped = True
+                stop_reason = str(
+                    entry_result.get("reason") or "main_story_entry_failed"
+                )
         elif resume and detect_stage is not None:
             detected = detect_stage(context, {"setting_name": normalized_name}) or {}
             initial_stage = str(detected.get("stage") or "unknown")
@@ -209,7 +233,7 @@ def create_full_run_handler(
                 "runs": [],
             }
         if initial_stage not in battle_stages:
-            raise RuntimeError("Free quest entry did not reach the battle flow.")
+            raise RuntimeError("Quest entry did not reach the battle flow.")
 
         while run_number <= max_runs or (clear_ap and clear_runs < max_clear_runs):
             clearing_ap = run_number > max_runs
@@ -368,6 +392,7 @@ def register_full_run_job(
     detect_stage: StageHandler | None = None,
     recover_game: StageHandler | None = None,
     enter_free_quest: StageHandler | None = None,
+    enter_main_story: StageHandler | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
         return
@@ -382,6 +407,7 @@ def register_full_run_job(
             detect_stage,
             recover_game,
             enter_free_quest,
+            enter_main_story,
         ),
         requires_device=True,
     )

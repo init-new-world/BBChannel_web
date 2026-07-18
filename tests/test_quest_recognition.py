@@ -220,3 +220,37 @@ def test_free_quest_recognizer_keeps_bottom_candidate_when_clear_badge_is_offscr
     assert result["candidates"][0]["clear_visible"] is False
     assert result["candidates"][0]["clear_confidence"] is None
     assert result["selected"] == result["candidates"][0]
+
+
+def test_main_story_recognizer_selects_first_visible_ap_target():
+    class MainStoryRecognition:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def match_template_all(self, _screenshot, template_path, **options):
+            self.calls.append({"template_path": template_path, **options})
+            return [
+                _match(template_path, [900, 500], confidence=0.91),
+                _match(template_path, [420, 240], confidence=0.97),
+                _match(template_path, [430, 250], confidence=0.89),
+            ]
+
+    recognition = MainStoryRecognition()
+    result = QuestRecognizer(recognition).recognize_main_story_quests(
+        b"screen",
+        "cntw",
+    )
+
+    assert recognition.calls == [
+        {
+            "template_path": "battle/MainStory/CNTW/reddot.png",
+            "threshold": 0.8,
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+            "mask_path": "battle/MainStory/CNTW/reddotMask.png",
+            "max_results": 50,
+        }
+    ]
+    assert result["server"] == "CNTW"
+    assert result["candidate_count"] == 2
+    assert result["candidates"][0]["center"] == [420, 240]
+    assert result["selected"] == result["candidates"][0]

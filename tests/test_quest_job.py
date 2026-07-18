@@ -2,9 +2,12 @@ from pathlib import Path
 
 from webapp.automation.quest import (
     FREE_QUEST_ENTER_JOB_KIND,
+    MAIN_STORY_ENTER_JOB_KIND,
     _free_map_swipe,
     create_free_quest_entry_handler,
+    create_main_story_entry_handler,
     register_free_quest_entry_job,
+    register_main_story_entry_job,
 )
 from webapp.core.models import OperationResult
 from webapp.runtime import JobDatabase, JobManager
@@ -338,3 +341,116 @@ def test_free_map_swipes_follow_original_left_top_then_snake_pattern():
         (640, 360, 1067, 360),
         (640, 360, 640, 120),
     ]
+
+
+def test_main_story_entry_clicks_visible_ap_target_until_assist_is_reached():
+    stages = iter(("unknown", "assist"))
+
+    class Recognizer:
+        def recognize_main_story_quests(self, screenshot, server):
+            assert screenshot == b"screen-1"
+            assert server == "CH"
+            candidate = {"center": [420, 240], "confidence": 0.97}
+            return {
+                "server": server,
+                "candidate_count": 1,
+                "candidates": [candidate],
+                "selected": candidate,
+            }
+
+    device = _Device()
+    result = create_main_story_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result == {
+        "setting_name": "demo",
+        "entered": True,
+        "stage": "assist",
+        "reason": None,
+        "attempts": 2,
+        "actions": ["main_story_quest"],
+    }
+    assert device.taps == [(420, 240)]
+
+
+def test_main_story_entry_scans_map_before_clicking_visible_ap_target():
+    stages = iter(("unknown", "unknown", "assist"))
+
+    class Recognizer:
+        def recognize_main_story_quests(self, screenshot, _server):
+            if screenshot == b"screen-1":
+                return {"candidate_count": 0, "candidates": [], "selected": None}
+            candidate = {"center": [760, 360], "confidence": 0.94}
+            return {
+                "candidate_count": 1,
+                "candidates": [candidate],
+                "selected": candidate,
+            }
+
+    device = _Device()
+    result = create_main_story_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_map_swipes": 1,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["actions"] == ["map_swipe", "main_story_quest"]
+    assert device.swipes == [(193, 93, 1067, 580, 1500)]
+    assert device.taps == [(760, 360)]
+
+
+def test_main_story_entry_reports_when_no_visible_target_exists():
+    class Recognizer:
+        def recognize_main_story_quests(self, _screenshot, _server):
+            return {"candidate_count": 0, "candidates": [], "selected": None}
+
+    device = _Device()
+    result = create_main_story_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": "unknown"},
+    )(
+        _Context(),
+        {"setting_name": "demo", "max_map_swipes": 0},
+    )
+
+    assert result["entered"] is False
+    assert result["stage"] == "unknown"
+    assert result["reason"] == "no_visible_main_story"
+    assert result["actions"] == []
+    assert device.swipes == []
+
+
+def test_main_story_entry_job_requires_connected_device(tmp_path: Path):
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_main_story_entry_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+            lambda _context, _payload: {"stage": "unknown"},
+        )
+
+        assert manager.has_kind(MAIN_STORY_ENTER_JOB_KIND)
+        assert manager.requires_device(MAIN_STORY_ENTER_JOB_KIND) is True
