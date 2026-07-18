@@ -398,6 +398,7 @@ def test_completion_handles_post_battle_story_navigation(
                 },
             )
         ],
+        wait_timeout=10,
     )
 
     assert result.status == JobStatus.SUCCEEDED
