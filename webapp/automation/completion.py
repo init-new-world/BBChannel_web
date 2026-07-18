@@ -248,16 +248,19 @@ def create_completion_handler(
                     f"battle/Interlude/{server}/gotoInterlude.png",
                     "goto_interlude",
                     "interlude_navigation",
+                    None,
                 ),
                 (
                     f"battle/Interlude/{server}/gotoStage.png",
                     "goto_stage",
                     "story_navigation",
+                    None,
                 ),
                 (
                     f"battle/MainStory/{server}/nextOne.png",
                     "next_story",
                     "main_story_navigation",
+                    f"battle/MainStory/{server}/nextOneMask.png",
                 ),
             )
             story_matches = recognition.match_templates(
@@ -268,14 +271,15 @@ def create_completion_handler(
                         "threshold": 0.85,
                         "roi": (0, 360, 1280, 360),
                         "scales": (1.0, 0.75, 2 / 3, 0.5),
+                        **({"mask_path": mask_path} if mask_path else {}),
                     }
-                    for template_path, _action, _reason in story_specs
+                    for template_path, _action, _reason, mask_path in story_specs
                 ],
             )
             story_navigation = next(
                 (
                     (match, action, reason)
-                    for match, (_template_path, action, reason) in zip(
+                    for match, (_template_path, action, reason, _mask_path) in zip(
                         story_matches,
                         story_specs,
                         strict=True,

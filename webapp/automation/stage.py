@@ -93,11 +93,18 @@ def create_stage_handler(
         for stage, template_paths in stage_templates:
             for template_path in template_paths:
                 try:
+                    mask_path = (
+                        f"battle/MainStory/{server}/nextOneMask.png"
+                        if template_path
+                        == f"battle/MainStory/{server}/nextOne.png"
+                        else None
+                    )
                     result = recognition.match_template(
                         screenshot,
                         template_path,
                         threshold=0.85,
                         scales=(1.0, 0.75, 2 / 3, 0.5),
+                        mask_path=mask_path,
                     )
                 except AppError as exc:
                     if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:

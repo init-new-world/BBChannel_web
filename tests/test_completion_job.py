@@ -30,6 +30,7 @@ def _run_completion(
     config: dict | None = None,
     payload: dict | None = None,
     wait_timeout: float = 3,
+    story_candidates: list[list[dict[str, object]]] | None = None,
 ):
     assets = tmp_path / "assets"
     data = tmp_path / "data"
@@ -73,6 +74,9 @@ def _run_completion(
     goto_interlude.save(interlude_assets / "gotoInterlude.png")
     goto_stage.save(interlude_assets / "gotoStage.png")
     next_story.save(main_story_assets / "nextOne.png")
+    Image.new("L", next_story.size, 255).save(
+        main_story_assets / "nextOneMask.png"
+    )
     drop_item.save(drop_assets / "item.png")
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
@@ -96,6 +100,14 @@ def _run_completion(
 
     resources = ResourceService(assets, data)
     recognition = RecognitionService(resources)
+    if story_candidates is not None:
+        match_templates = recognition.match_templates
+
+        def record_story_candidates(screenshot, candidates):
+            story_candidates.append([dict(candidate) for candidate in candidates])
+            return match_templates(screenshot, candidates)
+
+        recognition.match_templates = record_story_candidates
     devices = DeviceService(
         [ReplayBackend(tmp_path / "replays")],
         EventLog(),
@@ -393,3 +405,24 @@ def test_completion_handles_post_battle_story_navigation(
     assert result.result["stopped"] is True
     assert result.result["reason"] == reason
     assert result.result["actions"] == [action]
+
+
+def test_completion_uses_mask_for_main_story_navigation(tmp_path: Path):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern((161, 100), (105, 145, 65)), (700, 540))
+    story_candidates: list[list[dict[str, object]]] = []
+
+    result = _run_completion(
+        tmp_path,
+        [(frame, {"type": "tap", "x": 780, "y": 590})],
+        story_candidates=story_candidates,
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert story_candidates[0][2]["mask_path"] == (
+        "battle/MainStory/CH/nextOneMask.png"
+    )
+    assert "mask_path" not in story_candidates[0][0]
+    assert "mask_path" not in story_candidates[0][1]
