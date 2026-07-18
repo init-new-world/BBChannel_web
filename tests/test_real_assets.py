@@ -78,3 +78,27 @@ def test_real_command_card_template_matches_with_transparency():
     assert result.matched is True
     assert result.confidence >= 0.98
     assert result.top_left == [140, 80]
+
+
+def test_real_chocolate_templates_report_storage_limit():
+    pytest.importorskip("cv2")
+    from webapp.services.chocolate import ChocolateRecognizer
+    from webapp.services.recognition import RecognitionService
+
+    resources = ResourceService(PROJECT_ROOT / "assets", PROJECT_ROOT / "data")
+    template_path = "chocolate/CH/limit.png"
+    with Image.open(resources.resolve_template(template_path)) as source:
+        template = source.convert("RGBA")
+    screenshot = Image.new("RGB", (1280, 720), (24, 31, 43))
+    screenshot.paste(template, (510, 320), template)
+
+    report = ChocolateRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot),
+        "CH",
+        threshold=0.95,
+    )
+
+    assert report["state"] == "limit"
+    assert report["status"] == "blocked"
+    assert report["reason"] == "storage_full"
+    assert report["matches"][0]["template_path"] == template_path

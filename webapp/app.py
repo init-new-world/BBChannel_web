@@ -25,6 +25,7 @@ from webapp.automation import (
     register_assist_job,
     register_battle_entry_job,
     register_battle_jobs,
+    register_chocolate_inspect_job,
     register_completion_job,
     register_diagnostic_job,
     register_full_run_job,
@@ -40,6 +41,7 @@ from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager
 from webapp.services.cards import CommandCardRecognizer
+from webapp.services.chocolate import ChocolateRecognizer
 from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
@@ -139,6 +141,7 @@ def create_app(
     card_recognizer = CommandCardRecognizer(resources, recognition)
     team_recognizer = TeamRecognizer(resources, recognition)
     quest_recognizer = QuestRecognizer(recognition)
+    chocolate_recognizer = ChocolateRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -148,6 +151,12 @@ def create_app(
         )
         job_manager = JobManager(JobDatabase(runtime_db_path or default_db_path))
     register_diagnostic_job(job_manager, device_service, recognition)
+    register_chocolate_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        chocolate_recognizer,
+    )
     register_assist_job(
         job_manager,
         script_data,
@@ -274,6 +283,7 @@ def create_app(
     app.state.assist_recognizer = assist_recognizer
     app.state.card_recognizer = card_recognizer
     app.state.quest_recognizer = quest_recognizer
+    app.state.chocolate_recognizer = chocolate_recognizer
     app.state.script_data = script_data
     app.state.job_manager = job_manager
 
