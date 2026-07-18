@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from typing import Any
+
+from webapp.services.recognition import RecognitionService
+from webapp.services.resources import ResourceService
+
+
+_STATE_SPECS = (
+    ("noSucai", "enhancement", "blocked", "materials_exhausted", None),
+    ("no_servant", "enhancement", "blocked", "no_matching_target", None),
+    ("callfree", "summon", "actionable", None, "summon_free_ten"),
+    ("call10", "summon", "actionable", None, "summon_ten"),
+    ("again10", "summon", "actionable", None, "summon_again"),
+    ("again10_0", "summon", "actionable", None, "summon_again"),
+    ("again10_1", "summon", "actionable", None, "summon_again"),
+    ("boxfull", "summon", "actionable", None, "handle_full_box"),
+    ("autoSell", "sell", "actionable", None, "open_auto_sell"),
+    ("destroy", "sell", "actionable", None, "execute_sell"),
+    ("gotoqhcz", "navigation", "actionable", None, "open_enhancement"),
+    ("zxStore", "storage", "actionable", None, "execute_storage"),
+    ("storeAll", "storage", "actionable", None, "select_all"),
+    ("qh_back", "navigation", "actionable", None, "return_from_enhancement"),
+    ("back", "navigation", "actionable", None, "back"),
+    ("qpfull", "confirmation", "observed", None, None),
+    ("friendpointcall", "summon", "observed", None, None),
+    ("in_store", "storage", "observed", None, None),
+    ("feedjd", "enhancement", "observed", None, None),
+    ("doubleEXP", "enhancement", "observed", None, None),
+    ("decide", "confirmation", "observed", None, None),
+    ("sure", "confirmation", "observed", None, None),
+    ("menu", "navigation", "observed", None, None),
+    ("shop", "navigation", "observed", None, None),
+)
+_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+
+
+class ExpBallRecognizer:
+    def __init__(
+        self,
+        resources: ResourceService,
+        recognition: RecognitionService,
+    ) -> None:
+        self._resources = resources
+        self._recognition = recognition
+
+    def recognize(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.84,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW"}:
+            raise ValueError("server must be CH or CNTW.")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        root = f"expball/{normalized_server}"
+        page = self._resources.template_index(prefix=root, limit=200)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+        specs = [
+            (name, flow, status, reason, action, f"{root}/{name}.png")
+            for name, flow, status, reason, action in _STATE_SPECS
+            if f"{root}/{name}.png" in available_paths
+        ]
+        candidates = [
+            {
+                "template_path": template_path,
+                "threshold": threshold,
+                "scales": _SCALES,
+            }
+            for _name, _flow, _status, _reason, _action, template_path in specs
+        ]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        matches = [
+            {
+                "name": name,
+                "flow": flow,
+                "status": status,
+                "reason": reason,
+                "recommended_action": action,
+                **match.to_dict(),
+            }
+            for match, (name, flow, status, reason, action, _template_path) in zip(
+                results,
+                specs,
+                strict=True,
+            )
+            if match.matched
+        ]
+        primary = matches[0] if matches else None
+        return {
+            "server": normalized_server,
+            "state": primary["name"] if primary else "unknown",
+            "flow": primary["flow"] if primary else "unknown",
+            "status": primary["status"] if primary else "unknown",
+            "reason": primary["reason"] if primary else None,
+            "recommended_action": (
+                primary["recommended_action"] if primary else None
+            ),
+            "available_template_count": len(candidates),
+            "matches": matches,
+        }
