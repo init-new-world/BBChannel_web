@@ -45,6 +45,7 @@ class _Context:
 
 def _report(state, flow, status, *matches, action=None, reason=None):
     centers = {
+        "autoSell": (320, 610),
         "destroy": (980, 620),
         "sure": (900, 650),
         "qpfull": (640, 320),
@@ -71,19 +72,21 @@ def test_expball_sell_executes_current_selection_and_confirms():
     reports = iter(
         (
             _report(
-                "destroy",
+                "autoSell",
                 "sell",
                 "actionable",
+                "autoSell",
                 "destroy",
-                action="execute_sell",
+                action="open_auto_sell",
             ),
             _report("sure", "confirmation", "observed", "sure"),
             _report(
-                "destroy",
+                "autoSell",
                 "sell",
                 "actionable",
+                "autoSell",
                 "destroy",
-                action="execute_sell",
+                action="open_auto_sell",
             ),
         )
     )
@@ -116,11 +119,12 @@ def test_expball_sell_stops_before_confirmation_when_qp_is_full():
     reports = iter(
         (
             _report(
-                "destroy",
+                "autoSell",
                 "sell",
                 "actionable",
+                "autoSell",
                 "destroy",
-                action="execute_sell",
+                action="open_auto_sell",
             ),
             _report("qpfull", "confirmation", "observed", "qpfull", "sure"),
         )

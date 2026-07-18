@@ -129,10 +129,14 @@ def create_expball_sell_handler(
                 reason="outside_sell_flow",
                 report=report,
             )
+        initial_match_names = {
+            match.get("name")
+            for match in report.get("matches", [])
+            if isinstance(match, dict)
+        }
         if (
-            report.get("state") != "destroy"
-            or report.get("status") != "actionable"
-            or report.get("recommended_action") != "execute_sell"
+            report.get("status") != "actionable"
+            or "destroy" not in initial_match_names
         ):
             return finish(
                 completed=False,
