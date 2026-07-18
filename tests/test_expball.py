@@ -82,6 +82,28 @@ def test_expball_recognizer_prioritizes_terminal_state_over_summon_actions():
     ]
 
 
+def test_expball_recognizer_supports_jp_assets():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/JP"
+            assert limit == 200
+            return {"entries": [{"path": "expball/JP/callfree.png"}]}
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            assert candidates[0]["template_path"] == "expball/JP/callfree.png"
+            return [_match("expball/JP/callfree.png", True, 0.96)]
+
+    report = ExpBallRecognizer(Resources(), Recognition()).recognize(
+        b"jp-screen",
+        "jp",
+    )
+
+    assert report["server"] == "JP"
+    assert report["state"] == "callfree"
+    assert report["recommended_action"] == "summon_free_ten"
+
+
 class _ScriptData:
     def get_setting_plan(self, name):
         assert name == "demo"

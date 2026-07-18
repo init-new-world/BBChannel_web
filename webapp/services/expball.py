@@ -52,8 +52,8 @@ class ExpBallRecognizer:
         threshold: float = 0.84,
     ) -> dict[str, Any]:
         normalized_server = server.strip().upper()
-        if normalized_server not in {"CH", "CNTW"}:
-            raise ValueError("server must be CH or CNTW.")
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
         if not 0 <= threshold <= 1:
             raise ValueError("threshold must be between 0 and 1.")
 

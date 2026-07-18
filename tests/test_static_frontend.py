@@ -87,6 +87,8 @@ def test_operator_console_references_api_controls():
     assert "max_summons: readNumber(els.fpSummonBatches)" in script
     assert 'enqueueJob("event.expball.storage"' in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
+    assert '["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server)' in script
+    assert "!supportsExpball" in script
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index
     assert 'id="pause-job"' in index

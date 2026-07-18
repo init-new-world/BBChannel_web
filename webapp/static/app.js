@@ -1283,7 +1283,8 @@ function updateControls() {
   els.swipeButton.disabled = !state.connected;
   const selectedJobStatus = state.activeJob?.status || "idle";
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
-  const supportsCHOrCNTW = ["CH", "CNTW"].includes(state.selectedSettingPlan?.server);
+  const supportsDigdig = ["CH", "CNTW"].includes(state.selectedSettingPlan?.server);
+  const supportsExpball = ["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server);
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
@@ -1303,20 +1304,20 @@ function updateControls() {
     || hasRunningJob;
   els.inspectDigdig.disabled = !state.connected
     || !els.settingSelect.value
-    || !supportsCHOrCNTW
+    || !supportsDigdig
     || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
     || !els.settingSelect.value
-    || !supportsCHOrCNTW
+    || !supportsExpball
     || hasRunningJob;
   els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value
-    || !supportsCHOrCNTW
+    || !supportsExpball
     || hasRunningJob;
-  els.fpSummonBatches.disabled = !supportsCHOrCNTW || hasRunningJob;
+  els.fpSummonBatches.disabled = !supportsExpball || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
     || !els.settingSelect.value
-    || !supportsCHOrCNTW
+    || !supportsExpball
     || hasRunningJob;
   els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
   els.fullRunMapSwipes.disabled = !["free_quest", "main_story"].includes(
