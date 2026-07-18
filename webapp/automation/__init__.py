@@ -48,6 +48,11 @@ from webapp.automation.expball import (
     register_expball_storage_job,
     register_expball_summon_job,
 )
+from webapp.automation.expball_sell import (
+    EXPBALL_SELL_JOB_KIND,
+    create_expball_sell_handler,
+    register_expball_sell_job,
+)
 from webapp.automation.program import compile_battle_program
 from webapp.automation.quest import (
     FREE_QUEST_ENTER_JOB_KIND,
@@ -87,6 +92,7 @@ __all__ = [
     "DIGDIG_INSPECT_JOB_KIND",
     "DIGDIG_EXECUTE_JOB_KIND",
     "EXPBALL_INSPECT_JOB_KIND",
+    "EXPBALL_SELL_JOB_KIND",
     "EXPBALL_STORAGE_JOB_KIND",
     "EXPBALL_SUMMON_JOB_KIND",
     "FULL_RUN_JOB_KIND",
@@ -101,6 +107,7 @@ __all__ = [
     "create_digdig_inspect_handler",
     "create_digdig_execute_handler",
     "create_expball_inspect_handler",
+    "create_expball_sell_handler",
     "create_expball_storage_handler",
     "create_expball_summon_handler",
     "create_completion_handler",
@@ -119,6 +126,7 @@ __all__ = [
     "register_digdig_inspect_job",
     "register_digdig_execute_job",
     "register_expball_inspect_job",
+    "register_expball_sell_job",
     "register_expball_storage_job",
     "register_expball_summon_job",
     "register_full_run_job",

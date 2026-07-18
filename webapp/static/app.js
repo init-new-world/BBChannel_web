@@ -109,6 +109,7 @@ const els = {
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
+  runExpballSell: document.querySelector("#run-expball-sell"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -219,6 +220,7 @@ function bindEvents() {
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
+  els.runExpballSell.addEventListener("click", runExpballSell);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -814,6 +816,16 @@ async function runExpballStorage() {
   });
 }
 
+async function runExpballSell() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.sell", {
+    setting_name: settingName,
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -1137,6 +1149,15 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.expball.sell") {
+    const actionCount = result.actions?.length || 0;
+    els.jobResult.textContent = [
+      result.completed ? "EXP selection sold" : "EXP sale stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
+    ].join(" · ");
+    return;
+  }
   els.jobResult.textContent = "Completed";
 }
 
@@ -1341,6 +1362,10 @@ function updateControls() {
     || hasRunningJob;
   els.fpSummonBatches.disabled = !supportsExpball || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
+  els.runExpballSell.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
     || hasRunningJob;

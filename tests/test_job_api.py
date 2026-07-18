@@ -44,6 +44,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "event.digdig.execute",
                     "event.digdig.inspect",
                     "event.expball.inspect",
+                    "event.expball.sell",
                     "event.expball.storage",
                     "event.expball.summon",
                 ]
