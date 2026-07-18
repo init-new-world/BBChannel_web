@@ -60,6 +60,7 @@ def test_operator_console_references_api_controls():
     assert 'id="inspect-digdig"' in index
     assert 'id="inspect-expball"' in index
     assert 'id="run-expball-summon"' in index
+    assert 'id="run-expball-storage"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
     assert '!["free_quest", "main_story"].includes(' in script
@@ -74,6 +75,7 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.digdig.inspect"' in script
     assert 'enqueueJob("event.expball.inspect"' in script
     assert 'enqueueJob("event.expball.summon"' in script
+    assert 'enqueueJob("event.expball.storage"' in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
     assert 'id="job-status"' in index
     assert 'id="job-progress"' in index

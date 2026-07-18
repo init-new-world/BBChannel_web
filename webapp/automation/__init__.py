@@ -36,10 +36,13 @@ from webapp.automation.entry import (
 )
 from webapp.automation.expball import (
     EXPBALL_INSPECT_JOB_KIND,
+    EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
     create_expball_inspect_handler,
+    create_expball_storage_handler,
     create_expball_summon_handler,
     register_expball_inspect_job,
+    register_expball_storage_job,
     register_expball_summon_job,
 )
 from webapp.automation.program import compile_battle_program
@@ -80,6 +83,7 @@ __all__ = [
     "CHOCOLATE_RUN_JOB_KIND",
     "DIGDIG_INSPECT_JOB_KIND",
     "EXPBALL_INSPECT_JOB_KIND",
+    "EXPBALL_STORAGE_JOB_KIND",
     "EXPBALL_SUMMON_JOB_KIND",
     "FULL_RUN_JOB_KIND",
     "FREE_QUEST_ENTER_JOB_KIND",
@@ -92,6 +96,7 @@ __all__ = [
     "create_chocolate_run_handler",
     "create_digdig_inspect_handler",
     "create_expball_inspect_handler",
+    "create_expball_storage_handler",
     "create_expball_summon_handler",
     "create_completion_handler",
     "create_full_run_handler",
@@ -108,6 +113,7 @@ __all__ = [
     "register_diagnostic_job",
     "register_digdig_inspect_job",
     "register_expball_inspect_job",
+    "register_expball_storage_job",
     "register_expball_summon_job",
     "register_full_run_job",
     "register_free_quest_entry_job",

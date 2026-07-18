@@ -15,6 +15,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 EXPBALL_INSPECT_JOB_KIND = "event.expball.inspect"
+EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
 _SUMMON_ACTIONS = {"summon_free_ten", "summon_ten", "summon_again"}
 
@@ -299,6 +300,210 @@ def register_expball_summon_job(
     job_manager.register(
         EXPBALL_SUMMON_JOB_KIND,
         create_expball_summon_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_storage_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        threshold = _number(payload, "threshold", 0.84, 0, 1)
+        timeout_seconds = _number(payload, "timeout_seconds", 120, 0.1, 3600)
+        poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
+        action_wait_seconds = _number(
+            payload,
+            "action_wait_seconds",
+            1,
+            0,
+            30,
+        )
+        max_idle_polls = _integer(payload, "max_idle_polls", 3, 1, 100)
+        plan = script_data.get_setting_plan(normalized_name)
+        server = str(plan["server"]).upper()
+        run_options = plan.get("run", {})
+        random_touch = bool(run_options.get("random_touch"))
+        random_time = configured_random_time(run_options.get("random_time", 0))
+        started = monotonic()
+        attempts = 0
+        actions: list[str] = []
+        phase = "select_all"
+        idle_polls = 0
+        last_report: dict[str, Any] | None = None
+
+        def finish(
+            *,
+            completed: bool,
+            stopped: bool,
+            reason: str,
+            report: dict[str, Any],
+        ) -> dict[str, Any]:
+            context.checkpoint(
+                "complete",
+                progress=1.0,
+                message=(
+                    "Experience materials were stored."
+                    if completed
+                    else "Experience-material storage stopped."
+                ),
+            )
+            return {
+                "setting_name": normalized_name,
+                "completed": completed,
+                "stopped": stopped,
+                "reason": reason,
+                "attempts": attempts,
+                "actions": list(actions),
+                "last_report": report,
+            }
+
+        while monotonic() - started <= timeout_seconds:
+            attempts += 1
+            context.checkpoint(
+                f"store_expball_{phase}",
+                progress=min((monotonic() - started) / timeout_seconds, 0.95),
+            )
+            report = recognizer.recognize(
+                device_service.snapshot(),
+                server,
+                threshold=threshold,
+            )
+            last_report = report
+            context.emit(
+                "expball_state",
+                "Experience-material storage state was recognized.",
+                data={"attempt": attempts, "phase": phase, **report},
+            )
+            status = str(report.get("status") or "unknown")
+            flow = str(report.get("flow") or "unknown")
+            matches = {
+                match.get("name"): match
+                for match in report.get("matches", [])
+                if isinstance(match, dict) and isinstance(match.get("name"), str)
+            }
+
+            if status == "blocked":
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=str(report.get("reason") or "blocked"),
+                    report=report,
+                )
+            if phase == "verify" and flow == "storage" and "in_store" in matches:
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason="stored",
+                    report=report,
+                )
+
+            expected_flow = "confirmation" if phase == "confirm" else "storage"
+            if flow != expected_flow:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="outside_storage_flow",
+                    report=report,
+                )
+
+            target_name = {
+                "select_all": "storeAll",
+                "execute": "zxStore",
+                "confirm": "decide",
+            }.get(phase)
+            target = matches.get(target_name) if target_name is not None else None
+            initial_controls_ready = phase != "select_all" or {
+                "in_store",
+                "storeAll",
+                "zxStore",
+            }.issubset(matches)
+            if not isinstance(target, dict) or not initial_controls_ready:
+                idle_polls += 1
+                if idle_polls >= max_idle_polls:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="storage_controls_missing",
+                        report=report,
+                    )
+                context.sleep(randomized_wait_seconds(poll_interval, random_time))
+                continue
+
+            center = target.get("center")
+            if not isinstance(center, list) or len(center) != 2:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="invalid_recognition_result",
+                    report=report,
+                )
+            x, y = randomized_touch_point(
+                center,
+                enabled=random_touch,
+                size=target.get("size"),
+            )
+            operation = device_service.tap(x, y)
+            action = {
+                "select_all": "select_all",
+                "execute": "execute_storage",
+                "confirm": "confirm_storage",
+            }[phase]
+            context.emit(
+                "device_action",
+                "Executed an experience-material storage action.",
+                data={
+                    "role": action,
+                    "phase": phase,
+                    "operation": operation.to_dict(),
+                },
+            )
+            if not operation.ok:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="device_action_failed",
+                    report=report,
+                )
+            actions.append(action)
+            phase = {
+                "select_all": "execute",
+                "execute": "confirm",
+                "confirm": "verify",
+            }[phase]
+            idle_polls = 0
+            context.sleep(
+                randomized_wait_seconds(action_wait_seconds, random_time)
+            )
+
+        raise TimeoutError(
+            "Experience-material storage did not finish within "
+            f"{timeout_seconds:.2f} seconds. Last report: {last_report}"
+        )
+
+    return handler
+
+
+def register_expball_storage_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_STORAGE_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_STORAGE_JOB_KIND,
+        create_expball_storage_handler(
             script_data,
             device_service,
             recognizer,

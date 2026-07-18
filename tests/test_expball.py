@@ -1,9 +1,12 @@
 from webapp.automation.expball import (
     EXPBALL_INSPECT_JOB_KIND,
+    EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
     create_expball_inspect_handler,
+    create_expball_storage_handler,
     create_expball_summon_handler,
     register_expball_inspect_job,
+    register_expball_storage_job,
     register_expball_summon_job,
 )
 from webapp.core.models import MatchResult, OperationResult
@@ -185,6 +188,33 @@ def _report(state, flow, status, *, action=None, reason=None, center=(790, 530))
     }
 
 
+def _storage_report(*names):
+    centers = {
+        "in_store": (310, 120),
+        "storeAll": (720, 310),
+        "zxStore": (980, 620),
+        "decide": (900, 650),
+    }
+    matches = [
+        {
+            "name": name,
+            "center": list(centers[name]),
+            "size": [120, 60],
+        }
+        for name in names
+    ]
+    confirmation = "decide" in names
+    return {
+        "server": "CH",
+        "state": names[0] if names else "unknown",
+        "flow": "confirmation" if confirmation else "storage",
+        "status": "observed",
+        "reason": None,
+        "recommended_action": None,
+        "matches": matches,
+    }
+
+
 def test_expball_summon_runs_until_inventory_is_full():
     reports = iter(
         (
@@ -298,6 +328,109 @@ def test_expball_summon_stops_when_device_rejects_tap():
     assert result["summons"] == 0
     assert result["actions"] == []
     assert device.taps == [(800, 610)]
+
+
+def test_expball_storage_selects_all_executes_and_confirms():
+    reports = iter(
+        (
+            _storage_report("in_store", "storeAll", "zxStore"),
+            _storage_report("in_store", "storeAll", "zxStore"),
+            _storage_report("decide"),
+            _storage_report("in_store"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return next(reports)
+
+    device = _Device()
+    context = _Context()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "stored"
+    assert result["actions"] == [
+        "select_all",
+        "execute_storage",
+        "confirm_storage",
+    ]
+    assert device.taps == [(720, 310), (980, 620), (900, 650)]
+    assert context.events[-1][0:2] == ("checkpoint", "complete")
+
+
+def test_expball_storage_refuses_to_start_outside_storage_screen():
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return _report(
+                "callfree",
+                "summon",
+                "actionable",
+                action="summon_free_ten",
+            )
+
+    device = _Device()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(_Context(), {"setting_name": "demo"})
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "outside_storage_flow"
+    assert result["actions"] == []
+    assert device.taps == []
+
+
+def test_expball_storage_stops_when_a_storage_action_fails():
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return _storage_report("in_store", "storeAll", "zxStore")
+
+    class Device(_Device):
+        def tap(self, x, y):
+            self.taps.append((x, y))
+            return OperationResult(ok=False, action="tap", message="rejected")
+
+    device = Device()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(_Context(), {"setting_name": "demo"})
+
+    assert result["reason"] == "device_action_failed"
+    assert result["actions"] == []
+    assert device.taps == [(720, 310)]
+
+
+def test_expball_storage_job_requires_connected_device(tmp_path):
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_storage_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
+
+        assert manager.has_kind(EXPBALL_STORAGE_JOB_KIND)
+        assert manager.requires_device(EXPBALL_STORAGE_JOB_KIND) is True
 
 
 def test_expball_summon_job_requires_connected_device(tmp_path):

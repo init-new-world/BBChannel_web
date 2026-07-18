@@ -31,6 +31,7 @@ from webapp.automation import (
     register_diagnostic_job,
     register_digdig_inspect_job,
     register_expball_inspect_job,
+    register_expball_storage_job,
     register_expball_summon_job,
     register_full_run_job,
     register_free_quest_entry_job,
@@ -178,6 +179,12 @@ def create_app(
         digdig_recognizer,
     )
     register_expball_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        expball_recognizer,
+    )
+    register_expball_storage_job(
         job_manager,
         script_data,
         device_service,
