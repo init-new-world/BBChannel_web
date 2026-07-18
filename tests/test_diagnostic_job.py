@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 cv2 = pytest.importorskip("cv2")
 np = pytest.importorskip("numpy")
@@ -15,6 +14,7 @@ from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
+from tests.test_client import create_test_client
 
 
 def _write_image(path: Path, image) -> None:
@@ -104,7 +104,7 @@ def test_diagnostic_api_binds_job_to_connected_device(tmp_path: Path):
             device_service=device_service,
             job_manager=manager,
         )
-        with TestClient(app) as client:
+        with create_test_client(app) as client:
             response = client.post(
                 "/api/jobs",
                 json={

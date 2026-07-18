@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.test_client import create_test_client
 
 cv2 = pytest.importorskip("cv2")
 np = pytest.importorskip("numpy")
@@ -947,7 +947,7 @@ def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Pa
             event_log=event_log,
             job_manager=manager,
         )
-        with TestClient(app) as client:
+        with create_test_client(app) as client:
             response = client.post(
                 "/api/jobs",
                 json={

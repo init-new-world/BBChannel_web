@@ -2,8 +2,7 @@ import json
 import threading
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
+from tests.test_client import create_test_client
 from webapp.app import create_app
 from webapp.runtime import JobDatabase, JobManager, JobStatus
 
@@ -19,7 +18,7 @@ def _app(tmp_path: Path, manager: JobManager):
 def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         manager.register("echo", lambda _context, payload: {"echo": payload["value"]})
-        with TestClient(_app(tmp_path, manager)) as client:
+        with create_test_client(_app(tmp_path, manager)) as client:
             response = client.post("/api/jobs", json={"kind": "echo", "payload": {"value": 9}})
             assert response.status_code == 202
             job_id = response.json()["job"]["job_id"]
@@ -32,6 +31,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "battle.detect-stage",
                     "battle.dry-run",
                     "battle.enter-free-quest",
+                    "battle.enter-main-story",
                     "battle.execute-plan",
                     "battle.execute-skills",
                     "battle.prepare",
@@ -39,6 +39,13 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "battle.run",
                     "diagnostic.template-tap",
                     "echo",
+                    "event.chocolate.inspect",
+                    "event.chocolate.run",
+                    "event.digdig.execute",
+                    "event.digdig.inspect",
+                    "event.expball.inspect",
+                    "event.expball.storage",
+                    "event.expball.summon",
                 ]
             }
             assert client.get(f"/api/jobs/{job_id}").json()["job"]["status"] == "succeeded"
@@ -57,7 +64,7 @@ def test_job_api_controls_running_job_and_reports_events(tmp_path: Path):
                 context.sleep(0.05)
 
         manager.register("loop", loop)
-        with TestClient(_app(tmp_path, manager)) as client:
+        with create_test_client(_app(tmp_path, manager)) as client:
             job_id = client.post("/api/jobs", json={"kind": "loop"}).json()["job"]["job_id"]
             assert started.wait(timeout=2)
             assert client.post(f"/api/jobs/{job_id}/pause").json()["job"]["status"] == "paused"
@@ -71,7 +78,7 @@ def test_job_api_controls_running_job_and_reports_events(tmp_path: Path):
 
 def test_job_api_returns_structured_errors(tmp_path: Path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
-        with TestClient(_app(tmp_path, manager)) as client:
+        with create_test_client(_app(tmp_path, manager)) as client:
             unknown = client.post("/api/jobs", json={"kind": "missing"})
             missing = client.get("/api/jobs/not-found")
 
@@ -83,7 +90,7 @@ def test_job_api_returns_structured_errors(tmp_path: Path):
 
 def test_device_job_requires_active_device(tmp_path: Path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
-        with TestClient(_app(tmp_path, manager)) as client:
+        with create_test_client(_app(tmp_path, manager)) as client:
             response = client.post(
                 "/api/jobs",
                 json={
@@ -99,7 +106,7 @@ def test_device_job_requires_active_device(tmp_path: Path):
 def test_job_event_stream_replays_terminal_job_and_closes(tmp_path: Path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         manager.register("instant", lambda context, _payload: context.emit("note", "hello"))
-        with TestClient(_app(tmp_path, manager)) as client:
+        with create_test_client(_app(tmp_path, manager)) as client:
             job_id = client.post("/api/jobs", json={"kind": "instant"}).json()["job"]["job_id"]
             manager.wait(job_id, timeout=2)
             response = client.get(f"/api/jobs/{job_id}/events/stream")
@@ -140,7 +147,7 @@ def test_battle_dry_run_executes_normalized_setting_actions(tmp_path: Path):
             ),
             encoding="utf-8",
         )
-        with TestClient(app) as client:
+        with create_test_client(app) as client:
             response = client.post(
                 "/api/jobs",
                 json={

@@ -8,6 +8,7 @@ pytestmark = pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI is not in
 
 if FASTAPI_AVAILABLE:
     from fastapi.testclient import TestClient
+    from tests.test_client import create_test_client
 else:
     TestClient = object
 
@@ -76,7 +77,7 @@ def _client(tmp_path: Path, device_service: DeviceService | None = None) -> Test
         event_log=event_log,
         runtime_db_path=tmp_path / "runtime.db",
     )
-    return TestClient(app)
+    return create_test_client(app)
 
 
 def test_health_route(tmp_path: Path):
@@ -109,7 +110,7 @@ def test_app_lifespan_closes_device_service(tmp_path: Path):
     Path(app.state.resources.assets_dir).mkdir()
     Path(app.state.resources.data_dir).mkdir()
 
-    with TestClient(app) as client:
+    with create_test_client(app) as client:
         assert client.get("/api/health").status_code == 200
 
     assert backend.close_calls == 1
