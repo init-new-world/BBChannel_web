@@ -22,6 +22,9 @@ def test_operator_console_references_api_controls():
     assert 'id="new-setting"' in index
     assert 'id="edit-setting"' in index
     assert 'id="delete-setting"' in index
+    assert 'id="refresh-settings" class="ghost-button wide"' in index
+    assert index.index('id="delete-setting"') < index.index('id="refresh-settings"')
+    assert index.index('id="refresh-settings"') < index.index('id="setting-validation"')
     assert 'id="strategy-select"' in index
     assert 'id="new-strategy"' in index
     assert 'id="edit-strategy"' in index
@@ -105,6 +108,8 @@ def test_operator_console_references_api_controls():
     assert "/api/capabilities" in script
     assert "/api/adb/connect-endpoint" in script
     assert "/api/settings" in script
+    assert 'refreshSettings: document.querySelector("#refresh-settings")' in script
+    assert 'els.refreshSettings.addEventListener("click", () => loadSettings())' in script
     assert "/api/strategies" in script
     assert 'method: "PUT"' in script
     assert 'method: "DELETE"' in script

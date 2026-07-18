@@ -38,6 +38,7 @@ const els = {
   newSetting: document.querySelector("#new-setting"),
   editSetting: document.querySelector("#edit-setting"),
   deleteSetting: document.querySelector("#delete-setting"),
+  refreshSettings: document.querySelector("#refresh-settings"),
   strategySelect: document.querySelector("#strategy-select"),
   strategySummary: document.querySelector("#strategy-summary"),
   newStrategy: document.querySelector("#new-strategy"),
@@ -186,6 +187,7 @@ function bindEvents() {
   els.newSetting.addEventListener("click", () => openPresetEditor("settings", false));
   els.editSetting.addEventListener("click", () => openPresetEditor("settings", true));
   els.deleteSetting.addEventListener("click", () => deletePreset("settings"));
+  els.refreshSettings.addEventListener("click", () => loadSettings());
   els.newStrategy.addEventListener("click", () => openPresetEditor("strategies", false));
   els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
