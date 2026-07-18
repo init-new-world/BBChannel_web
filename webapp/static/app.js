@@ -1050,7 +1050,77 @@ function renderJobResult(job) {
     }
     return;
   }
+  if (job.kind === "event.chocolate.inspect") {
+    const details = [
+      `Valentine: ${humanizeResultValue(result.state || "unknown")}`,
+      humanizeResultValue(result.status || "unknown"),
+    ];
+    if (result.recommended_action) {
+      details.push(`Action: ${humanizeResultValue(result.recommended_action)}`);
+    } else if (result.reason) {
+      details.push(humanizeResultValue(result.reason));
+    }
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
+  if (job.kind === "event.chocolate.run") {
+    const actionCount = result.actions?.length || 0;
+    els.jobResult.textContent = [
+      result.completed ? "Valentine complete" : "Valentine stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
+    ].join(" · ");
+    return;
+  }
+  if (job.kind === "event.digdig.inspect") {
+    const pieceCount = result.pieces?.length || 0;
+    const details = [
+      `Dig board: ${humanizeResultValue(result.state || "unknown")}`,
+      `${pieceCount} ${pieceCount === 1 ? "piece" : "pieces"}`,
+    ];
+    if (result.suggested_tool) {
+      details.push(`Tool: ${humanizeResultValue(result.suggested_tool)}`);
+    }
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
+  if (job.kind === "event.expball.inspect") {
+    const details = [
+      `EXP ${humanizeResultValue(result.flow || "unknown")}`,
+      humanizeResultValue(result.state || "unknown"),
+      humanizeResultValue(result.status || "unknown"),
+    ];
+    if (result.recommended_action) {
+      details.push(`Action: ${humanizeResultValue(result.recommended_action)}`);
+    } else if (result.reason) {
+      details.push(humanizeResultValue(result.reason));
+    }
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
+  if (job.kind === "event.expball.summon") {
+    const summonCount = result.summons || 0;
+    els.jobResult.textContent = [
+      `${summonCount} FP ${summonCount === 1 ? "batch" : "batches"}`,
+      result.completed ? "Completed" : "Stopped",
+      humanizeResultValue(result.reason || "unknown"),
+    ].join(" · ");
+    return;
+  }
+  if (job.kind === "event.expball.storage") {
+    const actionCount = result.actions?.length || 0;
+    els.jobResult.textContent = [
+      result.completed ? "EXP stored" : "EXP storage stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
+    ].join(" · ");
+    return;
+  }
   els.jobResult.textContent = "Completed";
+}
+
+function humanizeResultValue(value) {
+  return String(value).replaceAll("_", " ");
 }
 
 function renderJobEvents() {

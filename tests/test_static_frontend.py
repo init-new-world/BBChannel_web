@@ -70,6 +70,14 @@ def test_operator_console_references_api_controls():
     assert "max_restarts: readNumber(els.fullRunRestartLimit)" in script
     assert "state.selectedSettingPlan?.run?.game_crash_restart" in script
     assert "result.restart_count" in script
+    assert 'job.kind === "event.chocolate.inspect"' in script
+    assert 'job.kind === "event.chocolate.run"' in script
+    assert 'job.kind === "event.digdig.inspect"' in script
+    assert 'job.kind === "event.expball.inspect"' in script
+    assert 'job.kind === "event.expball.summon"' in script
+    assert 'job.kind === "event.expball.storage"' in script
+    assert "result.summons || 0" in script
+    assert "result.pieces?.length || 0" in script
     assert 'enqueueJob("battle.restart-game"' in script
     assert 'enqueueJob("event.chocolate.inspect"' in script
     assert 'enqueueJob("event.chocolate.run"' in script
