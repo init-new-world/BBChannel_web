@@ -104,7 +104,13 @@ def create_expball_summon_handler(
             30,
         )
         max_summons = _integer(payload, "max_summons", 10, 1, 10000)
-        max_same_state = _integer(payload, "max_same_state", 3, 1, 20)
+        max_same_state = _integer(
+            payload,
+            "max_same_state",
+            min(max_summons, 20),
+            1,
+            20,
+        )
         max_idle_polls = _integer(payload, "max_idle_polls", 3, 1, 100)
         plan = script_data.get_setting_plan(normalized_name)
         server = str(plan["server"]).upper()

@@ -374,7 +374,6 @@ def test_expball_summon_defaults_to_ten_batches():
         {
             "setting_name": "demo",
             "action_wait_seconds": 0,
-            "max_same_state": 20,
         },
     )
 
