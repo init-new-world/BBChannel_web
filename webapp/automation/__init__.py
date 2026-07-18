@@ -19,6 +19,11 @@ from webapp.automation.chocolate import (
     register_chocolate_run_job,
 )
 from webapp.automation.diagnostic import register_diagnostic_job
+from webapp.automation.digdig import (
+    DIGDIG_INSPECT_JOB_KIND,
+    create_digdig_inspect_handler,
+    register_digdig_inspect_job,
+)
 from webapp.automation.completion import (
     BATTLE_COMPLETE_JOB_KIND,
     create_completion_handler,
@@ -65,6 +70,7 @@ __all__ = [
     "BATTLE_RESTART_GAME_JOB_KIND",
     "CHOCOLATE_INSPECT_JOB_KIND",
     "CHOCOLATE_RUN_JOB_KIND",
+    "DIGDIG_INSPECT_JOB_KIND",
     "FULL_RUN_JOB_KIND",
     "FREE_QUEST_ENTER_JOB_KIND",
     "MAIN_STORY_ENTER_JOB_KIND",
@@ -74,6 +80,7 @@ __all__ = [
     "create_battle_execute_plan_handler",
     "create_chocolate_inspect_handler",
     "create_chocolate_run_handler",
+    "create_digdig_inspect_handler",
     "create_completion_handler",
     "create_full_run_handler",
     "create_free_quest_entry_handler",
@@ -87,6 +94,7 @@ __all__ = [
     "register_completion_job",
     "register_battle_entry_job",
     "register_diagnostic_job",
+    "register_digdig_inspect_job",
     "register_full_run_job",
     "register_free_quest_entry_job",
     "register_main_story_entry_job",

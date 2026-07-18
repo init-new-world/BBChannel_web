@@ -103,6 +103,7 @@ const els = {
   restartGame: document.querySelector("#restart-game"),
   inspectChocolate: document.querySelector("#inspect-chocolate"),
   runChocolate: document.querySelector("#run-chocolate"),
+  inspectDigdig: document.querySelector("#inspect-digdig"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -208,6 +209,7 @@ function bindEvents() {
   els.restartGame.addEventListener("click", restartGame);
   els.inspectChocolate.addEventListener("click", inspectChocolate);
   els.runChocolate.addEventListener("click", runChocolate);
+  els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -752,6 +754,16 @@ async function runChocolate() {
   });
 }
 
+async function inspectDigdig() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.digdig.inspect", {
+    setting_name: settingName,
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -1163,6 +1175,7 @@ function updateControls() {
   els.swipeButton.disabled = !state.connected;
   const selectedJobStatus = state.activeJob?.status || "idle";
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
+  const supportsDigdig = ["CH", "CNTW"].includes(state.selectedSettingPlan?.server);
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
@@ -1179,6 +1192,10 @@ function updateControls() {
     || hasRunningJob;
   els.runChocolate.disabled = !state.connected
     || !els.settingSelect.value
+    || hasRunningJob;
+  els.inspectDigdig.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsDigdig
     || hasRunningJob;
   els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
   els.fullRunMapSwipes.disabled = !["free_quest", "main_story"].includes(

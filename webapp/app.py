@@ -29,6 +29,7 @@ from webapp.automation import (
     register_chocolate_run_job,
     register_completion_job,
     register_diagnostic_job,
+    register_digdig_inspect_job,
     register_full_run_job,
     register_free_quest_entry_job,
     register_main_story_entry_job,
@@ -45,6 +46,7 @@ from webapp.services.cards import CommandCardRecognizer
 from webapp.services.chocolate import ChocolateRecognizer
 from webapp.services.assist import AssistRecognizer
 from webapp.services.devices import DeviceService
+from webapp.services.digdig import DigdigRecognizer
 from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.quest import QuestRecognizer
@@ -143,6 +145,7 @@ def create_app(
     team_recognizer = TeamRecognizer(resources, recognition)
     quest_recognizer = QuestRecognizer(recognition)
     chocolate_recognizer = ChocolateRecognizer(resources, recognition)
+    digdig_recognizer = DigdigRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -163,6 +166,12 @@ def create_app(
         script_data,
         device_service,
         chocolate_recognizer,
+    )
+    register_digdig_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        digdig_recognizer,
     )
     register_assist_job(
         job_manager,
@@ -291,6 +300,7 @@ def create_app(
     app.state.card_recognizer = card_recognizer
     app.state.quest_recognizer = quest_recognizer
     app.state.chocolate_recognizer = chocolate_recognizer
+    app.state.digdig_recognizer = digdig_recognizer
     app.state.script_data = script_data
     app.state.job_manager = job_manager
 
