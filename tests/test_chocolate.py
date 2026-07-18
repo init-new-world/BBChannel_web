@@ -1,9 +1,12 @@
 from webapp.automation.chocolate import (
     CHOCOLATE_INSPECT_JOB_KIND,
+    CHOCOLATE_RUN_JOB_KIND,
     create_chocolate_inspect_handler,
+    create_chocolate_run_handler,
     register_chocolate_inspect_job,
+    register_chocolate_run_job,
 )
-from webapp.core.models import MatchResult
+from webapp.core.models import MatchResult, OperationResult
 from webapp.runtime import JobDatabase, JobManager
 from webapp.services.chocolate import ChocolateRecognizer
 
@@ -75,23 +78,37 @@ def test_chocolate_recognizer_prioritizes_blocking_state_over_actions():
 class _ScriptData:
     def get_setting_plan(self, name):
         assert name == "demo"
-        return {"server": "CNTW"}
+        return {
+            "server": "CNTW",
+            "run": {"random_touch": False, "random_time": 0},
+        }
 
 
 class _Device:
+    def __init__(self):
+        self.taps = []
+
     def snapshot(self):
         return b"chocolate-screen"
+
+    def tap(self, x, y):
+        self.taps.append((x, y))
+        return OperationResult(ok=True, action="tap", data={"x": x, "y": y})
 
 
 class _Context:
     def __init__(self):
         self.events = []
+        self.sleeps = []
 
     def checkpoint(self, step, **options):
         self.events.append(("checkpoint", step, options))
 
     def emit(self, event_type, message, **options):
         self.events.append((event_type, message, options))
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
 
 
 def test_chocolate_inspect_handler_reports_current_device_state():
@@ -136,3 +153,114 @@ def test_chocolate_inspect_job_requires_connected_device(tmp_path):
 
         assert manager.has_kind(CHOCOLATE_INSPECT_JOB_KIND)
         assert manager.requires_device(CHOCOLATE_INSPECT_JOB_KIND) is True
+
+
+def _report(
+    state,
+    status,
+    *,
+    action=None,
+    reason=None,
+    center=(140, 220),
+):
+    matches = []
+    if state != "unknown":
+        matches.append(
+            {
+                "name": state,
+                "status": status,
+                "reason": reason,
+                "recommended_action": action,
+                "center": list(center),
+                "size": [80, 40],
+            }
+        )
+    return {
+        "server": "CNTW",
+        "state": state,
+        "status": status,
+        "reason": reason,
+        "recommended_action": action,
+        "matches": matches,
+    }
+
+
+def test_chocolate_run_executes_actions_until_materials_are_exhausted():
+    reports = iter(
+        (
+            _report(
+                "makeChoco",
+                "actionable",
+                action="make_chocolate",
+                center=(300, 400),
+            ),
+            _report("yes", "actionable", action="confirm", center=(500, 420)),
+            _report(
+                "notEnough",
+                "blocked",
+                reason="materials_exhausted",
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CNTW"
+            assert threshold == 0.82
+            return next(reports)
+
+    device = _Device()
+    context = _Context()
+    result = create_chocolate_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "materials_exhausted"
+    assert result["actions"] == ["make_chocolate", "confirm"]
+    assert result["attempts"] == 3
+    assert device.taps == [(300, 400), (500, 420)]
+    assert context.events[-1][0:2] == ("checkpoint", "complete")
+
+
+def test_chocolate_run_stops_without_tapping_when_storage_is_full():
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.9
+            return _report("limit", "blocked", reason="storage_full")
+
+    device = _Device()
+    result = create_chocolate_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(_Context(), {"setting_name": "demo", "threshold": 0.9})
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "storage_full"
+    assert result["actions"] == []
+    assert device.taps == []
+
+
+def test_chocolate_run_job_requires_connected_device(tmp_path):
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_chocolate_run_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
+
+        assert manager.has_kind(CHOCOLATE_RUN_JOB_KIND)
+        assert manager.requires_device(CHOCOLATE_RUN_JOB_KIND) is True

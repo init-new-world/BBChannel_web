@@ -101,6 +101,8 @@ const els = {
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   startFullRun: document.querySelector("#start-full-run"),
   restartGame: document.querySelector("#restart-game"),
+  inspectChocolate: document.querySelector("#inspect-chocolate"),
+  runChocolate: document.querySelector("#run-chocolate"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -204,6 +206,8 @@ function bindEvents() {
   els.fullRunEntryMode.addEventListener("change", updateControls);
   els.startFullRun.addEventListener("click", startFullRun);
   els.restartGame.addEventListener("click", restartGame);
+  els.inspectChocolate.addEventListener("click", inspectChocolate);
+  els.runChocolate.addEventListener("click", runChocolate);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -728,6 +732,26 @@ async function restartGame() {
   });
 }
 
+async function inspectChocolate() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.chocolate.inspect", {
+    setting_name: settingName,
+  });
+}
+
+async function runChocolate() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.chocolate.run", {
+    setting_name: settingName,
+  });
+}
+
 async function enqueueJob(kind, payload) {
   try {
     const response = await api("/api/jobs", {
@@ -1149,6 +1173,12 @@ function updateControls() {
     || hasRunningJob;
   els.restartGame.disabled = !state.connected
     || !state.selectedSettingPlan?.run?.game_crash_restart
+    || hasRunningJob;
+  els.inspectChocolate.disabled = !state.connected
+    || !els.settingSelect.value
+    || hasRunningJob;
+  els.runChocolate.disabled = !state.connected
+    || !els.settingSelect.value
     || hasRunningJob;
   els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
   els.fullRunMapSwipes.disabled = !["free_quest", "main_story"].includes(

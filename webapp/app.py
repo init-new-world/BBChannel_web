@@ -26,6 +26,7 @@ from webapp.automation import (
     register_battle_entry_job,
     register_battle_jobs,
     register_chocolate_inspect_job,
+    register_chocolate_run_job,
     register_completion_job,
     register_diagnostic_job,
     register_full_run_job,
@@ -152,6 +153,12 @@ def create_app(
         job_manager = JobManager(JobDatabase(runtime_db_path or default_db_path))
     register_diagnostic_job(job_manager, device_service, recognition)
     register_chocolate_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        chocolate_recognizer,
+    )
+    register_chocolate_run_job(
         job_manager,
         script_data,
         device_service,

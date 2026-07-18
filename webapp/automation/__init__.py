@@ -12,8 +12,11 @@ from webapp.automation.battle import (
 )
 from webapp.automation.chocolate import (
     CHOCOLATE_INSPECT_JOB_KIND,
+    CHOCOLATE_RUN_JOB_KIND,
     create_chocolate_inspect_handler,
+    create_chocolate_run_handler,
     register_chocolate_inspect_job,
+    register_chocolate_run_job,
 )
 from webapp.automation.diagnostic import register_diagnostic_job
 from webapp.automation.completion import (
@@ -61,6 +64,7 @@ __all__ = [
     "BATTLE_PREPARE_JOB_KIND",
     "BATTLE_RESTART_GAME_JOB_KIND",
     "CHOCOLATE_INSPECT_JOB_KIND",
+    "CHOCOLATE_RUN_JOB_KIND",
     "FULL_RUN_JOB_KIND",
     "FREE_QUEST_ENTER_JOB_KIND",
     "MAIN_STORY_ENTER_JOB_KIND",
@@ -69,6 +73,7 @@ __all__ = [
     "create_battle_entry_handler",
     "create_battle_execute_plan_handler",
     "create_chocolate_inspect_handler",
+    "create_chocolate_run_handler",
     "create_completion_handler",
     "create_full_run_handler",
     "create_free_quest_entry_handler",
@@ -78,6 +83,7 @@ __all__ = [
     "register_assist_job",
     "register_battle_jobs",
     "register_chocolate_inspect_job",
+    "register_chocolate_run_job",
     "register_completion_job",
     "register_battle_entry_job",
     "register_diagnostic_job",
