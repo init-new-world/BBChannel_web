@@ -164,6 +164,28 @@ def test_grand_skill_levels_ignore_decoy_and_prefer_complete_ten_template():
     ]
 
 
+def test_refresh_button_match_is_limited_to_assist_header(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assets.mkdir()
+    data.mkdir()
+
+    expected = _match_result("battle/CH/listupdatebtn.png", [930, 131])
+
+    class RecognitionStub:
+        def match_template(self, _screenshot, template_path, **options):
+            assert template_path == "battle/CH/listupdatebtn.png"
+            assert options["roi"] == (780, 70, 280, 120)
+            return expected
+
+    result = AssistRecognizer(
+        ResourceService(assets, data),
+        RecognitionStub(),
+    ).match_refresh_button(b"frame", "CH")
+
+    assert result is expected
+
+
 def test_assist_recognizer_filters_candidates_by_equip_name(tmp_path: Path):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"

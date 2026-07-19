@@ -772,7 +772,7 @@ def test_assist_select_job_refreshes_list_after_scroll_limit(tmp_path: Path):
     refresh_confirm.save(battle_assets / "listupdate.png")
     blank = Image.new("RGB", (1280, 720), (18, 24, 32))
     refresh_screen = blank.copy()
-    refresh_screen.paste(refresh_button, (1100, 50))
+    refresh_screen.paste(refresh_button, (900, 115))
     confirm_screen = blank.copy()
     confirm_screen.paste(refresh_confirm, (600, 400))
     matched_screen = blank.copy()
@@ -798,7 +798,7 @@ def test_assist_select_job_refreshes_list_after_scroll_limit(tmp_path: Path):
                     },
                     {
                         "file": "1.png",
-                        "expect": {"type": "tap", "x": 1130, "y": 65},
+                        "expect": {"type": "tap", "x": 930, "y": 130},
                     },
                     {
                         "file": "2.png",

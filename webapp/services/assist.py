@@ -494,6 +494,7 @@ class AssistRecognizer:
             screenshot,
             f"battle/{server.upper()}/listupdatebtn.png",
             threshold=threshold,
+            roi=(780, 70, 280, 120),
             scales=ASSIST_EQUIP_SCALES,
         )
 

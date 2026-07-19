@@ -187,7 +187,7 @@ def initialize_battle_settings(
                 state != desired
                 for state, desired in zip(
                     initial_states,
-                    (True, True, False),
+                    (False, True, False),
                     strict=True,
                 )
             )

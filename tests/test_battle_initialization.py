@@ -194,5 +194,6 @@ def test_initialize_battle_settings_uses_current_menu_close_point_when_back_is_a
     )
 
     assert result["states"] == [False, True, False]
+    assert result["changed"] is False
     assert result["actions"] == ["open_menu", "close_menu"]
     assert device.taps == [(1180, 205), (1178, 108)]
