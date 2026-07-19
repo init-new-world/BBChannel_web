@@ -57,6 +57,7 @@ def _run_completion(
     finish_without_friend = _pattern((174, 52), (75, 135, 65))
     apply_for_friend = _pattern((308, 69), (165, 65, 105))
     reconnect = _pattern((114, 53), (125, 45, 165))
+    battle_finish = _pattern((150, 60), (55, 105, 165))
     goto_interlude = _pattern((180, 48), (95, 75, 165))
     goto_stage = _pattern((220, 52), (155, 105, 45))
     next_story = _pattern((161, 100), (105, 145, 65))
@@ -71,6 +72,7 @@ def _run_completion(
     finish_without_friend.save(battle_assets / "friend_apply.png")
     apply_for_friend.save(battle_assets / "friend_apply_1.png")
     reconnect.save(battle_assets / "reconnect.png")
+    battle_finish.save(battle_assets / "battleFinish.png")
     goto_interlude.save(interlude_assets / "gotoInterlude.png")
     goto_stage.save(interlude_assets / "gotoStage.png")
     next_story.save(main_story_assets / "nextOne.png")
@@ -157,6 +159,45 @@ def test_completion_advances_results_until_repeat_is_available(tmp_path: Path):
     assert result.result["repeated"] is False
     assert result.result["actions"] == ["next"]
     assert result.result["attempts"] == 2
+
+
+def test_completion_advances_generic_battle_result_screen(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    result_frame = base.copy()
+    result_frame.paste(_pattern((150, 60), (55, 105, 165)), (565, 30))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (result_frame, {"type": "tap", "x": 640, "y": 650}),
+            (repeat_frame, None),
+        ],
+        payload={"timeout_seconds": 10},
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["actions"] == ["settlement_continue"]
+
+
+def test_completion_prefers_story_navigation_over_generic_result_tap(tmp_path: Path):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern((150, 60), (55, 105, 165)), (565, 30))
+    frame.paste(_pattern((220, 52), (155, 105, 45)), (700, 540))
+
+    result = _run_completion(
+        tmp_path,
+        [(frame, {"type": "tap", "x": 810, "y": 566})],
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["reason"] == "story_navigation"
+    assert result.result["actions"] == ["goto_stage"]
 
 
 def test_completion_can_start_the_next_run(tmp_path: Path):

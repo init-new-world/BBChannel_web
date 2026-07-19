@@ -432,7 +432,13 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
         {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590},
     ]
     assert actions[1]["steps"] == [
-        {"type": "tap", "role": "servant_skill_5", "x": 474, "y": 590},
+        {
+            "type": "tap",
+            "role": "servant_skill_5",
+            "x": 474,
+            "y": 590,
+            "wait_after_seconds": 1.0,
+        },
         {"type": "tap", "role": "skill_target_2", "x": 640, "y": 440},
     ]
     assert actions[2]["steps"] == [
@@ -938,7 +944,13 @@ def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
             "y": 320,
             "wait_after_seconds": 1.5,
         },
-        {"type": "tap", "role": "master_skill_11", "x": 940, "y": 310},
+        {
+            "type": "tap",
+            "role": "master_skill_11",
+            "x": 940,
+            "y": 310,
+            "wait_after_seconds": 1.0,
+        },
         {"type": "tap", "role": "skill_target_1", "x": 350, "y": 440},
     ]
 

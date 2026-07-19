@@ -6,8 +6,10 @@ from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
 
-ASSIST_FACE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+ASSIST_FACE_SCALES = (1.25, 1.2, 1.0, 0.75, 2 / 3, 0.5)
 ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+ASSIST_LIMIT_BREAK_SCALES = (1.25, *ASSIST_EQUIP_SCALES)
+ASSIST_FACE_MASK_PATH = "assist/servant_face_mask.png"
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
 GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
@@ -60,6 +62,7 @@ class AssistRecognizer:
         only_servant = mode == "仅从者"
         grand_only_equip = mode == "冠位助战仅礼装"
         only_equip = mode == "仅礼装" or grand_only_equip
+        grand_layout = mode in GRAND_ASSIST_MODES
         canonical_name = assist.get("servant_canonical_name")
         templates = [] if only_equip else self._servant_templates(canonical_name)
         equip_templates = (
@@ -85,7 +88,7 @@ class AssistRecognizer:
                 screenshot,
                 "assist/满破标记.png",
                 threshold=threshold,
-                scales=ASSIST_EQUIP_SCALES,
+                scales=ASSIST_LIMIT_BREAK_SCALES,
                 max_results=20,
             )
             if check_limit_break
@@ -148,6 +151,11 @@ class AssistRecognizer:
                 template_path,
                 threshold=threshold,
                 scales=ASSIST_FACE_SCALES,
+                mask_path=(
+                    ASSIST_FACE_MASK_PATH
+                    if (self._resources.assets_dir / ASSIST_FACE_MASK_PATH).is_file()
+                    else None
+                ),
                 max_results=20,
             )
         ]
@@ -168,6 +176,7 @@ class AssistRecognizer:
                 limit_break_match = self._candidate_limit_break_match(
                     candidate["anchor"],
                     limit_break_matches,
+                    grand_layout=grand_layout,
                 )
                 if limit_break_match is None:
                     continue
@@ -205,6 +214,7 @@ class AssistRecognizer:
                 limit_break_match = self._candidate_limit_break_match(
                     candidate["anchor"],
                     limit_break_matches,
+                    grand_layout=grand_layout,
                 )
                 if limit_break_match is None:
                     continue
@@ -271,6 +281,7 @@ class AssistRecognizer:
                 recognized_skills = self._candidate_skill_levels(
                     candidate["anchor"],
                     skill_level_matches,
+                    grand_layout=grand_layout,
                 )
                 if len(recognized_skills) < len(normalized_skill_levels):
                     continue
@@ -470,7 +481,6 @@ class AssistRecognizer:
             threshold=0.5,
             roi=(left, top, right - left, bottom - top),
             scales=ASSIST_EQUIP_SCALES,
-            template_size=(48, 48),
         )
 
     def match_refresh_button(
@@ -742,13 +752,24 @@ class AssistRecognizer:
         return max(matches, key=lambda item: item[1].confidence)
 
     @staticmethod
-    def _candidate_limit_break_match(anchor: list[int], matches: list[Any]):
+    def _candidate_limit_break_match(
+        anchor: list[int],
+        matches: list[Any],
+        *,
+        grand_layout: bool = False,
+    ):
         anchor_x, anchor_y = anchor
+        if grand_layout:
+            left, right = anchor_x + 190, anchor_x + 260
+            top, bottom = anchor_y - 50, anchor_y + 20
+        else:
+            left, right = anchor_x + 40, anchor_x + 90
+            top, bottom = anchor_y + 45, anchor_y + 110
         nearby = [
             match
             for match in matches
-            if anchor_x + 40 <= match.center[0] <= anchor_x + 90
-            and anchor_y + 45 <= match.center[1] <= anchor_y + 110
+            if left <= match.center[0] <= right
+            and top <= match.center[1] <= bottom
         ]
         if not nearby:
             return None
@@ -786,14 +807,22 @@ class AssistRecognizer:
     def _candidate_skill_levels(
         anchor: list[int],
         matches: list[tuple[int, Any]],
+        *,
+        grand_layout: bool = False,
     ) -> list[tuple[int, Any]]:
         anchor_x, anchor_y = anchor
+        if grand_layout:
+            left, right = anchor_x + 650, anchor_x + 850
+            top, bottom = anchor_y + 40, anchor_y + 100
+        else:
+            left, right = anchor_x + 80, float("inf")
+            top, bottom = anchor_y + 10, anchor_y + 110
         nearby = sorted(
             (
                 (level, match)
                 for level, match in matches
-                if match.center[0] >= anchor_x + 80
-                and anchor_y + 10 <= match.center[1] <= anchor_y + 110
+                if left <= match.center[0] <= right
+                and top <= match.center[1] <= bottom
             ),
             key=lambda item: item[1].center[0],
         )
@@ -803,10 +832,17 @@ class AssistRecognizer:
                 groups.append([item])
             else:
                 groups[-1].append(item)
-        return [
-            max(group, key=lambda item: item[1].confidence)
-            for group in groups
-        ]
+        selected = []
+        for group in groups:
+            complete_ten = [
+                item
+                for item in group
+                if str(item[1].template_path).rsplit("/", 1)[-1] == "10.png"
+            ]
+            selected.append(
+                max(complete_ten or group, key=lambda item: item[1].confidence)
+            )
+        return selected
 
     @classmethod
     def _candidate_servant_level(

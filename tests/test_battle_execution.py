@@ -17,6 +17,7 @@ from webapp.automation.battle import (
     _execute_skill_action,
     _execute_strategy_step,
     _evaluate_card_condition,
+    _execution_options,
     _execute_steps,
     _frontline_servants,
     _matches_hakuno_needs,
@@ -238,6 +239,44 @@ def test_wait_for_battle_ready_recovers_network_prompt():
     assert taps == [(640, 420)]
 
 
+def test_wait_for_battle_ready_matches_scaled_attack_button():
+    class Device:
+        def snapshot(self):
+            return b"battle"
+
+    class Match:
+        matched = True
+        confidence = 0.99
+
+    class Recognition:
+        def match_template(self, _screenshot, _template_path, _threshold, **options):
+            assert options["scales"] == (1.0, 0.75, 2 / 3, 0.5)
+            return Match()
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    _wait_for_battle_ready(
+        Context(),
+        Device(),
+        Recognition(),
+        "battle/CH/attack.png",
+        0.85,
+        1,
+        0,
+    )
+
+
+def test_execution_options_allow_long_np_transitions_by_default():
+    _threshold, timeout_seconds, _poll_interval, _tap_interval = _execution_options({})
+
+    assert timeout_seconds == 120.0
+
+
 def test_wait_for_command_cards_settles_and_returns_fresh_screenshot():
     frames = iter((b"first", b"fresh"))
     snapshots = []
@@ -281,6 +320,52 @@ def test_wait_for_command_cards_settles_and_returns_fresh_screenshot():
     assert screenshot == b"fresh"
     assert snapshots == [b"first", b"fresh"]
     assert sleeps == [0.6]
+
+
+def test_wait_for_command_cards_rejects_low_confidence_transition_frame():
+    frames = iter((b"transition", b"ready"))
+    sleeps = []
+
+    class Device:
+        def snapshot(self):
+            return next(frames)
+
+    class Match:
+        def __init__(self, confidence):
+            self.confidence = confidence
+            self.matched = confidence >= 0.75
+
+        def to_dict(self):
+            return {"matched": self.matched, "confidence": self.confidence}
+
+    class Recognition:
+        def match_templates(self, screenshot, candidates):
+            assert all(
+                candidate["scales"] == (1.0, 0.75, 2 / 3, 0.5)
+                for candidate in candidates
+            )
+            confidence = 0.80 if screenshot == b"transition" else 0.99
+            return [Match(confidence)]
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, seconds):
+            sleeps.append(seconds)
+
+    screenshot = _wait_for_command_cards(
+        Context(),
+        Device(),
+        Recognition(),
+        ["battle/CH/Arts.png"],
+        0.75,
+        1.0,
+        0.01,
+    )
+
+    assert screenshot == b"ready"
+    assert sleeps == [0.01]
 
 
 @pytest.mark.parametrize(
@@ -643,6 +728,103 @@ def test_execute_battle_job_runs_extra_turn_while_round_is_unchanged(tmp_path: P
         (70, 590),
         (1217, 440),
         (1217, 440),
+        (1150, 600),
+        (150, 500),
+        (375, 500),
+        (650, 500),
+    ]
+
+
+def test_execute_battle_job_stops_when_battle_finishes_before_configured_turns(
+    tmp_path: Path,
+):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"Servant A": {"other_name": []}}),
+        encoding="utf-8",
+    )
+    (data / "settings" / "early-finish.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Servant A",
+                "round1_turns": 1,
+                "round2_turns": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        confidence = 1.0
+
+        def __init__(self, template_path, matched=True):
+            self.template_path = template_path
+            self.matched = matched
+
+        def to_dict(self):
+            return {"template_path": self.template_path, "matched": self.matched}
+
+    class Recognition:
+        transition_calls = 0
+
+        def match_template(
+            self,
+            _screenshot,
+            template_path,
+            _threshold=None,
+            **_options,
+        ):
+            return Match(template_path, not template_path.endswith("/reconnect.png"))
+
+        def match_templates(self, _screenshot, candidates):
+            paths = [candidate["template_path"] for candidate in candidates]
+            if not any("phase_" in path or "battleFinish" in path for path in paths):
+                return [Match(path) for path in paths]
+            self.transition_calls += 1
+            return [
+                Match(path, path.endswith("/battleFinish.png"))
+                for path in paths
+            ]
+
+    recognition = Recognition()
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            recognition,
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "early-finish",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:early-finish",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["tap_count"] == 4
+    assert recognition.transition_calls == 1
+    assert taps == [
         (1150, 600),
         (150, 500),
         (375, 500),
@@ -1122,7 +1304,7 @@ def test_execute_battle_job_runs_skill_and_command_phase(
             },
             device_key="replay:battle",
         )
-        result = manager.wait(job.job_id, timeout=2)
+        result = manager.wait(job.job_id, timeout=10)
 
     assert result.status == JobStatus.SUCCEEDED
     assert initialized == [True]
@@ -1281,7 +1463,7 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path
             },
             device_key="replay:strategy",
         )
-        result = manager.wait(job.job_id, timeout=3)
+        result = manager.wait(job.job_id, timeout=10)
 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result == {

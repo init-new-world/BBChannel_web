@@ -90,6 +90,7 @@ def create_full_run_handler(
         restart_count = 0
         recoveries: list[dict[str, Any]] = []
         resume_stage: str | None = None
+        battle_settings_initialized = False
         resume = payload.get("resume", True)
         if not isinstance(resume, bool):
             raise ValueError("resume must be a boolean.")
@@ -300,13 +301,20 @@ def create_full_run_handler(
                     progress=progress,
                     message=f"Executing run {run_number}.",
                 )
+                initialize_settings = (
+                    first_battle_set
+                    and run_number == 1
+                    and not battle_settings_initialized
+                )
+                if initialize_settings:
+                    battle_settings_initialized = True
                 battle_result, resume_stage = execute_stage(
                     "battle",
                     execute_battle,
                     {
                         **stage_options["battle"],
                         "setting_name": normalized_name,
-                        "initialize_settings": first_battle_set and run_number == 1,
+                        "initialize_settings": initialize_settings,
                     },
                 )
                 if resume_stage is not None:

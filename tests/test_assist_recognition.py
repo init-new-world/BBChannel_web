@@ -16,6 +16,26 @@ def _png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+def _match_result(
+    template_path: str,
+    center: list[int],
+    *,
+    confidence: float = 0.9,
+    size: list[int] | None = None,
+) -> MatchResult:
+    width, height = size or [20, 20]
+    return MatchResult(
+        template_path=template_path,
+        matched=True,
+        confidence=confidence,
+        threshold=0.85,
+        top_left=[center[0] - width // 2, center[1] - height // 2],
+        size=[width, height],
+        center=center,
+        scale=1.0,
+    )
+
+
 def test_assist_recognizer_finds_all_matching_servant_faces(tmp_path: Path):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"
@@ -63,6 +83,85 @@ def test_assist_recognizer_finds_all_matching_servant_faces(tmp_path: Path):
         [100, 215],
     ]
     assert all(candidate["confidence"] >= 0.99 for candidate in result["candidates"])
+
+
+def test_assist_recognizer_matches_enlarged_face_beneath_card_overlays(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    assist_assets = assets / "assist"
+    servant_faces.mkdir(parents=True)
+    assist_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (130, 130), (35, 75, 115))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.ellipse((38, 28, 112, 110), fill=(235, 195, 150))
+    portrait_draw.line((45, 95, 108, 42), fill=(45, 220, 185), width=7)
+    portrait.save(servant_faces / "Support_1.png")
+    face_mask = Image.new("L", (130, 130), 0)
+    ImageDraw.Draw(face_mask).rectangle((40, 40, 115, 105), fill=255)
+    face_mask.save(assist_assets / "servant_face_mask.png")
+
+    enlarged = portrait.resize((162, 162), Image.Resampling.BILINEAR)
+    screenshot = Image.new("RGB", (420, 300), (18, 24, 32))
+    screenshot.paste(enlarged, (70, 65))
+    screenshot_draw = ImageDraw.Draw(screenshot)
+    screenshot_draw.rectangle((70, 65, 231, 105), fill=(20, 35, 55))
+    screenshot_draw.rectangle((135, 198, 231, 226), fill=(210, 165, 40))
+
+    resources = ResourceService(assets, data)
+    result = AssistRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_sn": "314",
+        },
+        threshold=0.9,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["bounds"] == [70, 65, 162, 162]
+    assert result["candidates"][0]["anchor"] == [151, 146]
+
+
+def test_grand_limit_break_marker_uses_grand_card_layout():
+    marker = _match_result("assist/满破标记.png", [362, 303])
+
+    selected = AssistRecognizer._candidate_limit_break_match(
+        [130, 320],
+        [marker],
+        grand_layout=True,
+    )
+
+    assert selected is marker
+
+
+def test_grand_skill_levels_ignore_decoy_and_prefer_complete_ten_template():
+    matches = [
+        (10, _match_result("assist/full_skill/10.png", [843, 396], confidence=0.91)),
+        (1, _match_result("assist/full_skill/num1.png", [836, 396], confidence=0.94)),
+        (10, _match_result("assist/full_skill/10.png", [888, 396], confidence=0.90)),
+        (1, _match_result("assist/full_skill/num1.png", [881, 396], confidence=0.94)),
+        (10, _match_result("assist/full_skill/10.png", [933, 396], confidence=0.90)),
+        (1, _match_result("assist/full_skill/num1.png", [926, 396], confidence=0.94)),
+        (10, _match_result("assist/full_skill/10.png", [668, 355], confidence=0.99)),
+    ]
+
+    selected = AssistRecognizer._candidate_skill_levels(
+        [130, 320],
+        matches,
+        grand_layout=True,
+    )
+
+    assert [level for level, _match in selected] == [10, 10, 10]
+    assert [match.center for _level, match in selected] == [
+        [843, 396],
+        [888, 396],
+        [933, 396],
+    ]
 
 
 def test_assist_recognizer_filters_candidates_by_equip_name(tmp_path: Path):
@@ -295,7 +394,7 @@ def test_assist_recognizer_grand_only_equip_uses_marker_row_layout(tmp_path: Pat
             assert template_path == "UIimage/jb_np.png"
             assert _options["threshold"] == 0.5
             assert _options["roi"] == (257, 277, 33, 33)
-            assert _options["template_size"] == (48, 48)
+            assert "template_size" not in _options
             return bond_type
 
         def match_template_all(self, _screenshot, template_path, **_options):

@@ -5,6 +5,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from webapp.automation.battle import initialize_battle_settings
+from webapp.core.models import MatchResult
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.services.devices import DeviceService
@@ -16,11 +17,13 @@ from webapp.services.resources import ResourceService
 class _Context:
     def __init__(self) -> None:
         self.events = []
+        self.sleeps = []
 
     def emit(self, event_type, message, *, data=None, level="info"):
         self.events.append((event_type, message, data, level))
 
-    def sleep(self, _seconds):
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
         return None
 
 
@@ -69,7 +72,7 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
     menu_frame = base.copy()
     menu_frame.paste(menu, (1100, 20))
     toggle_frame = base.copy()
-    toggle_frame.paste(disabled, (900, 300))
+    toggle_frame.paste(enabled, (900, 300))
     toggle_frame.paste(disabled, (900, 400))
     toggle_frame.paste(enabled, (900, 500))
     toggle_frame.paste(speed_off, (700, 200))
@@ -114,8 +117,9 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
     )
     devices.connect("replay", "initialize")
 
+    context = _Context()
     result = initialize_battle_settings(
-        _Context(),
+        context,
         devices,
         RecognitionService(resources),
         "CH",
@@ -124,7 +128,7 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
 
     assert result == {
         "changed": True,
-        "states": [False, False, True],
+        "states": [True, False, True],
         "speed_enabled": False,
         "np_skip_enabled": False,
         "actions": [
@@ -137,3 +141,58 @@ def test_initialize_battle_settings_opens_menu_corrects_toggles_and_returns(tmp_
             "close_menu",
         ],
     }
+    assert context.sleeps[0] >= 0.5
+    assert context.sleeps[-1] >= 0.5
+
+
+def test_initialize_battle_settings_uses_current_menu_close_point_when_back_is_absent():
+    class DeviceStub:
+        def __init__(self):
+            self.frames = iter((b"battle", b"menu", b"menu"))
+            self.taps = []
+
+        def snapshot(self):
+            return next(self.frames)
+
+        def tap(self, x, y):
+            self.taps.append((x, y))
+
+    def match(template_path, center, *, matched=True, confidence=1.0):
+        return MatchResult(
+            template_path=template_path,
+            matched=matched,
+            confidence=confidence,
+            threshold=0.85,
+            top_left=[center[0] - 20, center[1] - 20],
+            size=[40, 40],
+            center=list(center),
+        )
+
+    class RecognitionStub:
+        def match_template(self, _screenshot, template_path, **_options):
+            if template_path.endswith("fight_menu_button.png"):
+                return match(template_path, (1180, 205))
+            return match(template_path, (0, 0), matched=False, confidence=0.0)
+
+        def match_template_all(self, _screenshot, template_path, **_options):
+            if template_path.endswith("on.png"):
+                return [match(template_path, (900, 450))]
+            if template_path.endswith("off.png"):
+                return [
+                    match(template_path, (900, 380)),
+                    match(template_path, (900, 520)),
+                ]
+            return []
+
+    device = DeviceStub()
+    result = initialize_battle_settings(
+        _Context(),
+        device,
+        RecognitionStub(),
+        "CH",
+        action_wait_seconds=0,
+    )
+
+    assert result["states"] == [False, True, False]
+    assert result["actions"] == ["open_menu", "close_menu"]
+    assert device.taps == [(1180, 205), (1178, 108)]

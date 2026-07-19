@@ -36,6 +36,9 @@ BATTLE_DRY_RUN_JOB_KIND = "battle.dry-run"
 BATTLE_EXECUTE_PLAN_JOB_KIND = "battle.execute-plan"
 BATTLE_EXECUTE_SKILLS_JOB_KIND = "battle.execute-skills"
 SKILL_ANIMATION_SKIP_POINT = (1217, 440)
+BATTLE_MENU_TRANSITION_SECONDS = 0.5
+BATTLE_MENU_CLOSE_POINT = (1178, 108)
+COMMAND_CARD_READY_CONFIDENCE = 0.9
 NAMED_SKILL_COMMANDS = {
     "Kukulkan",
     "Barghest",
@@ -79,7 +82,12 @@ def initialize_battle_settings(
         raise RuntimeError("Battle menu button was not recognized.")
     device_service.tap(*match_touch_point(menu_button, enabled=random_touch))
     actions = ["open_menu"]
-    context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+    context.sleep(
+        randomized_wait_seconds(
+            max(action_wait_seconds, BATTLE_MENU_TRANSITION_SECONDS),
+            random_time,
+        )
+    )
 
     screenshot = device_service.snapshot()
     candidates = []
@@ -126,7 +134,7 @@ def initialize_battle_settings(
 
     initial_states = [enabled for enabled, _match in toggles]
     for index, ((enabled, match), desired) in enumerate(
-        zip(toggles, (True, True, False), strict=True),
+        zip(toggles, (False, True, False), strict=True),
         start=1,
     ):
         if enabled == desired:
@@ -145,15 +153,17 @@ def initialize_battle_settings(
         context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
 
     screenshot = device_service.snapshot()
-    back_button = recognition.match_template(
+    back_button = _match_optional_battle_template(
+        recognition,
         screenshot,
         f"battle/{server}/back.png",
-        threshold=0.85,
-        scales=(1.0, 0.75, 2 / 3, 0.5),
     )
-    if not back_button.matched:
-        raise RuntimeError("Battle menu back button was not recognized.")
-    device_service.tap(*match_touch_point(back_button, enabled=random_touch))
+    close_point = (
+        match_touch_point(back_button, enabled=random_touch)
+        if back_button is not None and back_button.matched
+        else randomized_touch_point(BATTLE_MENU_CLOSE_POINT, enabled=random_touch)
+    )
+    device_service.tap(*close_point)
     actions.append("close_menu")
     context.emit(
         "battle_settings",
@@ -165,7 +175,12 @@ def initialize_battle_settings(
             "actions": actions,
         },
     )
-    context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+    context.sleep(
+        randomized_wait_seconds(
+            max(action_wait_seconds, BATTLE_MENU_TRANSITION_SECONDS),
+            random_time,
+        )
+    )
     return {
         "changed": (
             any(
@@ -860,24 +875,27 @@ def create_battle_execute_plan_handler(
 
             compiled_round = compiled_rounds[round_number]
             extra_turn = compiled_round["extra_turn"]
+            transition = None
+            if turn_number < len(turns) or extra_turn["actions"]:
+                transition = _wait_for_battle_transition(
+                    context,
+                    device_service,
+                    recognition,
+                    program["server"],
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    reconnect_timing=tap_interval,
+                )
+                if transition["state"] == "finished":
+                    battle_finished = True
             if (
-                turn["turn"] == last_turns[round_number]
+                not battle_finished
+                and turn["turn"] == last_turns[round_number]
                 and extra_turn["actions"]
             ):
                 for extra_number in range(1, 11):
-                    transition = _wait_for_battle_transition(
-                        context,
-                        device_service,
-                        recognition,
-                        program["server"],
-                        threshold,
-                        timeout_seconds,
-                        poll_interval,
-                        reconnect_timing=tap_interval,
-                    )
-                    if transition["state"] == "finished":
-                        battle_finished = True
-                        break
+                    assert transition is not None
                     if transition["round"] != round_number:
                         break
                     context.emit(
@@ -903,6 +921,19 @@ def create_battle_execute_plan_handler(
                         card_wait_seconds=card_wait_seconds,
                         speedup_skills=speedup_skills,
                     )
+                    transition = _wait_for_battle_transition(
+                        context,
+                        device_service,
+                        recognition,
+                        program["server"],
+                        threshold,
+                        timeout_seconds,
+                        poll_interval,
+                        reconnect_timing=tap_interval,
+                    )
+                    if transition["state"] == "finished":
+                        battle_finished = True
+                        break
                 else:
                     raise RuntimeError(
                         f"Round {round_number} exceeded the 10 configured extra-turn limit."
@@ -1350,7 +1381,7 @@ def _execute_skills_handler(
 def _execution_options(payload: dict[str, Any]) -> tuple[float, float, float, float]:
     return (
         _number(payload, "threshold", 0.75, minimum=0.0, maximum=1.0),
-        _number(payload, "timeout_seconds", 15.0, minimum=0.1, maximum=300.0),
+        _number(payload, "timeout_seconds", 120.0, minimum=0.1, maximum=300.0),
         _number(payload, "poll_interval", 0.25, minimum=0.01, maximum=10.0),
         _number(payload, "tap_interval_seconds", 0.15, minimum=0.0, maximum=10.0),
     )
@@ -1480,7 +1511,12 @@ def _wait_for_battle_ready(
             reconnect_timing,
         ) and monotonic() - started < timeout_seconds:
             continue
-        match = recognition.match_template(screenshot, template_path, threshold)
+        match = recognition.match_template(
+            screenshot,
+            template_path,
+            threshold,
+            scales=(1.0, 0.75, 2 / 3, 0.5),
+        )
         attempts += 1
         context.emit(
             "recognition",
@@ -1516,7 +1552,11 @@ def _wait_for_command_cards(
     attempts = 0
     settled = settle_seconds <= 0
     candidates = [
-        {"template_path": template_path, "threshold": threshold}
+        {
+            "template_path": template_path,
+            "threshold": threshold,
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+        }
         for template_path in template_paths
     ]
     while True:
@@ -1546,7 +1586,11 @@ def _wait_for_command_cards(
                 "matches": [match.to_dict() for match in matches],
             },
         )
-        matched = any(match.matched for match in matches)
+        ready_threshold = max(threshold, COMMAND_CARD_READY_CONFIDENCE)
+        matched = any(
+            match.matched and match.confidence >= ready_threshold
+            for match in matches
+        )
         if matched and not settled:
             context.sleep(settle_seconds)
             settled = True

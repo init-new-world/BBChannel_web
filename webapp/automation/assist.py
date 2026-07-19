@@ -17,6 +17,7 @@ from webapp.services.script_data import ScriptDataService
 
 ASSIST_SELECT_JOB_KIND = "assist.select"
 GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
+ASSIST_SCROLL_X = 700
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -364,7 +365,13 @@ def create_assist_handler(
                         )
             if scrolls_since_refresh < max_scrolls:
                 context.checkpoint("scroll_assist", progress=progress)
-                operation = device_service.swipe(1120, 620, 1120, 250, 500)
+                operation = device_service.swipe(
+                    ASSIST_SCROLL_X,
+                    620,
+                    ASSIST_SCROLL_X,
+                    250,
+                    500,
+                )
                 scrolls += 1
                 scrolls_since_refresh += 1
                 context.emit(

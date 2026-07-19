@@ -446,6 +446,7 @@ def test_full_run_stops_when_free_quest_entry_cannot_find_a_target(tmp_path: Pat
 
 def test_full_run_recovers_timeout_and_resumes_current_battle_stage():
     calls: list[str] = []
+    battle_payloads: list[dict] = []
     battle_attempts = 0
 
     def ordinary(name: str, result=None):
@@ -455,16 +456,17 @@ def test_full_run_recovers_timeout_and_resumes_current_battle_stage():
 
         return execute
 
-    def battle(_context, _payload):
+    def battle(_context, payload):
         nonlocal battle_attempts
         calls.append("battle")
+        battle_payloads.append(dict(payload))
         battle_attempts += 1
         if battle_attempts == 1:
             raise TimeoutError("battle controls did not recover")
         return {"executed": True}
 
     handler = create_full_run_handler(
-        _ScriptData(game_crash_restart=True),
+        _ScriptData(first_battle_set=True, game_crash_restart=True),
         ordinary("assist"),
         ordinary("prepare", {"ready": True}),
         battle,
@@ -487,6 +489,10 @@ def test_full_run_recovers_timeout_and_resumes_current_battle_stage():
     ]
     assert result["runs_completed"] == 1
     assert result["restart_count"] == 1
+    assert [payload["initialize_settings"] for payload in battle_payloads] == [
+        True,
+        False,
+    ]
     assert result["recoveries"] == [
         {
             "trigger_stage": "battle",

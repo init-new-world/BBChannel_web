@@ -48,14 +48,14 @@ def create_battle_entry_handler(
         random_time = configured_random_time(plan["run"].get("random_time", 0))
         server = str(plan["server"]).upper()
         template_roles = (
-            ("battle_ready", f"battle/{server}/attack.png"),
-            ("battle_ready", f"battle/{server}/phase_1.png"),
-            ("apple_decide", f"battle/{server}/apple_decide.png"),
-            ("apple_close", f"battle/{server}/apple_close.png"),
-            ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png"),
-            ("team_decide", f"battle/{server}/teamDecide.png"),
-            ("start_task", f"battle/{server}/start_task.png"),
-            ("start_battle", f"battle/{server}/start_battle.png"),
+            ("battle_ready", f"battle/{server}/attack.png", 0.85),
+            ("battle_ready", f"battle/{server}/phase_1.png", 0.95),
+            ("apple_decide", f"battle/{server}/apple_decide.png", 0.85),
+            ("apple_close", f"battle/{server}/apple_close.png", 0.85),
+            ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png", 0.85),
+            ("team_decide", f"battle/{server}/teamDecide.png", 0.85),
+            ("start_task", f"battle/{server}/start_task.png", 0.8),
+            ("start_battle", f"battle/{server}/start_battle.png", 0.85),
         )
         started = monotonic()
         attempts = 0
@@ -84,12 +84,12 @@ def create_battle_entry_handler(
                 continue
             matched_role = None
             matched_result = None
-            for role, template_path in template_roles:
+            for role, template_path, role_threshold in template_roles:
                 try:
                     result = recognition.match_template(
                         screenshot,
                         template_path,
-                        threshold=0.85,
+                        threshold=role_threshold,
                         scales=(1.0, 0.75, 2 / 3, 0.5),
                     )
                 except AppError as exc:

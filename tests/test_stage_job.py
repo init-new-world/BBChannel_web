@@ -17,8 +17,9 @@ class _Device:
 
 
 class _Match:
-    def __init__(self, matched):
+    def __init__(self, matched, confidence=1.0):
         self.matched = matched
+        self.confidence = confidence
 
 
 class _Recognition:
@@ -55,6 +56,28 @@ def test_stage_handler_recognizes_current_battle_flow_page(template: str, stage:
 
     assert result["stage"] == stage
     assert result["matched_template"].endswith(f"/{template}.png")
+
+
+def test_stage_handler_prefers_stronger_assist_match_over_completion_false_positive():
+    class ConflictingRecognition:
+        def match_template(self, _screen, template_path, **_options):
+            confidence = {
+                "battle/CH/battleFinish.png": 0.93,
+                "battle/CH/listupdatebtn.png": 0.997,
+            }.get(template_path, 0.2)
+            return _Match(confidence >= 0.85, confidence)
+
+    handler = create_stage_handler(
+        _ScriptData(),
+        _Device(),
+        ConflictingRecognition(),
+    )
+
+    result = handler(None, {"setting_name": "demo"})
+
+    assert result["stage"] == "assist"
+    assert result["matched_template"] == "battle/CH/listupdatebtn.png"
+    assert result["confidence"] == pytest.approx(0.997)
 
 
 def test_detect_stage_job_is_device_scoped(tmp_path: Path):

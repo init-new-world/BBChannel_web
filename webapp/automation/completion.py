@@ -7,6 +7,7 @@ from typing import Any
 from webapp.automation.interaction import (
     configured_random_time,
     match_touch_point,
+    randomized_touch_point,
     randomized_wait_seconds,
 )
 from webapp.automation.network import reconnect_if_present
@@ -19,6 +20,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 BATTLE_COMPLETE_JOB_KIND = "battle.complete"
+SETTLEMENT_CONTINUE_POINT = (640, 650)
 
 
 def create_completion_handler(
@@ -317,6 +319,35 @@ def create_completion_handler(
                     "actions": actions,
                     "attempts": attempts,
                 }
+
+            battle_finish = None
+            for template_name in ("battleFinish", "battleFinish1", "fight_end"):
+                candidate = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/{template_name}.png",
+                )
+                if candidate is not None and candidate.matched:
+                    battle_finish = candidate
+                    break
+            if battle_finish is not None:
+                operation = device_service.tap(
+                    *randomized_touch_point(
+                        SETTLEMENT_CONTINUE_POINT,
+                        enabled=random_touch,
+                    )
+                )
+                actions.append("settlement_continue")
+                context.emit(
+                    "device_action",
+                    "Advanced the generic battle result screen.",
+                    data={
+                        "role": "settlement_continue",
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
 
             context.emit(
                 "recognition",

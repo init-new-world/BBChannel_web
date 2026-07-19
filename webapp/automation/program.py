@@ -324,13 +324,25 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
 
     if skill <= 9:
         x, y = SERVANT_SKILL_POINTS[skill - 1]
-        steps = [_tap(f"servant_skill_{skill}", x, y)]
+        steps = [
+            _tap(
+                f"servant_skill_{skill}",
+                x,
+                y,
+                wait_after_seconds=1.0 if target is not None else None,
+            )
+        ]
     else:
         menu_x, menu_y = MASTER_SKILL_MENU_POINT
         x, y = MASTER_SKILL_POINTS[skill - 10]
         steps = [
             _tap("master_skill_menu", menu_x, menu_y, wait_after_seconds=1.5),
-            _tap(f"master_skill_{skill}", x, y),
+            _tap(
+                f"master_skill_{skill}",
+                x,
+                y,
+                wait_after_seconds=1.0 if target is not None else None,
+            ),
         ]
     if target is not None:
         target_x, target_y = SKILL_TARGET_POINTS[target - 1]

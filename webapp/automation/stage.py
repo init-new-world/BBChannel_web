@@ -10,6 +10,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 BATTLE_DETECT_STAGE_JOB_KIND = "battle.detect-stage"
+CERTAIN_STAGE_CONFIDENCE = 0.99
 
 
 def create_stage_handler(
@@ -90,6 +91,8 @@ def create_stage_handler(
                 ),
             ),
         )
+        best_response: dict[str, Any] | None = None
+        best_confidence = float("-inf")
         for stage, template_paths in stage_templates:
             for template_path in template_paths:
                 try:
@@ -112,19 +115,34 @@ def create_stage_handler(
                     raise
                 if not result.matched:
                     continue
-                response = {
+                confidence = getattr(result, "confidence", None)
+                comparable_confidence = (
+                    float(confidence)
+                    if isinstance(confidence, (int, float))
+                    else 1.0
+                )
+                if comparable_confidence <= best_confidence:
+                    continue
+                best_confidence = comparable_confidence
+                best_response = {
                     "setting_name": setting_name.strip(),
                     "stage": stage,
                     "matched_template": template_path,
-                    "confidence": getattr(result, "confidence", None),
+                    "confidence": confidence,
                 }
-                if context is not None:
-                    context.emit(
-                        "battle_stage",
-                        "Current battle flow stage was recognized.",
-                        data=response,
-                    )
-                return response
+                if comparable_confidence >= CERTAIN_STAGE_CONFIDENCE:
+                    break
+            if best_confidence >= CERTAIN_STAGE_CONFIDENCE:
+                break
+
+        if best_response is not None:
+            if context is not None:
+                context.emit(
+                    "battle_stage",
+                    "Current battle flow stage was recognized.",
+                    data=best_response,
+                )
+            return best_response
 
         response = {
             "setting_name": setting_name.strip(),
