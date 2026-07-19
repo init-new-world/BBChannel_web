@@ -643,8 +643,8 @@ def test_setting_program_compiles_master_order_change(tmp_path: Path):
     action = payload["rounds"][0]["turns"][0]["actions"][0]
     assert action["state_change"] == {"type": "servant_exchange", "positions": [1, 4]}
     assert action["steps"] == [
-        {"type": "tap", "role": "master_skill_menu", "x": 1131, "y": 320, "wait_after_seconds": 1.5},
-        {"type": "tap", "role": "master_skill_12", "x": 1020, "y": 310, "wait_after_seconds": 1.0},
+        {"type": "tap", "role": "master_skill_menu", "x": 1217, "y": 320, "wait_after_seconds": 1.5},
+        {"type": "tap", "role": "master_skill_12", "x": 1089, "y": 310, "wait_after_seconds": 1.0},
         {"type": "tap", "role": "exchange_position_1", "x": 137, "y": 352},
         {"type": "tap", "role": "exchange_position_4", "x": 737, "y": 352},
         {"type": "tap", "role": "exchange_confirm_1", "x": 607, "y": 625},
@@ -940,14 +940,14 @@ def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
         {
             "type": "tap",
             "role": "master_skill_menu",
-            "x": 1131,
+            "x": 1217,
             "y": 320,
             "wait_after_seconds": 1.5,
         },
         {
             "type": "tap",
             "role": "master_skill_11",
-            "x": 940,
+            "x": 997,
             "y": 310,
             "wait_after_seconds": 1.0,
         },

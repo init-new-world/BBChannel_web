@@ -680,8 +680,8 @@ def test_assist_select_job_scrolls_before_retrying_recognition(tmp_path: Path):
                             "x1": 700,
                             "y1": 620,
                             "x2": 700,
-                            "y2": 250,
-                            "duration_ms": 500,
+                            "y2": 380,
+                            "duration_ms": 700,
                         },
                     },
                     {
@@ -792,8 +792,8 @@ def test_assist_select_job_refreshes_list_after_scroll_limit(tmp_path: Path):
                             "x1": 700,
                             "y1": 620,
                             "x2": 700,
-                            "y2": 250,
-                            "duration_ms": 500,
+                            "y2": 380,
+                            "duration_ms": 700,
                         },
                     },
                     {

@@ -18,6 +18,9 @@ from webapp.services.script_data import ScriptDataService
 ASSIST_SELECT_JOB_KIND = "assist.select"
 GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
 ASSIST_SCROLL_X = 700
+ASSIST_SCROLL_START_Y = 620
+ASSIST_SCROLL_END_Y = 380
+ASSIST_SCROLL_DURATION_MS = 700
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -68,7 +71,7 @@ def create_assist_handler(
             or not 0 <= scroll_wait_seconds <= 10
         ):
             raise ValueError("scroll_wait_seconds must be between 0 and 10.")
-        max_scrolls = payload.get("max_scrolls", 8)
+        max_scrolls = payload.get("max_scrolls", 12)
         if (
             isinstance(max_scrolls, bool)
             or not isinstance(max_scrolls, int)
@@ -367,10 +370,10 @@ def create_assist_handler(
                 context.checkpoint("scroll_assist", progress=progress)
                 operation = device_service.swipe(
                     ASSIST_SCROLL_X,
-                    620,
+                    ASSIST_SCROLL_START_Y,
                     ASSIST_SCROLL_X,
-                    250,
-                    500,
+                    ASSIST_SCROLL_END_Y,
+                    ASSIST_SCROLL_DURATION_MS,
                 )
                 scrolls += 1
                 scrolls_since_refresh += 1
