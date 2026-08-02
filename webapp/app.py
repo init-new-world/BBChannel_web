@@ -38,6 +38,8 @@ from webapp.automation import (
     register_full_run_job,
     register_free_quest_entry_job,
     register_main_story_entry_job,
+    register_lottery_draw_job,
+    register_lottery_inspect_job,
     register_recovery_job,
     register_stage_job,
 )
@@ -54,6 +56,7 @@ from webapp.services.devices import DeviceService
 from webapp.services.digdig import DigdigRecognizer
 from webapp.services.event_log import EventLog
 from webapp.services.expball import ExpBallRecognizer
+from webapp.services.lottery import LotteryRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.quest import QuestRecognizer
 from webapp.services.resources import ResourceService
@@ -153,6 +156,7 @@ def create_app(
     chocolate_recognizer = ChocolateRecognizer(resources, recognition)
     digdig_recognizer = DigdigRecognizer(resources, recognition)
     expball_recognizer = ExpBallRecognizer(resources, recognition)
+    lottery_recognizer = LotteryRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -209,6 +213,18 @@ def create_app(
         script_data,
         device_service,
         expball_recognizer,
+    )
+    register_lottery_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        lottery_recognizer,
+    )
+    register_lottery_draw_job(
+        job_manager,
+        script_data,
+        device_service,
+        lottery_recognizer,
     )
     register_assist_job(
         job_manager,
@@ -338,6 +354,7 @@ def create_app(
     app.state.quest_recognizer = quest_recognizer
     app.state.chocolate_recognizer = chocolate_recognizer
     app.state.digdig_recognizer = digdig_recognizer
+    app.state.lottery_recognizer = lottery_recognizer
     app.state.expball_recognizer = expball_recognizer
     app.state.script_data = script_data
     app.state.job_manager = job_manager
