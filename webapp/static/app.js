@@ -115,6 +115,7 @@ const els = {
   inspectExpball: document.querySelector("#inspect-expball"),
   expballDestination: document.querySelector("#expball-destination"),
   navigateExpball: document.querySelector("#navigate-expball"),
+  inspectExpballGrid: document.querySelector("#inspect-expball-grid"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
@@ -234,6 +235,7 @@ function bindEvents() {
   els.lotteryStar5.addEventListener("change", updateControls);
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.navigateExpball.addEventListener("click", navigateExpball);
+  els.inspectExpballGrid.addEventListener("click", inspectExpballGrid);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
@@ -855,6 +857,16 @@ async function navigateExpball() {
   });
 }
 
+async function inspectExpballGrid() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-storage-grid", {
+    setting_name: settingName,
+  });
+}
+
 async function runExpballSummon() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -1223,6 +1235,17 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.expball.inspect-storage-grid") {
+    const slots = Array.isArray(result.slots) ? result.slots : [];
+    const countStar = (star) => slots.filter((slot) => slot.star === star).length;
+    els.jobResult.textContent = [
+      `${result.recognized_count || 0}/21 EXP cards`,
+      `3 star: ${countStar(3)}`,
+      `4 star: ${countStar(4)}`,
+      `5 star: ${countStar(5)}`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.run") {
     els.jobResult.textContent = [
       `${result.summons || 0}/${result.max_summons || 0} FP batches`,
@@ -1476,6 +1499,10 @@ function updateControls() {
     || !supportsExpball
     || hasRunningJob;
   els.expballDestination.disabled = !supportsExpball || hasRunningJob;
+  els.inspectExpballGrid.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
   els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

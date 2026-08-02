@@ -38,6 +38,19 @@ _STATE_SPECS = (
     ("shop", "navigation", "observed", None, None),
 )
 _SCALES = (1.0, 0.75, 2 / 3, 0.5)
+_STORAGE_STARS = (3, 4, 5)
+_STORAGE_CARD_ROIS = tuple(
+    (
+        round((112 + column * 200) * 2 / 3),
+        round((271 + row * 213) * 2 / 3),
+        round((297 + column * 200) * 2 / 3)
+        - round((112 + column * 200) * 2 / 3),
+        round((472 + row * 213) * 2 / 3)
+        - round((271 + row * 213) * 2 / 3),
+    )
+    for row in range(3)
+    for column in range(7)
+)
 
 _NAVIGATION_STATE_SPECS = (
     ("summon_page", "friendpointcall.png", (507, 333, 263, 133)),
@@ -179,4 +192,80 @@ class ExpBallRecognizer:
             "reason": None,
             "available_template_count": len(candidates),
             "matches": matches,
+        }
+
+    def recognize_storage_grid(
+        self,
+        screenshot: bytes,
+        *,
+        threshold: float = 0.75,
+    ) -> dict[str, Any]:
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        root = "expball/FPgold"
+        page = self._resources.template_index(prefix=root, limit=20)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+        template_paths = {
+            star: f"{root}/{star}jyz.png"
+            for star in _STORAGE_STARS
+            if f"{root}/{star}jyz.png" in available_paths
+        }
+        specs = [
+            (slot, star, roi, template_paths[star])
+            for slot, roi in enumerate(_STORAGE_CARD_ROIS)
+            for star in _STORAGE_STARS
+            if star in template_paths
+        ]
+        candidates = [
+            {
+                "template_path": template_path,
+                "threshold": threshold,
+                "roi": roi,
+                "scales": _SCALES,
+            }
+            for _slot, _star, roi, template_path in specs
+        ]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        best_by_slot: dict[int, tuple[int, Any]] = {}
+        for result, (slot, star, _roi, _template_path) in zip(
+            results,
+            specs,
+            strict=True,
+        ):
+            if not result.matched:
+                continue
+            current = best_by_slot.get(slot)
+            if current is None or result.confidence > current[1].confidence:
+                best_by_slot[slot] = (star, result)
+
+        slots = []
+        for slot, roi in enumerate(_STORAGE_CARD_ROIS):
+            x, y, width, height = roi
+            best = best_by_slot.get(slot)
+            slots.append(
+                {
+                    "slot": slot,
+                    "row": slot // 7,
+                    "column": slot % 7,
+                    "roi": list(roi),
+                    "center": [x + width // 2, y + height // 2],
+                    "star": best[0] if best is not None else None,
+                    "confidence": (
+                        best[1].confidence if best is not None else None
+                    ),
+                    "match": best[1].to_dict() if best is not None else None,
+                }
+            )
+        return {
+            "rows": 3,
+            "columns": 7,
+            "available_template_count": len(template_paths),
+            "candidate_count": len(candidates),
+            "recognized_count": len(best_by_slot),
+            "slots": slots,
         }

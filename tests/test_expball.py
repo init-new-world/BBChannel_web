@@ -1,11 +1,14 @@
 from webapp.automation.expball import (
     EXPBALL_INSPECT_JOB_KIND,
+    EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
     create_expball_inspect_handler,
+    create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
     register_expball_inspect_job,
+    register_expball_storage_grid_inspect_job,
     register_expball_storage_job,
     register_expball_summon_job,
 )
@@ -208,6 +211,74 @@ def test_expball_recognizer_distinguishes_summon_confirmation_and_result():
     assert matches["close"]["recommended_action"] == "close_summon_result"
 
 
+def test_expball_recognizer_scans_visible_storage_grid_by_slot():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/FPgold"
+            assert limit == 20
+            return {
+                "entries": [
+                    {"path": f"expball/FPgold/{star}jyz.png"}
+                    for star in (3, 4, 5)
+                ]
+            }
+
+    class Recognition:
+        def __init__(self):
+            self.candidates = None
+
+        def match_templates(self, _screenshot, candidates):
+            self.candidates = candidates
+            results = []
+            for index, candidate in enumerate(candidates):
+                slot = index // 3
+                star = 3 + index % 3
+                confidence = 0.1
+                matched = False
+                if slot == 0 and star in {3, 4}:
+                    confidence = 0.88 if star == 3 else 0.96
+                    matched = True
+                if slot == 8 and star == 5:
+                    confidence = 0.93
+                    matched = True
+                results.append(
+                    MatchResult(
+                        template_path=candidate["template_path"],
+                        matched=matched,
+                        confidence=confidence,
+                        threshold=0.75,
+                        top_left=[100, 200],
+                        size=[40, 30],
+                        center=[120, 215],
+                        scale=2 / 3,
+                        roi=list(candidate["roi"]),
+                    )
+                )
+            return results
+
+    recognition = Recognition()
+    report = ExpBallRecognizer(Resources(), recognition).recognize_storage_grid(
+        b"storage-grid",
+        threshold=0.75,
+    )
+
+    assert len(recognition.candidates) == 63
+    assert recognition.candidates[0] == {
+        "template_path": "expball/FPgold/3jyz.png",
+        "threshold": 0.75,
+        "roi": (75, 181, 123, 134),
+        "scales": (1.0, 0.75, 2 / 3, 0.5),
+    }
+    assert report["recognized_count"] == 2
+    assert len(report["slots"]) == 21
+    assert report["slots"][0]["star"] == 4
+    assert report["slots"][0]["confidence"] == 0.96
+    assert report["slots"][1]["star"] is None
+    assert report["slots"][8]["star"] == 5
+    assert report["slots"][8]["row"] == 1
+    assert report["slots"][8]["column"] == 1
+
+
 class _ScriptData:
     def get_setting_plan(self, name):
         assert name == "demo"
@@ -287,6 +358,44 @@ def test_expball_inspect_job_requires_connected_device(tmp_path):
 
         assert manager.has_kind(EXPBALL_INSPECT_JOB_KIND)
         assert manager.requires_device(EXPBALL_INSPECT_JOB_KIND) is True
+
+
+def test_expball_storage_grid_inspect_reports_visible_cards():
+    class Recognizer:
+        def recognize_storage_grid(self, screenshot, *, threshold):
+            assert screenshot == b"expball-screen"
+            assert threshold == 0.78
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 2,
+                "slots": [{"slot": 0, "star": 4}, {"slot": 1, "star": 5}],
+            }
+
+    context = _Context()
+    result = create_expball_storage_grid_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )(context, {"setting_name": "demo", "threshold": 0.78})
+
+    assert result["setting_name"] == "demo"
+    assert result["server"] == "CH"
+    assert result["recognized_count"] == 2
+    assert context.events[-1][0:2] == ("checkpoint", "complete")
+
+
+def test_expball_storage_grid_inspect_job_requires_connected_device(tmp_path):
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_storage_grid_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
+
+        assert manager.has_kind(EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND)
+        assert manager.requires_device(EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND) is True
 
 
 def _report(state, flow, status, *, action=None, reason=None, center=(790, 530)):

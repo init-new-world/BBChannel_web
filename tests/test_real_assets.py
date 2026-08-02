@@ -102,3 +102,29 @@ def test_real_chocolate_templates_report_storage_limit():
     assert report["status"] == "blocked"
     assert report["reason"] == "storage_full"
     assert report["matches"][0]["template_path"] == template_path
+
+
+def test_real_expball_templates_classify_a_storage_grid_slot():
+    pytest.importorskip("cv2")
+    from webapp.services.expball import ExpBallRecognizer
+    from webapp.services.recognition import RecognitionService
+
+    resources = ResourceService(PROJECT_ROOT / "assets", PROJECT_ROOT / "data")
+    template_path = "expball/FPgold/4jyz.png"
+    with Image.open(resources.resolve_template(template_path)) as source:
+        template = source.convert("RGBA")
+    screenshot = Image.new("RGB", (1280, 720), (24, 31, 43))
+    screenshot.paste(template, (100, 210), template)
+
+    report = ExpBallRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize_storage_grid(
+        _png_bytes(screenshot),
+        threshold=0.95,
+    )
+
+    assert report["recognized_count"] == 1
+    assert report["slots"][0]["star"] == 4
+    assert report["slots"][0]["confidence"] >= 0.99
+    assert all(slot["star"] is None for slot in report["slots"][1:])

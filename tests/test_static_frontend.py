@@ -69,6 +69,7 @@ def test_operator_console_references_api_controls():
     assert 'id="lottery-star-4"' in index
     assert 'id="lottery-star-5"' in index
     assert 'id="inspect-expball"' in index
+    assert 'id="inspect-expball-grid"' in index
     assert 'id="expball-destination"' in index
     assert 'id="navigate-expball"' in index
     assert 'id="run-expball-summon"' in index
@@ -91,6 +92,7 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.lottery.inspect"' in script
     assert 'job.kind === "event.lottery.run"' in script
     assert 'job.kind === "event.expball.inspect"' in script
+    assert 'job.kind === "event.expball.inspect-storage-grid"' in script
     assert 'job.kind === "event.expball.navigate"' in script
     assert 'job.kind === "event.expball.run"' in script
     assert 'job.kind === "event.expball.summon"' in script
@@ -108,6 +110,7 @@ def test_operator_console_references_api_controls():
     assert "pay_slot: readNumber(els.lotteryPaySlot)" in script
     assert "stars: selectedLotteryStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script
+    assert 'enqueueJob("event.expball.inspect-storage-grid"' in script
     assert 'enqueueJob("event.expball.navigate"' in script
     assert "destination: els.expballDestination.value" in script
     assert 'enqueueJob("event.expball.run"' in script
