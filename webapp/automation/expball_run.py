@@ -7,7 +7,6 @@ from webapp.automation.expball import (
     create_expball_summon_handler,
 )
 from webapp.automation.expball_navigation import create_expball_navigate_handler
-from webapp.automation.expball_sell import create_expball_sell_handler
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
 from webapp.services.expball import ExpBallRecognizer
@@ -15,7 +14,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 EXPBALL_RUN_JOB_KIND = "event.expball.run"
-_OVERFLOW_ACTIONS = {"stop", "storage", "sell"}
+_OVERFLOW_ACTIONS = {"stop", "storage"}
 
 
 def create_expball_run_handler(
@@ -38,12 +37,6 @@ def create_expball_run_handler(
         device_service,
         recognizer,
     )
-    sell_handler = create_expball_sell_handler(
-        script_data,
-        device_service,
-        recognizer,
-    )
-
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
         max_summons = _integer(payload, "max_summons", 10, 1, 10000)
@@ -56,7 +49,7 @@ def create_expball_run_handler(
         )
         overflow_action = str(payload.get("overflow_action") or "stop").lower()
         if overflow_action not in _OVERFLOW_ACTIONS:
-            raise ValueError("overflow_action must be stop, storage, or sell.")
+            raise ValueError("overflow_action must be stop or storage.")
 
         common_payload: dict[str, Any] = {"setting_name": setting_name}
         for key in (
@@ -71,11 +64,6 @@ def create_expball_run_handler(
         navigation_payload = dict(common_payload)
         summon_payload = dict(common_payload)
         storage_payload = dict(common_payload)
-        sell_payload = {
-            key: value
-            for key, value in common_payload.items()
-            if key in {"setting_name", "threshold", "action_wait_seconds"}
-        }
         _copy_option(
             payload,
             navigation_payload,
@@ -218,10 +206,7 @@ def create_expball_run_handler(
                     ),
                 )
 
-            if overflow_action == "storage":
-                overflow_result = storage_handler(context, storage_payload)
-            else:
-                overflow_result = sell_handler(context, sell_payload)
+            overflow_result = storage_handler(context, storage_payload)
             record(overflow_action, overflow_result)
             if overflow_result.get("completed") is not True:
                 return finish(

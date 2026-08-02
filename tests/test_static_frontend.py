@@ -72,6 +72,7 @@ def test_operator_console_references_api_controls():
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
     assert 'id="expball-overflow-action"' in index
+    assert '<option value="sell">' not in index
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script

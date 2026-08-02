@@ -202,6 +202,16 @@ def test_expball_run_rejects_unknown_overflow_action():
         )
 
 
+def test_expball_run_does_not_offer_unconfigured_automatic_sale():
+    handler = create_expball_run_handler(_ScriptData(), _Device(), object())
+
+    with pytest.raises(ValueError, match="overflow_action"):
+        handler(
+            _Context(),
+            {"setting_name": "demo", "overflow_action": "sell"},
+        )
+
+
 def test_expball_run_job_requires_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_expball_run_job(
