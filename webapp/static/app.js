@@ -1200,12 +1200,10 @@ function renderJobResult(job) {
     return;
   }
   if (job.kind === "event.expball.run") {
-    const overflowCycles = result.overflow_cycles || 0;
     els.jobResult.textContent = [
       `${result.summons || 0}/${result.max_summons || 0} FP batches`,
       result.completed ? "Completed" : "Stopped",
       humanizeResultValue(result.reason || "unknown"),
-      `${overflowCycles} overflow ${overflowCycles === 1 ? "cycle" : "cycles"}`,
     ].join(" · ");
     return;
   }

@@ -261,7 +261,16 @@ def create_expball_summon_handler(
                         reason="outside_summon_flow",
                         report=report,
                     )
-                if (
+                if "bianhuan" in matches and "close" in matches:
+                    if not tap_match(report, "close", "recover_summon_page"):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    acted = True
+                elif (
                     isinstance(action, str)
                     and action in _SUMMON_REQUEST_ACTIONS
                     and state in matches

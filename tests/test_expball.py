@@ -544,6 +544,54 @@ def test_expball_summon_defaults_to_ten_batches():
     assert result["actions"].count("summon_again") == 9
 
 
+def test_expball_summon_closes_a_previous_result_without_counting_it():
+    reports = iter(
+        (
+            _summon_report(
+                "bianhuan",
+                "bianhuan",
+                "close",
+                status="observed",
+            ),
+            _summon_report("call10", "call10", action="summon_ten"),
+            _summon_report("decide", "decide", action="confirm_summon"),
+            _summon_report(
+                "again10_1",
+                "bianhuan",
+                "again10_1",
+                action="summon_again",
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_summon_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 1,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["summons"] == 1
+    assert result["actions"] == [
+        "recover_summon_page",
+        "summon_ten",
+        "confirm_summon",
+    ]
+    assert device.taps == [(90, 55), (800, 610), (830, 570)]
+
+
 def test_expball_storage_executes_current_selection_and_confirms():
     reports = iter(
         (
