@@ -260,3 +260,82 @@ def test_device_service_normalizes_frame_and_maps_actions_to_raw_screen():
     assert backend.swipes == [("dev1", 240, 0, 2160, 1079, 300)]
     assert tap_result.data["mapped"] == [240, 540]
     assert swipe_result.data["mapped"] == [[240, 0], [2160, 1079]]
+
+
+def test_device_service_maps_actions_to_control_display_in_split_channel_session():
+    class CaptureBackend(FakeBackend):
+        def snapshot(self, device_id):
+            image = Image.new("RGB", (1280, 720), (20, 40, 60))
+            output = BytesIO()
+            image.save(output, format="PNG")
+            return output.getvalue()
+
+    class AdbControlBackend(FakeBackend):
+        def list_devices(self):
+            return [
+                DeviceInfo(
+                    backend=self.name,
+                    device_id=self.device_id,
+                    name="ADB Device",
+                    details={"display_size": {"width": 1920, "height": 1080}},
+                )
+            ]
+
+    capture = CaptureBackend("capture", "screen-1")
+    control = AdbControlBackend("adb", "touch-1")
+    service = DeviceService(
+        [capture, control],
+        EventLog(),
+        frame_normalizer=FrameNormalizer(),
+    )
+    service.connect_channels(
+        capture_backend="capture",
+        capture_device_id="screen-1",
+        control_backend="adb",
+        control_device_id="touch-1",
+    )
+
+    before_snapshot = service.tap(1217, 320)
+    service.snapshot()
+    after_snapshot = service.tap(905, 310)
+
+    assert control.taps == [
+        ("touch-1", 1826, 480),
+        ("touch-1", 1358, 465),
+    ]
+    assert before_snapshot.data["mapped"] == [1826, 480]
+    assert after_snapshot.data["mapped"] == [1358, 465]
+
+
+def test_same_endpoint_refreshes_control_mapping_when_display_size_changes():
+    class ResizedAdbBackend(FakeBackend):
+        def list_devices(self):
+            return [
+                DeviceInfo(
+                    backend=self.name,
+                    device_id=self.device_id,
+                    name="ADB Device",
+                    details={"display_size": {"width": 1920, "height": 1080}},
+                )
+            ]
+
+        def snapshot(self, device_id):
+            image = Image.new("RGB", (2560, 1440), (20, 40, 60))
+            output = BytesIO()
+            image.save(output, format="PNG")
+            return output.getvalue()
+
+    backend = ResizedAdbBackend("adb", "touch-1")
+    service = DeviceService(
+        [backend],
+        EventLog(),
+        frame_normalizer=FrameNormalizer(),
+    )
+    service.connect("adb", "touch-1")
+
+    before_snapshot = service.tap(1217, 320)
+    service.snapshot()
+    after_snapshot = service.tap(1217, 320)
+
+    assert before_snapshot.data["mapped"] == [1826, 480]
+    assert after_snapshot.data["mapped"] == [2434, 640]

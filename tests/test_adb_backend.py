@@ -12,6 +12,7 @@ from webapp.devices.adb import (
     detect_wsl_host_ip,
     normalize_adb_endpoint,
     parse_adb_devices,
+    parse_adb_display_size,
 )
 
 
@@ -71,6 +72,12 @@ def test_parse_adb_devices_keeps_device_details_from_long_output():
         "device": "aurora",
         "transport_id": "1",
     }
+
+
+def test_parse_adb_display_size_prefers_active_override():
+    output = "Physical size: 2560x1440\nOverride size: 1920x1080\n"
+
+    assert parse_adb_display_size(output) == (1920, 1080)
 
 
 def test_detect_wsl_host_ip_reads_first_nameserver(tmp_path: Path):
@@ -301,6 +308,42 @@ def test_list_devices_deduplicates_aliases_by_android_id(tmp_path: Path):
 
     assert [device.device_id for device in devices] == ["172.25.208.1:16384"]
     assert devices[0].details["android_id"] == "cedc10406839cb1"
+
+
+def test_list_devices_exposes_effective_adb_display_size(tmp_path: Path):
+    candidate = tmp_path / "adb"
+    candidate.write_text("", encoding="utf-8")
+
+    def run_command(command: list[str], text: bool, timeout_seconds: float):
+        args = command[1:]
+        if args == ["devices", "-l"]:
+            return CompletedProcess(
+                command,
+                0,
+                stdout="List of devices attached\nemulator-5554 device model:Demo\n",
+                stderr="",
+            )
+        if args[-3:] == ["shell", "wm", "size"]:
+            return CompletedProcess(
+                command,
+                0,
+                stdout="Physical size: 2560x1440\nOverride size: 1920x1080\n",
+                stderr="",
+            )
+        if len(args) >= 3 and args[0] == "-s" and args[2] == "shell":
+            return CompletedProcess(command, 0, stdout="", stderr="")
+        raise AssertionError(args)
+
+    backend = AdbBackend(
+        adb_candidates=[candidate],
+        discovery_config=AdbDiscoveryConfig(auto_connect=False),
+        run_command=run_command,
+    )
+
+    device = backend.list_devices()[0]
+
+    assert device.details["wm_size"] == "1920x1080"
+    assert device.details["display_size"] == {"width": 1920, "height": 1080}
 
 
 def test_find_adb_prefers_existing_candidate(tmp_path: Path):

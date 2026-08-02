@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import socket
 import shutil
 import subprocess
@@ -233,6 +234,27 @@ def parse_adb_devices(output: str) -> list[DeviceInfo]:
             )
         )
     return devices
+
+
+def parse_adb_display_size(output: str) -> tuple[int, int] | None:
+    sizes: dict[str, tuple[int, int]] = {}
+    fallback: tuple[int, int] | None = None
+    for match in re.finditer(
+        r"(?:(Physical|Override)\s+size:\s*)?(\d+)\s*x\s*(\d+)",
+        output,
+        flags=re.IGNORECASE,
+    ):
+        width = int(match.group(2))
+        height = int(match.group(3))
+        if width <= 0 or height <= 0:
+            continue
+        size = (width, height)
+        label = match.group(1)
+        if label is None:
+            fallback = size
+        else:
+            sizes[label.casefold()] = size
+    return sizes.get("override") or sizes.get("physical") or fallback
 
 
 def normalize_adb_endpoint(value: str) -> str:
@@ -560,7 +582,15 @@ class AdbBackend:
 
         wm_size = self._try_shell(device.device_id, ["wm", "size"])
         if wm_size and "wm_size" not in details:
-            details["wm_size"] = wm_size.replace("Physical size:", "").strip()
+            display_size = parse_adb_display_size(wm_size)
+            details["wm_size"] = (
+                f"{display_size[0]}x{display_size[1]}" if display_size else wm_size
+            )
+            if display_size:
+                details["display_size"] = {
+                    "width": display_size[0],
+                    "height": display_size[1],
+                }
         wm_density = self._try_shell(device.device_id, ["wm", "density"])
         if wm_density and "wm_density" not in details:
             details["wm_density"] = wm_density.replace("Physical density:", "").strip()

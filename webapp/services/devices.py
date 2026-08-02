@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import (
@@ -28,6 +29,7 @@ class DeviceService:
         self._control: DeviceEndpoint | None = None
         self._frame_normalizer = frame_normalizer
         self._screen_transform: ScreenTransform | None = None
+        self._control_transform: ScreenTransform | None = None
         self._state_lock = threading.RLock()
         self._endpoint_locks_guard = threading.Lock()
         self._endpoint_locks: dict[str, threading.RLock] = {}
@@ -102,12 +104,14 @@ class DeviceService:
         control_backend: str,
         control_device_id: str,
     ) -> ConnectionState:
-        capture = self._validate_endpoint(capture_backend, capture_device_id)
-        control = self._validate_endpoint(control_backend, control_device_id)
+        capture, _capture_info = self._validate_endpoint(capture_backend, capture_device_id)
+        control, control_info = self._validate_endpoint(control_backend, control_device_id)
+        control_transform = _display_transform(control_info)
         with self._state_lock:
             self._capture = capture
             self._control = control
             self._screen_transform = None
+            self._control_transform = control_transform
         self._event_log.info(
             "connect",
             "Device session connected.",
@@ -142,6 +146,7 @@ class DeviceService:
             self._capture = None
             self._control = None
             self._screen_transform = None
+            self._control_transform = None
         if previous_state.capture is not None or previous_state.control is not None:
             self._event_log.info(
                 "disconnect",
@@ -186,6 +191,8 @@ class DeviceService:
                     data = frame.png
                     with self._state_lock:
                         self._screen_transform = frame.transform
+                        if _same_endpoint(self._capture, self._control):
+                            self._control_transform = frame.transform
             except AppError as exc:
                 if self._frame_normalizer is not None:
                     with self._state_lock:
@@ -294,7 +301,11 @@ class DeviceService:
             {"channels": sorted(attempted)},
         )
 
-    def _validate_endpoint(self, backend_name: str, device_id: str) -> DeviceEndpoint:
+    def _validate_endpoint(
+        self,
+        backend_name: str,
+        device_id: str,
+    ) -> tuple[DeviceEndpoint, DeviceInfo]:
         backend = self._backend_for(backend_name)
         devices = backend.list_devices()
         matching_device = next((device for device in devices if device.device_id == device_id), None)
@@ -314,7 +325,7 @@ class DeviceService:
                     "status": matching_device.status,
                 },
             )
-        return DeviceEndpoint(backend_name, device_id, matching_device.name)
+        return DeviceEndpoint(backend_name, device_id, matching_device.name), matching_device
 
     def _backend_for(self, backend_name: str) -> DeviceBackend:
         backend = self._backends.get(backend_name)
@@ -347,7 +358,7 @@ class DeviceService:
 
     def _map_point(self, x: int, y: int) -> tuple[int, int]:
         with self._state_lock:
-            transform = self._screen_transform
+            transform = self._control_transform or self._screen_transform
         if transform is None:
             if self._frame_normalizer is not None:
                 raise AppError(
@@ -358,8 +369,34 @@ class DeviceService:
         return transform.logical_to_raw(x, y)
 
 
+def _display_transform(device: DeviceInfo) -> ScreenTransform | None:
+    display_size = device.details.get("display_size")
+    if not isinstance(display_size, Mapping):
+        return None
+    width = display_size.get("width")
+    height = display_size.get("height")
+    if isinstance(width, bool) or isinstance(height, bool):
+        return None
+    if not isinstance(width, int) or not isinstance(height, int):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return ScreenTransform.fit(width, height)
+
+
 def _endpoint_key(endpoint: DeviceEndpoint) -> str:
     return f"{endpoint.backend}:{endpoint.device_id}"
+
+
+def _same_endpoint(
+    first: DeviceEndpoint | None,
+    second: DeviceEndpoint | None,
+) -> bool:
+    return (
+        first is not None
+        and second is not None
+        and _endpoint_key(first) == _endpoint_key(second)
+    )
 
 
 def _operation_with_mapping(
