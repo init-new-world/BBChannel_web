@@ -51,6 +51,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "event.lottery.inspect",
                     "event.lottery.navigate",
                     "event.lottery.receive-giftbox",
+                    "event.lottery.run",
                 ]
             }
             assert client.get(f"/api/jobs/{job_id}").json()["job"]["status"] == "succeeded"

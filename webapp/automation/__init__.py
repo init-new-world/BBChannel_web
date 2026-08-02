@@ -58,14 +58,17 @@ from webapp.automation.lottery import (
     LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
     LOTTERY_INSPECT_JOB_KIND,
     LOTTERY_NAVIGATE_JOB_KIND,
+    LOTTERY_RUN_JOB_KIND,
     create_lottery_draw_handler,
     create_lottery_giftbox_receive_handler,
     create_lottery_inspect_handler,
     create_lottery_navigate_handler,
+    create_lottery_run_handler,
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
     register_lottery_inspect_job,
     register_lottery_navigate_job,
+    register_lottery_run_job,
 )
 from webapp.automation.program import compile_battle_program
 from webapp.automation.quest import (
@@ -116,6 +119,7 @@ __all__ = [
     "LOTTERY_GIFTBOX_RECEIVE_JOB_KIND",
     "LOTTERY_INSPECT_JOB_KIND",
     "LOTTERY_NAVIGATE_JOB_KIND",
+    "LOTTERY_RUN_JOB_KIND",
     "compile_battle_program",
     "create_assist_handler",
     "create_battle_entry_handler",
@@ -136,6 +140,7 @@ __all__ = [
     "create_lottery_giftbox_receive_handler",
     "create_lottery_inspect_handler",
     "create_lottery_navigate_handler",
+    "create_lottery_run_handler",
     "create_recovery_handler",
     "create_stage_handler",
     "register_assist_job",
@@ -158,6 +163,7 @@ __all__ = [
     "register_lottery_giftbox_receive_job",
     "register_lottery_inspect_job",
     "register_lottery_navigate_job",
+    "register_lottery_run_job",
     "register_recovery_job",
     "register_stage_job",
 ]

@@ -7,14 +7,17 @@ from webapp.automation.lottery import (
     LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
     LOTTERY_INSPECT_JOB_KIND,
     LOTTERY_NAVIGATE_JOB_KIND,
+    LOTTERY_RUN_JOB_KIND,
     create_lottery_draw_handler,
     create_lottery_giftbox_receive_handler,
     create_lottery_inspect_handler,
     create_lottery_navigate_handler,
+    create_lottery_run_handler,
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
     register_lottery_inspect_job,
     register_lottery_navigate_job,
+    register_lottery_run_job,
 )
 from webapp.core.models import MatchResult, OperationResult
 from webapp.runtime import JobDatabase, JobManager
@@ -438,6 +441,123 @@ def test_lottery_navigate_selects_configured_reward_slot():
     assert device.taps == [(640, 527), (743, 140)]
 
 
+def test_lottery_run_receives_full_giftbox_and_resumes_drawing():
+    draw_reports = iter(
+        (
+            _report("giftbox_full", "blocked", reason="giftbox_full"),
+            _report("unknown", "unknown"),
+            _report("unknown", "unknown"),
+            _report("draw_10", "actionable", action="draw"),
+            _report("pool_empty", "complete", reason="pool_empty"),
+        )
+    )
+    giftbox_reports = iter(
+        (
+            {"state": "giftbox_full", "status": "actionable", "reason": None},
+            {
+                "state": "giftbox_loaded",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": None,
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: True, 5: True},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: True, 5: True},
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {"state": "receive_confirm", "status": "actionable", "reason": None},
+            {
+                "state": "receive_all_off",
+                "status": "complete",
+                "reason": "giftbox_empty",
+                "receive_all_enabled": False,
+            },
+        )
+    )
+    navigation_reports = iter(
+        (
+            {"state": "pay", "status": "actionable"},
+            {"state": "unknown", "status": "unknown"},
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(draw_reports)
+
+        def recognize_giftbox(self, *_args, **_kwargs):
+            return next(giftbox_reports)
+
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(navigation_reports)
+
+    device = _Device()
+    result = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "pool_empty"
+    assert result["giftbox_cycles"] == 1
+    assert result["draw_count"] == 0
+    assert result["receive_batches"] == 1
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "draw",
+        "receive_giftbox",
+        "navigate",
+        "draw",
+    ]
+    assert result["stages"][1]["result"]["completed"] is True
+    assert result["stages"][2]["result"]["completed"] is True
+
+
+def test_lottery_run_stops_when_giftbox_cycle_limit_is_reached():
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return _report("giftbox_full", "blocked", reason="giftbox_full")
+
+    device = _Device()
+    result = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {"setting_name": "demo", "max_giftbox_cycles": 0},
+    )
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "giftbox_cycle_limit"
+    assert result["giftbox_cycles"] == 0
+    assert device.taps == []
+
+
 def test_lottery_giftbox_receive_configures_filters_and_receives_batches():
     reports = iter(
         (
@@ -583,6 +703,12 @@ def test_lottery_jobs_require_connected_device(tmp_path):
             _Device(),
             object(),
         )
+        register_lottery_run_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
 
         assert manager.has_kind(LOTTERY_INSPECT_JOB_KIND)
         assert manager.requires_device(LOTTERY_INSPECT_JOB_KIND) is True
@@ -592,3 +718,5 @@ def test_lottery_jobs_require_connected_device(tmp_path):
         assert manager.requires_device(LOTTERY_GIFTBOX_RECEIVE_JOB_KIND) is True
         assert manager.has_kind(LOTTERY_NAVIGATE_JOB_KIND)
         assert manager.requires_device(LOTTERY_NAVIGATE_JOB_KIND) is True
+        assert manager.has_kind(LOTTERY_RUN_JOB_KIND)
+        assert manager.requires_device(LOTTERY_RUN_JOB_KIND) is True

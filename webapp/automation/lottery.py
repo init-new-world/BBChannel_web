@@ -18,6 +18,7 @@ LOTTERY_INSPECT_JOB_KIND = "event.lottery.inspect"
 LOTTERY_DRAW_JOB_KIND = "event.lottery.draw"
 LOTTERY_GIFTBOX_RECEIVE_JOB_KIND = "event.lottery.receive-giftbox"
 LOTTERY_NAVIGATE_JOB_KIND = "event.lottery.navigate"
+LOTTERY_RUN_JOB_KIND = "event.lottery.run"
 OPEN_GIFTBOX_POINT = (860, 565)
 OPEN_FILTER_POINT = (1157, 128)
 CLEAR_FILTERS_POINT = (225, 637)
@@ -637,6 +638,193 @@ def register_lottery_giftbox_receive_job(
     )
 
 
+def create_lottery_run_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: LotteryRecognizer,
+):
+    draw_handler = create_lottery_draw_handler(
+        script_data,
+        device_service,
+        recognizer,
+    )
+    giftbox_handler = create_lottery_giftbox_receive_handler(
+        script_data,
+        device_service,
+        recognizer,
+    )
+    navigate_handler = create_lottery_navigate_handler(
+        script_data,
+        device_service,
+        recognizer,
+    )
+
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = _setting_name(payload)
+        max_giftbox_cycles = _integer(
+            payload,
+            "max_giftbox_cycles",
+            100,
+            0,
+            10000,
+        )
+        common_payload: dict[str, Any] = {"setting_name": setting_name}
+        for key in (
+            "threshold",
+            "poll_interval",
+            "action_wait_seconds",
+            "max_idle_polls",
+        ):
+            if key in payload:
+                common_payload[key] = payload[key]
+
+        draw_payload = dict(common_payload)
+        giftbox_payload = dict(common_payload)
+        navigate_payload = dict(common_payload)
+        _copy_option(
+            payload,
+            draw_payload,
+            "draw_timeout_seconds",
+            "timeout_seconds",
+        )
+        _copy_option(
+            payload,
+            giftbox_payload,
+            "giftbox_timeout_seconds",
+            "timeout_seconds",
+        )
+        _copy_option(
+            payload,
+            navigate_payload,
+            "navigation_timeout_seconds",
+            "timeout_seconds",
+        )
+        _copy_option(payload, draw_payload, "max_draw_actions", "max_draw_actions")
+        _copy_option(
+            payload,
+            giftbox_payload,
+            "max_giftbox_actions",
+            "max_actions",
+        )
+        _copy_option(
+            payload,
+            navigate_payload,
+            "max_navigation_actions",
+            "max_actions",
+        )
+        if "stars" in payload:
+            giftbox_payload["stars"] = payload["stars"]
+        if "pay_slot" in payload:
+            navigate_payload["pay_slot"] = payload["pay_slot"]
+
+        giftbox_cycles = 0
+        draw_count = 0
+        receive_batches = 0
+        stages: list[dict[str, Any]] = []
+
+        def record(stage: str, result: dict[str, Any]) -> None:
+            stages.append({"stage": stage, "result": result})
+
+        def finish(
+            *,
+            completed: bool,
+            stopped: bool,
+            reason: str,
+        ) -> dict[str, Any]:
+            context.checkpoint(
+                "complete",
+                progress=1.0,
+                message=(
+                    "Unlimited lottery automation completed."
+                    if completed
+                    else "Unlimited lottery automation stopped."
+                ),
+            )
+            return {
+                "setting_name": setting_name,
+                "completed": completed,
+                "stopped": stopped,
+                "reason": reason,
+                "giftbox_cycles": giftbox_cycles,
+                "draw_count": draw_count,
+                "receive_batches": receive_batches,
+                "stages": stages,
+            }
+
+        while True:
+            context.checkpoint(
+                "lottery_cycle",
+                message=f"Running unlimited lottery cycle {giftbox_cycles + 1}.",
+            )
+            draw_result = draw_handler(context, draw_payload)
+            draw_count += int(draw_result.get("draw_count") or 0)
+            record("draw", draw_result)
+            draw_reason = str(draw_result.get("reason") or "draw_stopped")
+            if draw_result.get("completed") is True:
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason=draw_reason,
+                )
+            if draw_reason != "giftbox_full":
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=draw_reason,
+                )
+            if giftbox_cycles >= max_giftbox_cycles:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="giftbox_cycle_limit",
+                )
+
+            giftbox_result = giftbox_handler(context, giftbox_payload)
+            receive_batches += int(giftbox_result.get("receive_batches") or 0)
+            record("receive_giftbox", giftbox_result)
+            if giftbox_result.get("completed") is not True:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=str(
+                        giftbox_result.get("reason") or "giftbox_receive_stopped"
+                    ),
+                )
+
+            navigate_result = navigate_handler(context, navigate_payload)
+            record("navigate", navigate_result)
+            if navigate_result.get("completed") is not True:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=str(
+                        navigate_result.get("reason") or "navigation_stopped"
+                    ),
+                )
+            giftbox_cycles += 1
+
+    return handler
+
+
+def register_lottery_run_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: LotteryRecognizer,
+) -> None:
+    if job_manager.has_kind(LOTTERY_RUN_JOB_KIND):
+        return
+    job_manager.register(
+        LOTTERY_RUN_JOB_KIND,
+        create_lottery_run_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
 def _setting_name(payload: dict[str, Any]) -> str:
     setting_name = payload.get("setting_name")
     if not isinstance(setting_name, str) or not setting_name.strip():
@@ -688,3 +876,13 @@ def _stars(value: object) -> list[int]:
     ):
         raise ValueError("stars must be a non-empty list containing 3, 4, or 5.")
     return sorted(set(value))
+
+
+def _copy_option(
+    source: dict[str, Any],
+    destination: dict[str, Any],
+    source_key: str,
+    destination_key: str,
+) -> None:
+    if source_key in source:
+        destination[destination_key] = source[source_key]
