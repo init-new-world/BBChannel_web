@@ -34,6 +34,7 @@ from webapp.automation import (
     register_expball_inspect_job,
     register_expball_navigate_job,
     register_expball_run_job,
+    register_expball_store_all_job,
     register_expball_sell_job,
     register_expball_storage_job,
     register_expball_summon_job,
@@ -208,6 +209,12 @@ def create_app(
         expball_recognizer,
     )
     register_expball_run_job(
+        job_manager,
+        script_data,
+        device_service,
+        expball_recognizer,
+    )
+    register_expball_store_all_job(
         job_manager,
         script_data,
         device_service,

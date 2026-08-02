@@ -63,6 +63,11 @@ from webapp.automation.expball_run import (
     create_expball_run_handler,
     register_expball_run_job,
 )
+from webapp.automation.expball_store_all import (
+    EXPBALL_STORE_ALL_JOB_KIND,
+    create_expball_store_all_handler,
+    register_expball_store_all_job,
+)
 from webapp.automation.lottery import (
     LOTTERY_DRAW_JOB_KIND,
     LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
@@ -121,6 +126,7 @@ __all__ = [
     "EXPBALL_INSPECT_JOB_KIND",
     "EXPBALL_NAVIGATE_JOB_KIND",
     "EXPBALL_RUN_JOB_KIND",
+    "EXPBALL_STORE_ALL_JOB_KIND",
     "EXPBALL_SELL_JOB_KIND",
     "EXPBALL_STORAGE_JOB_KIND",
     "EXPBALL_SUMMON_JOB_KIND",
@@ -143,6 +149,7 @@ __all__ = [
     "create_expball_inspect_handler",
     "create_expball_navigate_handler",
     "create_expball_run_handler",
+    "create_expball_store_all_handler",
     "create_expball_sell_handler",
     "create_expball_storage_handler",
     "create_expball_summon_handler",
@@ -169,6 +176,7 @@ __all__ = [
     "register_expball_inspect_job",
     "register_expball_navigate_job",
     "register_expball_run_job",
+    "register_expball_store_all_job",
     "register_expball_sell_job",
     "register_expball_storage_job",
     "register_expball_summon_job",

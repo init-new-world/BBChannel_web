@@ -859,7 +859,7 @@ async function runExpballStorage() {
   if (!settingName) {
     return;
   }
-  await enqueueJob("event.expball.storage", {
+  await enqueueJob("event.expball.store-all", {
     setting_name: settingName,
   });
 }
@@ -1216,6 +1216,13 @@ function renderJobResult(job) {
     els.jobResult.textContent = [
       `${summonCount} FP ${summonCount === 1 ? "batch" : "batches"}`,
       result.completed ? "Completed" : "Stopped",
+      humanizeResultValue(result.reason || "unknown"),
+    ].join(" · ");
+    return;
+  }
+  if (job.kind === "event.expball.store-all") {
+    els.jobResult.textContent = [
+      result.completed ? "EXP stored" : "EXP storage stopped",
       humanizeResultValue(result.reason || "unknown"),
     ].join(" · ");
     return;
