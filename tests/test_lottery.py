@@ -1,9 +1,16 @@
+from io import BytesIO
+
+from PIL import Image
+
 from webapp.automation.lottery import (
     LOTTERY_DRAW_JOB_KIND,
+    LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
     LOTTERY_INSPECT_JOB_KIND,
     create_lottery_draw_handler,
+    create_lottery_giftbox_receive_handler,
     create_lottery_inspect_handler,
     register_lottery_draw_job,
+    register_lottery_giftbox_receive_job,
     register_lottery_inspect_job,
 )
 from webapp.core.models import MatchResult, OperationResult
@@ -63,6 +70,69 @@ def test_lottery_recognizer_prioritizes_giftbox_full_over_draw_state():
         for candidate in recognition.candidates
         if candidate["template_path"] == "unlimitedPool/CH/ge.png"
     )
+
+
+def test_lottery_giftbox_recognizer_reports_filter_toggle_states():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "unlimitedPool/CH"
+            assert limit == 100
+            return {
+                "entries": [
+                    {"path": f"{prefix}/decide.png"},
+                    {"path": f"{prefix}/servant_off.png"},
+                    {"path": f"{prefix}/servant_on.png"},
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            matched = {
+                "unlimitedPool/CH/decide.png",
+                "unlimitedPool/CH/servant_on.png",
+            }
+            return [
+                _match(
+                    candidate["template_path"],
+                    candidate["template_path"] in matched,
+                    0.95 if candidate["template_path"] in matched else 0.2,
+                )
+                for candidate in candidates
+            ]
+
+    class Recognizer(LotteryRecognizer):
+        def _star_filter_states(self, _screenshot):
+            return {3: True, 4: False, 5: True}
+
+    report = Recognizer(Resources(), Recognition()).recognize_giftbox(
+        b"screen",
+        "CH",
+    )
+
+    assert report["state"] == "filter_dialog"
+    assert report["status"] == "actionable"
+    assert report["servant_exp_enabled"] is True
+    assert report["star_filters"] == {3: True, 4: False, 5: True}
+    assert report["receive_all_enabled"] is None
+
+
+def test_lottery_giftbox_recognizer_reads_star_filter_colors():
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    states = {3: True, 4: False, 5: True}
+    rois = {
+        3: (580, 467, 613, 500),
+        4: (393, 467, 426, 500),
+        5: (205, 467, 239, 500),
+    }
+    for star, roi in rois.items():
+        color = (61, 112, 196) if states[star] else (215, 215, 215)
+        screenshot.paste(color, roi)
+    encoded = BytesIO()
+    screenshot.save(encoded, format="PNG")
+
+    recognizer = LotteryRecognizer(object(), object())
+
+    assert recognizer._star_filter_states(encoded.getvalue()) == states
 
 
 class _ScriptData:
@@ -216,6 +286,125 @@ def test_lottery_draw_stops_when_giftbox_is_full():
     assert device.taps == []
 
 
+def test_lottery_giftbox_receive_configures_filters_and_receives_batches():
+    reports = iter(
+        (
+            {
+                "state": "giftbox_full",
+                "status": "actionable",
+                "reason": None,
+            },
+            {
+                "state": "giftbox_loaded",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": None,
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: True, 5: True},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": False,
+                "star_filters": {3: False, 4: False, 5: False},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: False, 4: False, 5: False},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: False, 5: False},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: True, 5: False},
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "receive_confirm",
+                "status": "actionable",
+                "reason": None,
+            },
+            {
+                "state": "receive_all_off",
+                "status": "complete",
+                "reason": "giftbox_empty",
+                "receive_all_enabled": False,
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize_giftbox(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(reports)
+
+    device = _Device()
+    result = create_lottery_giftbox_receive_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "stars": [3, 4],
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "giftbox_empty"
+    assert result["receive_batches"] == 1
+    assert result["stars"] == [3, 4]
+    assert result["actions"] == [
+        "open_giftbox",
+        "open_filter",
+        "clear_filters",
+        "enable_servant_exp",
+        "toggle_star_3",
+        "toggle_star_4",
+        "apply_filter",
+        "receive_all",
+        "confirm_receive",
+    ]
+    assert device.taps == [
+        (860, 565),
+        (1157, 128),
+        (225, 637),
+        (535, 250),
+        (640, 483),
+        (453, 483),
+        (1060, 635),
+        (1150, 222),
+        (837, 563),
+    ]
+
+
 def test_lottery_jobs_require_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_lottery_inspect_job(
@@ -230,8 +419,16 @@ def test_lottery_jobs_require_connected_device(tmp_path):
             _Device(),
             object(),
         )
+        register_lottery_giftbox_receive_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
 
         assert manager.has_kind(LOTTERY_INSPECT_JOB_KIND)
         assert manager.requires_device(LOTTERY_INSPECT_JOB_KIND) is True
         assert manager.has_kind(LOTTERY_DRAW_JOB_KIND)
         assert manager.requires_device(LOTTERY_DRAW_JOB_KIND) is True
+        assert manager.has_kind(LOTTERY_GIFTBOX_RECEIVE_JOB_KIND)
+        assert manager.requires_device(LOTTERY_GIFTBOX_RECEIVE_JOB_KIND) is True

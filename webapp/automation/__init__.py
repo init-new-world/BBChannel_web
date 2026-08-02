@@ -55,10 +55,13 @@ from webapp.automation.expball_sell import (
 )
 from webapp.automation.lottery import (
     LOTTERY_DRAW_JOB_KIND,
+    LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
     LOTTERY_INSPECT_JOB_KIND,
     create_lottery_draw_handler,
+    create_lottery_giftbox_receive_handler,
     create_lottery_inspect_handler,
     register_lottery_draw_job,
+    register_lottery_giftbox_receive_job,
     register_lottery_inspect_job,
 )
 from webapp.automation.program import compile_battle_program
@@ -107,6 +110,7 @@ __all__ = [
     "FREE_QUEST_ENTER_JOB_KIND",
     "MAIN_STORY_ENTER_JOB_KIND",
     "LOTTERY_DRAW_JOB_KIND",
+    "LOTTERY_GIFTBOX_RECEIVE_JOB_KIND",
     "LOTTERY_INSPECT_JOB_KIND",
     "compile_battle_program",
     "create_assist_handler",
@@ -125,6 +129,7 @@ __all__ = [
     "create_free_quest_entry_handler",
     "create_main_story_entry_handler",
     "create_lottery_draw_handler",
+    "create_lottery_giftbox_receive_handler",
     "create_lottery_inspect_handler",
     "create_recovery_handler",
     "create_stage_handler",
@@ -145,6 +150,7 @@ __all__ = [
     "register_free_quest_entry_job",
     "register_main_story_entry_job",
     "register_lottery_draw_job",
+    "register_lottery_giftbox_receive_job",
     "register_lottery_inspect_job",
     "register_recovery_job",
     "register_stage_job",

@@ -49,6 +49,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "event.expball.summon",
                     "event.lottery.draw",
                     "event.lottery.inspect",
+                    "event.lottery.receive-giftbox",
                 ]
             }
             assert client.get(f"/api/jobs/{job_id}").json()["job"]["status"] == "succeeded"
