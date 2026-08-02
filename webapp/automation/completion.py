@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from time import monotonic
 from typing import Any
 
@@ -60,7 +59,7 @@ def create_completion_handler(
         attempts = 0
         actions: list[str] = []
         drop_count = initial_drop_count
-        observed_drop_frames: set[str] = set()
+        observed_drop_bounds: list[tuple[int, int, int, int]] = []
 
         while monotonic() - started <= timeout_seconds:
             elapsed = monotonic() - started
@@ -82,13 +81,7 @@ def create_completion_handler(
             ):
                 actions.append("reconnect")
                 continue
-            screenshot_digest = hashlib.sha256(screenshot).hexdigest()
-            if (
-                drop_limit > 0
-                and drop_template is not None
-                and screenshot_digest not in observed_drop_frames
-            ):
-                observed_drop_frames.add(screenshot_digest)
+            if drop_limit > 0 and drop_template is not None:
                 drop_matches = recognition.match_template_all(
                     screenshot,
                     drop_template,
@@ -96,12 +89,16 @@ def create_completion_handler(
                     scales=(1.0, 0.75, 2 / 3, 0.5),
                     max_results=100,
                 )
-                drop_count += len(drop_matches)
+                new_drop_matches = _unseen_drop_matches(
+                    drop_matches,
+                    observed_drop_bounds,
+                )
+                drop_count += len(new_drop_matches)
                 context.emit(
                     "recognition",
                     "Configured battle drops counted.",
                     data={
-                        "frame_drop_count": len(drop_matches),
+                        "frame_drop_count": len(new_drop_matches),
                         "drop_count": drop_count,
                         "drop_limit": drop_limit,
                     },
@@ -434,3 +431,25 @@ def _resolve_drop_template(
         if str(entry["path"]).rsplit("/", 1)[-1].casefold() == filename.casefold()
     ]
     return matches[0] if matches else None
+
+
+def _unseen_drop_matches(
+    matches: list[Any],
+    observed_bounds: list[tuple[int, int, int, int]],
+) -> list[Any]:
+    unseen = []
+    for match in matches:
+        left, top = match.top_left
+        width, height = match.size
+        bounds = (left, top, width, height)
+        center_x = left + width / 2
+        center_y = top + height / 2
+        if any(
+            abs(center_x - (seen_left + seen_width / 2)) <= max(width, seen_width) / 2
+            and abs(center_y - (seen_top + seen_height / 2)) <= max(height, seen_height) / 2
+            for seen_left, seen_top, seen_width, seen_height in observed_bounds
+        ):
+            continue
+        observed_bounds.append(bounds)
+        unseen.append(match)
+    return unseen

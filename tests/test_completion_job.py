@@ -390,6 +390,35 @@ def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
     assert result.result["drop_count"] == 3
 
 
+def test_completion_counts_animated_drop_screen_only_once(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    drop_item = _pattern((40, 40), (165, 105, 45))
+    first_drop_frame = base.copy()
+    first_drop_frame.paste(drop_item, (300, 250))
+    first_drop_frame.paste(drop_item, (700, 450))
+    first_drop_frame.paste(_pattern((100, 40), (80, 65, 150)), (600, 500))
+    animated_drop_frame = first_drop_frame.copy()
+    animated_drop_frame.putpixel((50, 50), (19, 24, 32))
+    animated_drop_frame.paste(
+        _pattern((120, 50), (35, 120, 170)),
+        (900, 600),
+    )
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (first_drop_frame, {"type": "tap", "x": 650, "y": 520}),
+            (animated_drop_frame, None),
+        ],
+        config={"dropStopNum": 3, "dropImage": "assets/drop/item.png"},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is True
+    assert result.result["drop_count"] == 2
+
+
 @pytest.mark.parametrize(
     ("template_size", "template_color", "reason", "action"),
     [
