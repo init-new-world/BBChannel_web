@@ -282,6 +282,31 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
     }
 
 
+def test_get_setting_plan_flattens_grand_assist_equip_groups(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(
+        tmp_path / "settings" / "grand.json",
+        {
+            "server": "CH",
+            "assistMode": "冠位助战",
+            "assistEquip": [
+                ["Holmes", "Bond CE", "Tea Time"],
+                None,
+                ["Tea Time", "Event CE", "Holmes"],
+            ],
+        },
+    )
+
+    plan = ScriptDataService(tmp_path).get_setting_plan("grand")
+
+    assert plan["assist"]["equip_names"] == [
+        "Holmes",
+        "Bond CE",
+        "Tea Time",
+        "Event CE",
+    ]
+
+
 def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
     _write_json(tmp_path / "servant_info_CH.json", {})
     _write_json(

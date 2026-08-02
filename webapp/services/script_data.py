@@ -447,13 +447,7 @@ class ScriptDataService:
                 servant_class = class_name if isinstance(class_name, str) else None
                 break
 
-        equip_value = config.get("assistEquip")
-        if isinstance(equip_value, str):
-            equip_names = [equip_value] if equip_value else []
-        elif isinstance(equip_value, list):
-            equip_names = [name for name in equip_value if isinstance(name, str) and name]
-        else:
-            equip_names = []
+        equip_names = self._assist_equip_names(config.get("assistEquip"))
 
         skill_levels = config.get("skillsLevel")
         return {
@@ -475,6 +469,22 @@ class ScriptDataService:
             "bond_equip_type": config.get("jbType", "任意"),
             "all_not_skip": bool(config.get("allNotSkip", 1)),
         }
+
+    @staticmethod
+    def _assist_equip_names(value: Any) -> list[str]:
+        names: list[str] = []
+
+        def collect(entry: Any) -> None:
+            if isinstance(entry, str):
+                if entry and entry not in names:
+                    names.append(entry)
+                return
+            if isinstance(entry, list):
+                for item in entry:
+                    collect(item)
+
+        collect(value)
+        return names
 
     @staticmethod
     def _plan_run(config: dict[str, Any]) -> dict[str, Any]:
