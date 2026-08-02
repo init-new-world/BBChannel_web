@@ -173,6 +173,41 @@ def test_expball_recognizer_exposes_selection_and_result_controls():
     assert report["matches"][1]["recommended_action"] == "close_result"
 
 
+def test_expball_recognizer_distinguishes_summon_confirmation_and_result():
+    names = ["decide", "bianhuan", "again10_0", "again10_1", "close"]
+
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/CH"
+            assert limit == 200
+            return {
+                "entries": [
+                    {"path": f"expball/CH/{name}.png"}
+                    for name in names
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [
+                _match(candidate["template_path"], True, 0.99 - index * 0.01)
+                for index, candidate in enumerate(candidates)
+            ]
+
+    report = ExpBallRecognizer(Resources(), Recognition()).recognize(
+        b"summon-result",
+        "CH",
+    )
+    matches = {match["name"]: match for match in report["matches"]}
+
+    assert matches["decide"]["recommended_action"] == "confirm_summon"
+    assert matches["bianhuan"]["status"] == "observed"
+    assert matches["again10_0"]["status"] == "observed"
+    assert matches["again10_0"]["recommended_action"] is None
+    assert matches["again10_1"]["recommended_action"] == "summon_again"
+    assert matches["close"]["recommended_action"] == "close_summon_result"
+
+
 class _ScriptData:
     def get_setting_plan(self, name):
         assert name == "demo"
@@ -279,6 +314,36 @@ def _report(state, flow, status, *, action=None, reason=None, center=(790, 530))
     }
 
 
+def _summon_report(state, *names, action=None, status="actionable"):
+    centers = {
+        "callfree": (820, 600),
+        "call10": (800, 610),
+        "decide": (830, 570),
+        "bianhuan": (350, 480),
+        "again10": (760, 680),
+        "again10_1": (760, 680),
+        "close": (90, 55),
+        "boxfull": (790, 530),
+    }
+    flow = "confirmation" if state == "decide" else "summon"
+    return {
+        "server": "CH",
+        "state": state,
+        "flow": flow,
+        "status": status,
+        "reason": None,
+        "recommended_action": action,
+        "matches": [
+            {
+                "name": name,
+                "center": list(centers[name]),
+                "size": [180, 60],
+            }
+            for name in names
+        ],
+    }
+
+
 def _storage_report(*names):
     centers = {
         "in_store": (310, 120),
@@ -310,24 +375,30 @@ def _storage_report(*names):
 def test_expball_summon_runs_until_inventory_is_full():
     reports = iter(
         (
-            _report(
+            _summon_report(
                 "callfree",
-                "summon",
-                "actionable",
+                "callfree",
                 action="summon_free_ten",
-                center=(820, 600),
             ),
-            _report(
-                "again10",
-                "summon",
-                "actionable",
-                action="summon_again",
-                center=(850, 620),
+            _summon_report(
+                "decide",
+                "decide",
+                action="confirm_summon",
             ),
-            _report(
+            _summon_report(
+                "bianhuan",
+                "bianhuan",
+                "close",
+                status="observed",
+            ),
+            _summon_report(
+                "call10",
+                "call10",
+                action="summon_ten",
+            ),
+            _summon_report(
                 "boxfull",
-                "summon",
-                "actionable",
+                "boxfull",
                 action="handle_full_box",
             ),
         )
@@ -357,9 +428,14 @@ def test_expball_summon_runs_until_inventory_is_full():
     assert result["completed"] is False
     assert result["stopped"] is True
     assert result["reason"] == "box_full"
-    assert result["summons"] == 2
-    assert result["actions"] == ["summon_free_ten", "summon_again"]
-    assert device.taps == [(820, 600), (850, 620)]
+    assert result["summons"] == 1
+    assert result["actions"] == [
+        "summon_free_ten",
+        "confirm_summon",
+        "close_summon_result",
+        "summon_ten",
+    ]
+    assert device.taps == [(820, 600), (830, 570), (90, 55), (800, 610)]
     assert context.events[-1][0:2] == ("checkpoint", "complete")
 
 
@@ -423,16 +499,29 @@ def test_expball_summon_stops_when_device_rejects_tap():
 
 
 def test_expball_summon_defaults_to_ten_batches():
+    reports = [
+        _summon_report("call10", "call10", action="summon_ten"),
+        _summon_report("decide", "decide", action="confirm_summon"),
+    ]
+    for batch in range(1, 11):
+        reports.append(
+            _summon_report(
+                "again10_1",
+                "bianhuan",
+                "again10_1",
+                action="summon_again",
+            )
+        )
+        if batch < 10:
+            reports.append(
+                _summon_report("decide", "decide", action="confirm_summon")
+            )
+    reports = iter(reports)
+
     class Recognizer:
         def recognize(self, _screenshot, _server, *, threshold):
             assert threshold == 0.84
-            return _report(
-                "call10",
-                "summon",
-                "actionable",
-                action="summon_ten",
-                center=(800, 610),
-            )
+            return next(reports)
 
     device = _Device()
     result = create_expball_summon_handler(
@@ -450,7 +539,9 @@ def test_expball_summon_defaults_to_ten_batches():
     assert result["completed"] is True
     assert result["reason"] == "summon_limit"
     assert result["summons"] == 10
-    assert len(device.taps) == 10
+    assert len(device.taps) == 20
+    assert result["actions"].count("confirm_summon") == 10
+    assert result["actions"].count("summon_again") == 9
 
 
 def test_expball_storage_executes_current_selection_and_confirms():

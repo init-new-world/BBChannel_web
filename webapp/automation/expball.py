@@ -17,7 +17,7 @@ from webapp.services.script_data import ScriptDataService
 EXPBALL_INSPECT_JOB_KIND = "event.expball.inspect"
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
-_SUMMON_ACTIONS = {"summon_free_ten", "summon_ten", "summon_again"}
+_SUMMON_REQUEST_ACTIONS = {"summon_free_ten", "summon_ten"}
 
 
 def create_expball_inspect_handler(
@@ -121,6 +121,9 @@ def create_expball_summon_handler(
         attempts = 0
         summons = 0
         actions: list[str] = []
+        phase = "request"
+        pending_free_summon = False
+        result_counted = False
         last_state = None
         same_state_count = 0
         idle_polls = 0
@@ -153,6 +156,48 @@ def create_expball_summon_handler(
                 report=report,
             )
 
+        def tap_match(
+            report: dict[str, Any],
+            name: str,
+            role: str,
+        ) -> bool:
+            target = next(
+                (
+                    match
+                    for match in report.get("matches", [])
+                    if isinstance(match, dict) and match.get("name") == name
+                ),
+                None,
+            )
+            if not isinstance(target, dict):
+                return False
+            center = target.get("center")
+            if not isinstance(center, list) or len(center) != 2:
+                return False
+            x, y = randomized_touch_point(
+                center,
+                enabled=random_touch,
+                size=target.get("size"),
+            )
+            operation = device_service.tap(x, y)
+            context.emit(
+                "device_action",
+                "Executed a friendship-point summon action.",
+                data={
+                    "role": role,
+                    "state": report.get("state"),
+                    "phase": phase,
+                    "operation": operation.to_dict(),
+                },
+            )
+            if not operation.ok:
+                return False
+            actions.append(role)
+            context.sleep(
+                randomized_wait_seconds(action_wait_seconds, random_time)
+            )
+            return True
+
         while monotonic() - started <= timeout_seconds:
             attempts += 1
             context.checkpoint(
@@ -168,14 +213,19 @@ def create_expball_summon_handler(
             context.emit(
                 "expball_state",
                 "Friendship-point summon state was recognized.",
-                data={"attempt": attempts, **report},
+                data={"attempt": attempts, "phase": phase, **report},
             )
             state = str(report.get("state") or "unknown")
             flow = str(report.get("flow") or "unknown")
             status = str(report.get("status") or "unknown")
             action = report.get("recommended_action")
+            matches = {
+                match.get("name"): match
+                for match in report.get("matches", [])
+                if isinstance(match, dict) and isinstance(match.get("name"), str)
+            }
 
-            if action == "handle_full_box":
+            if "boxfull" in matches or action == "handle_full_box":
                 return finish(
                     completed=False,
                     stopped=True,
@@ -189,31 +239,11 @@ def create_expball_summon_handler(
                     reason=str(report.get("reason") or "blocked"),
                     report=report,
                 )
-            if flow not in {"summon", "unknown"}:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="outside_summon_flow",
-                    report=report,
-                )
-
-            if status != "actionable":
-                idle_polls += 1
-                if idle_polls >= max_idle_polls:
-                    return finish(
-                        completed=False,
-                        stopped=True,
-                        reason="no_actionable_summon",
-                        report=report,
-                    )
-                context.sleep(randomized_wait_seconds(poll_interval, random_time))
-                continue
-
-            idle_polls = 0
-            if state == last_state:
+            action_state = (phase, state)
+            if action_state == last_state:
                 same_state_count += 1
             else:
-                last_state = state
+                last_state = action_state
                 same_state_count = 1
             if same_state_count > max_same_state:
                 return finish(
@@ -222,70 +252,111 @@ def create_expball_summon_handler(
                     reason="state_stalled",
                     report=report,
                 )
-            if not isinstance(action, str) or action not in _SUMMON_ACTIONS:
+            acted = False
+            if phase == "request":
+                if flow not in {"summon", "unknown"}:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="outside_summon_flow",
+                        report=report,
+                    )
+                if (
+                    isinstance(action, str)
+                    and action in _SUMMON_REQUEST_ACTIONS
+                    and state in matches
+                ):
+                    if not tap_match(report, state, action):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    pending_free_summon = action == "summon_free_ten"
+                    result_counted = False
+                    phase = "confirm"
+                    acted = True
+            elif phase == "confirm":
+                if "decide" in matches:
+                    if not tap_match(report, "decide", "confirm_summon"):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    phase = "result"
+                    acted = True
+            elif phase == "result" and "bianhuan" in matches:
+                if not result_counted:
+                    summons += 1
+                    result_counted = True
+                if pending_free_summon:
+                    if "close" in matches:
+                        if not tap_match(
+                            report,
+                            "close",
+                            "close_summon_result",
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        phase = "request"
+                        pending_free_summon = False
+                        result_counted = False
+                        acted = True
+                        if summons >= max_summons:
+                            return finish(
+                                completed=True,
+                                stopped=False,
+                                reason="summon_limit",
+                                report=report,
+                            )
+                elif summons >= max_summons:
+                    return finish(
+                        completed=True,
+                        stopped=False,
+                        reason="summon_limit",
+                        report=report,
+                    )
+                elif "again10_1" in matches or "again10" in matches:
+                    target_name = (
+                        "again10_1" if "again10_1" in matches else "again10"
+                    )
+                    if not tap_match(report, target_name, "summon_again"):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    phase = "confirm"
+                    result_counted = False
+                    acted = True
+                elif "again10_0" in matches:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="summon_unavailable",
+                        report=report,
+                    )
+
+            if acted:
+                idle_polls = 0
+                continue
+            idle_polls += 1
+            if idle_polls >= max_idle_polls:
                 return finish(
                     completed=False,
                     stopped=True,
-                    reason="invalid_recognition_result",
+                    reason="no_actionable_summon",
                     report=report,
                 )
-            primary = next(
-                (
-                    match
-                    for match in report.get("matches", [])
-                    if match.get("name") == state
-                ),
-                None,
-            )
-            if not isinstance(primary, dict):
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="invalid_recognition_result",
-                    report=report,
-                )
-            center = primary.get("center")
-            if not isinstance(center, list) or len(center) != 2:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="invalid_recognition_result",
-                    report=report,
-                )
-            x, y = randomized_touch_point(
-                center,
-                enabled=random_touch,
-                size=primary.get("size"),
-            )
-            operation = device_service.tap(x, y)
-            context.emit(
-                "device_action",
-                "Executed a friendship-point summon action.",
-                data={
-                    "role": action,
-                    "state": state,
-                    "operation": operation.to_dict(),
-                },
-            )
-            if not operation.ok:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="device_action_failed",
-                    report=report,
-                )
-            summons += 1
-            actions.append(action)
-            if summons >= max_summons:
-                return finish(
-                    completed=True,
-                    stopped=False,
-                    reason="summon_limit",
-                    report=report,
-                )
-            context.sleep(
-                randomized_wait_seconds(action_wait_seconds, random_time)
-            )
+            context.sleep(randomized_wait_seconds(poll_interval, random_time))
 
         raise TimeoutError(
             "Friendship-point summoning did not finish within "
