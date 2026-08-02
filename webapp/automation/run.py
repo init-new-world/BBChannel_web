@@ -259,9 +259,13 @@ def create_full_run_handler(
                     "assist",
                     select_assist,
                     {
-                        "setting_name": normalized_name,
-                        "recover_ap": not clearing_ap,
                         **stage_options["assist"],
+                        "setting_name": normalized_name,
+                        "apple": stage_options["assist"].get(
+                            "apple",
+                            stage_options["prepare"].get("apple", "gold"),
+                        ),
+                        "recover_ap": not clearing_ap,
                     },
                 )
                 if resume_stage is not None:

@@ -271,10 +271,17 @@ def test_full_run_stops_clear_ap_when_assist_reports_ap_empty():
 
     result = handler(
         _Context(),
-        {"setting_name": "demo", "max_runs": 1, "max_clear_runs": 2},
+        {
+            "setting_name": "demo",
+            "max_runs": 1,
+            "max_clear_runs": 2,
+            "assist": {"recover_ap": True},
+            "prepare": {"apple": "silver"},
+        },
     )
 
     assert [payload["recover_ap"] for payload in assist_payloads] == [True, False]
+    assert [payload["apple"] for payload in assist_payloads] == ["silver", "silver"]
     assert prepare_calls == 1
     assert result["runs_completed"] == 1
     assert result["cleared_ap"] is True
