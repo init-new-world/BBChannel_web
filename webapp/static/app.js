@@ -114,6 +114,7 @@ const els = {
   lotteryStar5: document.querySelector("#lottery-star-5"),
   inspectExpball: document.querySelector("#inspect-expball"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
+  expballOverflowAction: document.querySelector("#expball-overflow-action"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
   runExpballSell: document.querySelector("#run-expball-sell"),
@@ -846,9 +847,10 @@ async function runExpballSummon() {
   if (!settingName) {
     return;
   }
-  await enqueueJob("event.expball.summon", {
+  await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
+    overflow_action: els.expballOverflowAction.value,
   });
 }
 
@@ -1199,6 +1201,16 @@ function renderJobResult(job) {
     els.jobResult.textContent = details.join(" · ");
     return;
   }
+  if (job.kind === "event.expball.run") {
+    const overflowCycles = result.overflow_cycles || 0;
+    els.jobResult.textContent = [
+      `${result.summons || 0}/${result.max_summons || 0} FP batches`,
+      result.completed ? "Completed" : "Stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${overflowCycles} overflow ${overflowCycles === 1 ? "cycle" : "cycles"}`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.summon") {
     const summonCount = result.summons || 0;
     els.jobResult.textContent = [
@@ -1444,6 +1456,7 @@ function updateControls() {
     || !supportsExpball
     || hasRunningJob;
   els.fpSummonBatches.disabled = !supportsExpball || hasRunningJob;
+  els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

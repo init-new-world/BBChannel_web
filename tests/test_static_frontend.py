@@ -71,6 +71,7 @@ def test_operator_console_references_api_controls():
     assert 'id="inspect-expball"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
+    assert 'id="expball-overflow-action"' in index
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
@@ -88,6 +89,7 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.lottery.inspect"' in script
     assert 'job.kind === "event.lottery.run"' in script
     assert 'job.kind === "event.expball.inspect"' in script
+    assert 'job.kind === "event.expball.run"' in script
     assert 'job.kind === "event.expball.summon"' in script
     assert 'job.kind === "event.expball.storage"' in script
     assert 'job.kind === "event.expball.sell"' in script
@@ -103,8 +105,9 @@ def test_operator_console_references_api_controls():
     assert "pay_slot: readNumber(els.lotteryPaySlot)" in script
     assert "stars: selectedLotteryStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script
-    assert 'enqueueJob("event.expball.summon"' in script
+    assert 'enqueueJob("event.expball.run"' in script
     assert "max_summons: readNumber(els.fpSummonBatches)" in script
+    assert "overflow_action: els.expballOverflowAction.value" in script
     assert 'enqueueJob("event.expball.storage"' in script
     assert 'enqueueJob("event.expball.sell"' in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
