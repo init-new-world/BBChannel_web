@@ -467,8 +467,8 @@ def test_full_run_recovers_timeout_and_resumes_current_battle_stage():
 
     handler = create_full_run_handler(
         _ScriptData(first_battle_set=True, game_crash_restart=True),
-        ordinary("assist"),
-        ordinary("prepare", {"ready": True}),
+        ordinary("assist", {"selected": "support"}),
+        ordinary("prepare", {"ready": True, "team": "checked"}),
         battle,
         ordinary("complete", {"complete": True, "drop_count": 0}),
         recover_game=ordinary(
@@ -493,6 +493,12 @@ def test_full_run_recovers_timeout_and_resumes_current_battle_stage():
         True,
         False,
     ]
+    assert result["runs"][0]["assist"] == {"selected": "support"}
+    assert result["runs"][0]["prepare"] == {
+        "ready": True,
+        "team": "checked",
+    }
+    assert result["runs"][0]["battle"] == {"executed": True}
     assert result["recoveries"] == [
         {
             "trigger_stage": "battle",

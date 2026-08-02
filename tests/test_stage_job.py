@@ -62,7 +62,7 @@ def test_stage_handler_prefers_stronger_assist_match_over_completion_false_posit
     class ConflictingRecognition:
         def match_template(self, _screen, template_path, **_options):
             confidence = {
-                "battle/CH/battleFinish.png": 0.93,
+                "battle/CH/battleFinish.png": 0.99,
                 "battle/CH/listupdatebtn.png": 0.997,
             }.get(template_path, 0.2)
             return _Match(confidence >= 0.85, confidence)

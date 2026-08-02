@@ -10,7 +10,6 @@ from webapp.services.script_data import ScriptDataService
 
 
 BATTLE_DETECT_STAGE_JOB_KIND = "battle.detect-stage"
-CERTAIN_STAGE_CONFIDENCE = 0.99
 
 
 def create_stage_handler(
@@ -130,10 +129,6 @@ def create_stage_handler(
                     "matched_template": template_path,
                     "confidence": confidence,
                 }
-                if comparable_confidence >= CERTAIN_STAGE_CONFIDENCE:
-                    break
-            if best_confidence >= CERTAIN_STAGE_CONFIDENCE:
-                break
 
         if best_response is not None:
             if context is not None:

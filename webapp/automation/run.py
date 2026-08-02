@@ -236,6 +236,11 @@ def create_full_run_handler(
         if initial_stage not in battle_stages:
             raise RuntimeError("Quest entry did not reach the battle flow.")
 
+        current_run_results: dict[str, dict[str, Any]] = {
+            "assist": {},
+            "prepare": {"ready": True},
+            "battle": {},
+        }
         while run_number <= max_runs or (clear_ap and clear_runs < max_clear_runs):
             clearing_ap = run_number > max_runs
             current_stage = resume_stage or (
@@ -243,7 +248,7 @@ def create_full_run_handler(
             )
             resume_stage = None
             progress = min(completed_runs / max(max_runs, 1), 0.95)
-            assist_result = {}
+            assist_result = current_run_results["assist"]
             if current_stage == "assist":
                 context.checkpoint(
                     "run.select_assist",
@@ -257,8 +262,9 @@ def create_full_run_handler(
                 )
                 if resume_stage is not None:
                     continue
+                current_run_results["assist"] = assist_result
 
-            prepare_result = {"ready": True}
+            prepare_result = current_run_results["prepare"]
             if current_stage in {"assist", "prepare"}:
                 context.checkpoint(
                     "run.prepare_battle",
@@ -281,6 +287,7 @@ def create_full_run_handler(
                 )
                 if resume_stage is not None:
                     continue
+                current_run_results["prepare"] = prepare_result
             if prepare_result.get("ready") is False:
                 prepare_reason = str(
                     prepare_result.get("reason") or "battle_not_ready"
@@ -292,7 +299,7 @@ def create_full_run_handler(
                     stopped = True
                     stop_reason = prepare_reason
                 break
-            battle_result = {}
+            battle_result = current_run_results["battle"]
             if current_stage != "completion":
                 if interval_before_fight:
                     context.sleep(interval_before_fight)
@@ -319,6 +326,7 @@ def create_full_run_handler(
                 )
                 if resume_stage is not None:
                     continue
+                current_run_results["battle"] = battle_result
                 if interval_after_fight:
                     context.sleep(interval_after_fight)
 
@@ -363,6 +371,11 @@ def create_full_run_handler(
                 stop_reason = str(completion_result.get("reason") or "completion_stop")
                 break
             run_number += 1
+            current_run_results = {
+                "assist": {},
+                "prepare": {"ready": True},
+                "battle": {},
+            }
 
         if clear_ap and not cleared_ap and not stopped and clear_runs >= max_clear_runs:
             stopped = True
