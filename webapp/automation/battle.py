@@ -454,12 +454,18 @@ def _wait_for_battle_transition(
             result = {"state": "finished", "round": None}
         else:
             matched_rounds = [
-                round_number
+                (round_number, by_path[path])
                 for round_number, path in enumerate(phase_paths, start=1)
                 if by_path[path].matched
             ]
             result = (
-                {"state": "battle", "round": matched_rounds[0]}
+                {
+                    "state": "battle",
+                    "round": max(
+                        matched_rounds,
+                        key=lambda item: item[1].confidence,
+                    )[0],
+                }
                 if by_path[attack_path].matched and matched_rounds
                 else None
             )

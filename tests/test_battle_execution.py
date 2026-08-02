@@ -430,6 +430,59 @@ def test_wait_for_battle_transition_recognizes_round_or_finish(
     assert events[-1][0] == "battle_transition"
 
 
+def test_wait_for_battle_transition_uses_highest_confidence_round_match():
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+    class Match:
+        def __init__(self, template_path, confidence):
+            self.template_path = template_path
+            self.confidence = confidence
+            self.matched = confidence >= 0.85
+
+        def to_dict(self):
+            return {
+                "template_path": self.template_path,
+                "matched": self.matched,
+                "confidence": self.confidence,
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            confidences = {
+                "battle/CH/attack.png": 0.99,
+                "battle/CH/phase_1.png": 0.87,
+                "battle/CH/phase_2.png": 0.96,
+            }
+            return [
+                Match(
+                    candidate["template_path"],
+                    confidences.get(candidate["template_path"], 0.1),
+                )
+                for candidate in candidates
+            ]
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = _wait_for_battle_transition(
+        Context(),
+        Device(),
+        Recognition(),
+        "CH",
+        0.85,
+        1,
+        0,
+    )
+
+    assert result == {"state": "battle", "round": 2}
+
+
 def test_hakuno_reroll_casts_skill_until_card_need_matches():
     taps = []
     events = []
