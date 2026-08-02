@@ -887,26 +887,23 @@ def create_battle_execute_plan_handler(
 
             compiled_round = compiled_rounds[round_number]
             extra_turn = compiled_round["extra_turn"]
-            transition = None
-            if turn_number < len(turns) or extra_turn["actions"]:
-                transition = _wait_for_battle_transition(
-                    context,
-                    device_service,
-                    recognition,
-                    program["server"],
-                    threshold,
-                    timeout_seconds,
-                    poll_interval,
-                    reconnect_timing=tap_interval,
-                )
-                if transition["state"] == "finished":
-                    battle_finished = True
-                else:
-                    detected_round = int(transition["round"])
+            transition = _wait_for_battle_transition(
+                context,
+                device_service,
+                recognition,
+                program["server"],
+                threshold,
+                timeout_seconds,
+                poll_interval,
+                reconnect_timing=tap_interval,
+            )
+            if transition["state"] == "finished":
+                battle_finished = True
+            else:
+                detected_round = int(transition["round"])
             if (
                 not battle_finished
                 and turn["turn"] == last_turns[round_number]
-                and transition is not None
                 and transition["round"] == round_number
             ):
                 for extra_number in range(1, 11):

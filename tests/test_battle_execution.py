@@ -736,6 +736,105 @@ def test_execute_battle_job_runs_extra_turn_while_round_is_unchanged(tmp_path: P
     ]
 
 
+def test_execute_battle_job_uses_default_extra_turn_on_final_round(tmp_path: Path):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"Servant A": {"other_name": []}}),
+        encoding="utf-8",
+    )
+    (data / "settings" / "final-extra.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Servant A",
+                "round1_turns": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        confidence = 1.0
+
+        def __init__(self, template_path, matched=True):
+            self.template_path = template_path
+            self.matched = matched
+
+        def to_dict(self):
+            return {"template_path": self.template_path, "matched": self.matched}
+
+    class Recognition:
+        transition_calls = 0
+
+        def match_template(
+            self,
+            _screenshot,
+            template_path,
+            _threshold=None,
+            **_options,
+        ):
+            return Match(template_path, not template_path.endswith("/reconnect.png"))
+
+        def match_templates(self, _screenshot, candidates):
+            paths = [candidate["template_path"] for candidate in candidates]
+            if not any("phase_" in path or "battleFinish" in path for path in paths):
+                return [Match(path) for path in paths]
+            self.transition_calls += 1
+            matched_paths = (
+                {"battle/CH/attack.png", "battle/CH/phase_1.png"}
+                if self.transition_calls == 1
+                else {"battle/CH/battleFinish.png"}
+            )
+            return [Match(path, path in matched_paths) for path in paths]
+
+    recognition = Recognition()
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            recognition,
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "final-extra",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:final-extra",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert recognition.transition_calls == 2
+    assert taps == [
+        (1150, 600),
+        (150, 500),
+        (375, 500),
+        (650, 500),
+        (1150, 600),
+        (150, 500),
+        (375, 500),
+        (650, 500),
+    ]
+
+
 def test_execute_battle_job_stops_when_battle_finishes_before_configured_turns(
     tmp_path: Path,
 ):
@@ -896,7 +995,11 @@ def test_execute_battle_job_skips_stale_turns_after_round_advances(tmp_path: Pat
             if not any("phase_" in path or "battleFinish" in path for path in paths):
                 return [Match(path) for path in paths]
             self.transition_calls += 1
-            matched_paths = {"battle/CH/attack.png", "battle/CH/phase_2.png"}
+            matched_paths = (
+                {"battle/CH/attack.png", "battle/CH/phase_2.png"}
+                if self.transition_calls == 1
+                else {"battle/CH/battleFinish.png"}
+            )
             return [Match(path, path in matched_paths) for path in paths]
 
     recognition = Recognition()
@@ -920,7 +1023,7 @@ def test_execute_battle_job_skips_stale_turns_after_round_advances(tmp_path: Pat
         result = manager.wait(job.job_id, timeout=2)
 
     assert result.status == JobStatus.SUCCEEDED
-    assert recognition.transition_calls == 1
+    assert recognition.transition_calls == 2
     assert taps == [
         (70, 590),
         (1150, 600),
@@ -998,11 +1101,13 @@ def test_execute_battle_job_uses_default_extra_turn_until_round_advances(
             if not any("phase_" in path or "battleFinish" in path for path in paths):
                 return [Match(path) for path in paths]
             self.transition_calls += 1
-            round_number = 1 if self.transition_calls == 1 else 2
-            matched_paths = {
-                "battle/CH/attack.png",
-                f"battle/CH/phase_{round_number}.png",
-            }
+            if self.transition_calls < 3:
+                matched_paths = {
+                    "battle/CH/attack.png",
+                    f"battle/CH/phase_{self.transition_calls}.png",
+                }
+            else:
+                matched_paths = {"battle/CH/battleFinish.png"}
             return [Match(path, path in matched_paths) for path in paths]
 
     recognition = Recognition()
@@ -1026,7 +1131,7 @@ def test_execute_battle_job_uses_default_extra_turn_until_round_advances(
         result = manager.wait(job.job_id, timeout=2)
 
     assert result.status == JobStatus.SUCCEEDED
-    assert recognition.transition_calls == 2
+    assert recognition.transition_calls == 3
     assert taps == [
         (1150, 600),
         (150, 500),
@@ -1499,6 +1604,10 @@ def test_execute_battle_job_runs_skill_and_command_phase(
         return {"changed": False, "states": [True, True, False], "actions": []}
 
     monkeypatch.setattr("webapp.automation.battle.initialize_battle_settings", initialize)
+    monkeypatch.setattr(
+        "webapp.automation.battle._wait_for_battle_transition",
+        lambda *_args, **_kwargs: {"state": "finished", "round": None},
+    )
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_battle_jobs(
             manager,
@@ -1538,7 +1647,10 @@ def test_execute_battle_job_runs_skill_and_command_phase(
     ]
 
 
-def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path):
+def test_execute_battle_job_recognizes_and_selects_strategy_cards(
+    tmp_path: Path,
+    monkeypatch,
+):
     assets = tmp_path / "assets"
     data = tmp_path / "data"
     session = tmp_path / "replays" / "strategy"
@@ -1657,6 +1769,10 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(tmp_path: Path
         frame_normalizer=FrameNormalizer(),
     )
     devices.connect("replay", "strategy")
+    monkeypatch.setattr(
+        "webapp.automation.battle._wait_for_battle_transition",
+        lambda *_args, **_kwargs: {"state": "finished", "round": None},
+    )
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_battle_jobs(
             manager,
