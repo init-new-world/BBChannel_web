@@ -61,8 +61,11 @@ def test_expball_navigation_recognizer_prioritizes_destination_pages():
         "friendpointcall",
         "ljbh",
         "in_store",
+        "exlevel",
         "ljbhfm",
         "ljbg",
+        "lzqh",
+        "czqh",
         "menu",
         "shop",
     ]
@@ -105,8 +108,11 @@ def test_expball_navigation_recognizer_prioritizes_destination_pages():
         "expball/CH/friendpointcall.png",
         "expball/CH/ljbh.png",
         "expball/CH/in_store.png",
+        "expball/CH/exlevel.png",
         "expball/CH/ljbhfm.png",
         "expball/CH/ljbg.png",
+        "expball/CH/lzqh.png",
+        "expball/CH/czqh.png",
         "expball/CH/shop.png",
         "expball/CH/menu.png",
     ]
@@ -116,8 +122,11 @@ def test_expball_navigation_recognizer_prioritizes_destination_pages():
         "summon_page",
         "sell_page",
         "storage_page",
+        "enhancement_page",
         "sell_menu",
         "storage_menu",
+        "equipment_enhancement_menu",
+        "servant_enhancement_menu",
         "menu_expanded",
         "menu_available",
     ]
@@ -199,6 +208,65 @@ def test_expball_navigate_switches_banner_until_summon_page_is_found():
         "previous_summon_banner",
     ]
     assert device.taps == [(1183, 650), (640, 615), (30, 360), (30, 360)]
+
+
+@pytest.mark.parametrize(
+    ("destination", "submenu_state", "submenu_action", "submenu_point"),
+    (
+        (
+            "equipment_enhancement",
+            "equipment_enhancement_menu",
+            "open_equipment_enhancement",
+            (960, 462),
+        ),
+        (
+            "servant_enhancement",
+            "servant_enhancement_menu",
+            "open_servant_enhancement",
+            (960, 173),
+        ),
+    ),
+)
+def test_expball_navigate_enters_enhancement_destination(
+    destination,
+    submenu_state,
+    submenu_action,
+    submenu_point,
+):
+    submenu_report = _navigation_report("equipment_enhancement_menu")
+    submenu_report["matches"] = [
+        {"name": "equipment_enhancement_menu"},
+        {"name": "servant_enhancement_menu"},
+    ]
+    reports = iter(
+        (
+            _navigation_report("menu_expanded"),
+            submenu_report,
+            _navigation_report("enhancement_page"),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_navigate_handler(
+        _ScriptData(), device, Recognizer()
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "destination": destination,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["destination"] == destination
+    assert result["actions"] == ["open_enhancement", submenu_action]
+    assert device.taps == [(473, 598), submenu_point]
 
 
 def test_expball_navigate_stops_when_device_action_fails():

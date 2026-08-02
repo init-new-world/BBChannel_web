@@ -20,6 +20,8 @@ _DESTINATION_STATES = {
     "summon": "summon_page",
     "sell": "sell_page",
     "storage": "storage_page",
+    "equipment_enhancement": "enhancement_page",
+    "servant_enhancement": "enhancement_page",
 }
 
 _OPEN_MENU_POINT = (1183, 650)
@@ -31,10 +33,20 @@ _MENU_DESTINATIONS = {
     "summon": ("open_summon", (640, 615)),
     "sell": ("open_shop", (807, 598)),
     "storage": ("open_formation", (303, 597)),
+    "equipment_enhancement": ("open_enhancement", (473, 598)),
+    "servant_enhancement": ("open_enhancement", (473, 598)),
 }
 _SUBMENU_DESTINATIONS = {
     ("sell", "sell_menu"): ("open_sell", (1127, 417)),
     ("storage", "storage_menu"): ("open_storage", (1127, 587)),
+    ("equipment_enhancement", "equipment_enhancement_menu"): (
+        "open_equipment_enhancement",
+        (960, 462),
+    ),
+    ("servant_enhancement", "servant_enhancement_menu"): (
+        "open_servant_enhancement",
+        (960, 173),
+    ),
 }
 
 
@@ -47,7 +59,10 @@ def create_expball_navigate_handler(
         setting_name = _setting_name(payload)
         destination = str(payload.get("destination") or "summon").strip().lower()
         if destination not in _DESTINATION_STATES:
-            raise ValueError("destination must be summon, sell, or storage.")
+            raise ValueError(
+                "destination must be summon, sell, storage, "
+                "equipment_enhancement, or servant_enhancement."
+            )
         threshold = _number(payload, "threshold", 0.84, 0, 1)
         timeout_seconds = _number(payload, "timeout_seconds", 120, 0.1, 600)
         poll_interval = _number(payload, "poll_interval", 0.25, 0, 10)
@@ -120,13 +135,19 @@ def create_expball_navigate_handler(
             )
             last_report = report
             state = str(report.get("state") or "unknown")
+            matched_states = {
+                str(match.get("name"))
+                for match in report.get("matches", [])
+                if isinstance(match, dict) and match.get("name")
+            }
+            matched_states.add(state)
             context.emit(
                 "expball_navigation_state",
                 "Experience-material navigation state was recognized.",
                 data={"attempt": attempts, "destination": destination, **report},
             )
 
-            if state == _DESTINATION_STATES[destination]:
+            if _DESTINATION_STATES[destination] in matched_states:
                 return finish(
                     completed=True,
                     reason="destination_reached",
@@ -140,8 +161,16 @@ def create_expball_navigate_handler(
             elif state == "menu_expanded":
                 action, point = _MENU_DESTINATIONS[destination]
                 menu_destination_selected = True
-            elif (destination, state) in _SUBMENU_DESTINATIONS:
-                action, point = _SUBMENU_DESTINATIONS[(destination, state)]
+            elif any(
+                target == destination and submenu_state in matched_states
+                for target, submenu_state in _SUBMENU_DESTINATIONS
+            ):
+                submenu_key = next(
+                    key
+                    for key in _SUBMENU_DESTINATIONS
+                    if key[0] == destination and key[1] in matched_states
+                )
+                action, point = _SUBMENU_DESTINATIONS[submenu_key]
             elif (
                 destination == "summon"
                 and menu_destination_selected
@@ -177,6 +206,9 @@ def create_expball_navigate_handler(
                 "storage_page",
                 "sell_menu",
                 "storage_menu",
+                "equipment_enhancement_menu",
+                "servant_enhancement_menu",
+                "enhancement_page",
             }:
                 action, point = "close_current_page", _CLOSE_PAGE_POINT
 
