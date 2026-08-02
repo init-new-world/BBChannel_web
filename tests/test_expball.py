@@ -383,11 +383,10 @@ def test_expball_summon_defaults_to_ten_batches():
     assert len(device.taps) == 10
 
 
-def test_expball_storage_selects_all_executes_and_confirms():
+def test_expball_storage_executes_current_selection_and_confirms():
     reports = iter(
         (
-            _storage_report("in_store", "storeAll", "zxStore"),
-            _storage_report("in_store", "storeAll", "zxStore"),
+            _storage_report("in_store", "zxStore"),
             _storage_report("decide"),
             _storage_report("in_store"),
         )
@@ -417,11 +416,10 @@ def test_expball_storage_selects_all_executes_and_confirms():
     assert result["stopped"] is False
     assert result["reason"] == "stored"
     assert result["actions"] == [
-        "select_all",
         "execute_storage",
         "confirm_storage",
     ]
-    assert device.taps == [(720, 310), (980, 620), (900, 650)]
+    assert device.taps == [(980, 620), (900, 650)]
     assert context.events[-1][0:2] == ("checkpoint", "complete")
 
 
@@ -454,7 +452,7 @@ def test_expball_storage_stops_when_a_storage_action_fails():
     class Recognizer:
         def recognize(self, _screenshot, _server, *, threshold):
             assert threshold == 0.84
-            return _storage_report("in_store", "storeAll", "zxStore")
+            return _storage_report("in_store", "zxStore")
 
     class Device(_Device):
         def tap(self, x, y):
@@ -470,7 +468,26 @@ def test_expball_storage_stops_when_a_storage_action_fails():
 
     assert result["reason"] == "device_action_failed"
     assert result["actions"] == []
-    assert device.taps == [(720, 310)]
+    assert device.taps == [(980, 620)]
+
+
+def test_expball_storage_refuses_to_store_without_current_selection():
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return _storage_report("in_store", "storeAll")
+
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )(
+        _Context(),
+        {"setting_name": "demo", "max_idle_polls": 1},
+    )
+
+    assert result["completed"] is False
+    assert result["reason"] == "no_actionable_selection"
+    assert result["actions"] == []
 
 
 def test_expball_storage_job_requires_connected_device(tmp_path):

@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from webapp.automation.expball import (
-    create_expball_storage_handler,
-    create_expball_summon_handler,
-)
+from webapp.automation.expball import create_expball_summon_handler
 from webapp.automation.expball_navigation import create_expball_navigate_handler
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
@@ -14,7 +11,7 @@ from webapp.services.script_data import ScriptDataService
 
 
 EXPBALL_RUN_JOB_KIND = "event.expball.run"
-_OVERFLOW_ACTIONS = {"stop", "storage"}
+_OVERFLOW_ACTIONS = {"stop"}
 
 
 def create_expball_run_handler(
@@ -32,24 +29,13 @@ def create_expball_run_handler(
         device_service,
         recognizer,
     )
-    storage_handler = create_expball_storage_handler(
-        script_data,
-        device_service,
-        recognizer,
-    )
+
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
         max_summons = _integer(payload, "max_summons", 10, 1, 10000)
-        max_overflow_cycles = _integer(
-            payload,
-            "max_overflow_cycles",
-            10,
-            0,
-            1000,
-        )
         overflow_action = str(payload.get("overflow_action") or "stop").lower()
         if overflow_action not in _OVERFLOW_ACTIONS:
-            raise ValueError("overflow_action must be stop or storage.")
+            raise ValueError("overflow_action must be stop.")
 
         common_payload: dict[str, Any] = {"setting_name": setting_name}
         for key in (
@@ -63,7 +49,6 @@ def create_expball_run_handler(
 
         navigation_payload = dict(common_payload)
         summon_payload = dict(common_payload)
-        storage_payload = dict(common_payload)
         _copy_option(
             payload,
             navigation_payload,
@@ -94,15 +79,8 @@ def create_expball_run_handler(
             "max_same_state",
             "max_same_state",
         )
-        _copy_option(
-            payload,
-            storage_payload,
-            "storage_timeout_seconds",
-            "timeout_seconds",
-        )
 
         summons = 0
-        overflow_cycles = 0
         stages: list[dict[str, Any]] = []
 
         def record(stage: str, result: dict[str, Any]) -> None:
@@ -131,17 +109,14 @@ def create_expball_run_handler(
                 "max_summons": max_summons,
                 "summons": summons,
                 "overflow_action": overflow_action,
-                "overflow_cycles": overflow_cycles,
+                "overflow_cycles": 0,
                 "stages": stages,
             }
 
         while summons < max_summons:
             context.checkpoint(
                 "expball_cycle",
-                message=(
-                    "Running experience-material cycle "
-                    f"{overflow_cycles + 1}."
-                ),
+                message="Running experience-material summon cycle.",
             )
             current_navigation_payload = dict(navigation_payload)
             current_navigation_payload["destination"] = "summon"
@@ -177,46 +152,11 @@ def create_expball_run_handler(
                     stopped=True,
                     reason=summon_reason,
                 )
-            if overflow_action == "stop":
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="box_full",
-                )
-            if overflow_cycles >= max_overflow_cycles:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="overflow_cycle_limit",
-                )
-
-            overflow_navigation_payload = dict(navigation_payload)
-            overflow_navigation_payload["destination"] = overflow_action
-            navigation_result = navigate_handler(
-                context,
-                overflow_navigation_payload,
+            return finish(
+                completed=False,
+                stopped=True,
+                reason="box_full",
             )
-            record(f"navigate_{overflow_action}", navigation_result)
-            if navigation_result.get("completed") is not True:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason=str(
-                        navigation_result.get("reason") or "navigation_stopped"
-                    ),
-                )
-
-            overflow_result = storage_handler(context, storage_payload)
-            record(overflow_action, overflow_result)
-            if overflow_result.get("completed") is not True:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason=str(
-                        overflow_result.get("reason") or "overflow_action_stopped"
-                    ),
-                )
-            overflow_cycles += 1
 
         return finish(
             completed=True,

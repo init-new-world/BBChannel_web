@@ -48,7 +48,6 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "event.expball.run",
                     "event.expball.sell",
                     "event.expball.storage",
-                    "event.expball.store-all",
                     "event.expball.summon",
                     "event.lottery.draw",
                     "event.lottery.inspect",

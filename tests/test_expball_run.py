@@ -95,76 +95,6 @@ def _storage_report(*names):
     )
 
 
-def test_expball_run_stores_full_inventory_and_resumes_summoning():
-    navigation_reports = iter(
-        (
-            _navigation_report("summon_page"),
-            _navigation_report("storage_page"),
-            _navigation_report("summon_page"),
-        )
-    )
-    flow_reports = iter(
-        (
-            _report(
-                "boxfull",
-                "summon",
-                "actionable",
-                action="handle_full_box",
-            ),
-            _storage_report("in_store", "storeAll", "zxStore"),
-            _storage_report("in_store", "storeAll", "zxStore"),
-            _storage_report("decide"),
-            _storage_report("in_store"),
-            _report(
-                "call10",
-                "summon",
-                "actionable",
-                action="summon_ten",
-            ),
-        )
-    )
-
-    class Recognizer:
-        def recognize_navigation(self, *_args, **_kwargs):
-            return next(navigation_reports)
-
-        def recognize(self, *_args, **_kwargs):
-            return next(flow_reports)
-
-    device = _Device()
-    result = create_expball_run_handler(
-        _ScriptData(), device, Recognizer()
-    )(
-        _Context(),
-        {
-            "setting_name": "demo",
-            "max_summons": 1,
-            "overflow_action": "storage",
-            "action_wait_seconds": 0,
-            "poll_interval": 0,
-        },
-    )
-
-    assert result["completed"] is True
-    assert result["reason"] == "summon_limit"
-    assert result["summons"] == 1
-    assert result["overflow_cycles"] == 1
-    assert [stage["stage"] for stage in result["stages"]] == [
-        "navigate_summon",
-        "summon",
-        "navigate_storage",
-        "storage",
-        "navigate_summon",
-        "summon",
-    ]
-    assert device.taps == [
-        (720, 310),
-        (980, 620),
-        (900, 650),
-        (800, 600),
-    ]
-
-
 def test_expball_run_defaults_to_stopping_safely_when_inventory_is_full():
     class Recognizer:
         def recognize_navigation(self, *_args, **_kwargs):
@@ -209,6 +139,16 @@ def test_expball_run_does_not_offer_unconfigured_automatic_sale():
         handler(
             _Context(),
             {"setting_name": "demo", "overflow_action": "sell"},
+        )
+
+
+def test_expball_run_does_not_offer_unconfigured_automatic_storage():
+    handler = create_expball_run_handler(_ScriptData(), _Device(), object())
+
+    with pytest.raises(ValueError, match="overflow_action"):
+        handler(
+            _Context(),
+            {"setting_name": "demo", "overflow_action": "storage"},
         )
 
 

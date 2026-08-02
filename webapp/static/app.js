@@ -114,7 +114,6 @@ const els = {
   lotteryStar5: document.querySelector("#lottery-star-5"),
   inspectExpball: document.querySelector("#inspect-expball"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
-  expballOverflowAction: document.querySelector("#expball-overflow-action"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
   runExpballSell: document.querySelector("#run-expball-sell"),
@@ -850,7 +849,6 @@ async function runExpballSummon() {
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
-    overflow_action: els.expballOverflowAction.value,
   });
 }
 
@@ -859,7 +857,7 @@ async function runExpballStorage() {
   if (!settingName) {
     return;
   }
-  await enqueueJob("event.expball.store-all", {
+  await enqueueJob("event.expball.storage", {
     setting_name: settingName,
   });
 }
@@ -1220,13 +1218,6 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
-  if (job.kind === "event.expball.store-all") {
-    els.jobResult.textContent = [
-      result.completed ? "EXP stored" : "EXP storage stopped",
-      humanizeResultValue(result.reason || "unknown"),
-    ].join(" · ");
-    return;
-  }
   if (job.kind === "event.expball.storage") {
     const actionCount = result.actions?.length || 0;
     els.jobResult.textContent = [
@@ -1463,7 +1454,6 @@ function updateControls() {
     || !supportsExpball
     || hasRunningJob;
   els.fpSummonBatches.disabled = !supportsExpball || hasRunningJob;
-  els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

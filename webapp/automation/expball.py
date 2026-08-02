@@ -343,7 +343,7 @@ def create_expball_storage_handler(
         started = monotonic()
         attempts = 0
         actions: list[str] = []
-        phase = "select_all"
+        phase = "execute"
         idle_polls = 0
         last_report: dict[str, Any] | None = None
 
@@ -423,23 +423,22 @@ def create_expball_storage_handler(
                 )
 
             target_name = {
-                "select_all": "storeAll",
                 "execute": "zxStore",
                 "confirm": "decide",
             }.get(phase)
             target = matches.get(target_name) if target_name is not None else None
-            initial_controls_ready = phase != "select_all" or {
-                "in_store",
-                "storeAll",
-                "zxStore",
-            }.issubset(matches)
+            initial_controls_ready = phase != "execute" or "in_store" in matches
             if not isinstance(target, dict) or not initial_controls_ready:
                 idle_polls += 1
                 if idle_polls >= max_idle_polls:
                     return finish(
                         completed=False,
                         stopped=True,
-                        reason="storage_controls_missing",
+                        reason=(
+                            "no_actionable_selection"
+                            if phase == "execute" and "in_store" in matches
+                            else "storage_controls_missing"
+                        ),
                         report=report,
                     )
                 context.sleep(randomized_wait_seconds(poll_interval, random_time))
@@ -460,7 +459,6 @@ def create_expball_storage_handler(
             )
             operation = device_service.tap(x, y)
             action = {
-                "select_all": "select_all",
                 "execute": "execute_storage",
                 "confirm": "confirm_storage",
             }[phase]
@@ -482,7 +480,6 @@ def create_expball_storage_handler(
                 )
             actions.append(action)
             phase = {
-                "select_all": "execute",
                 "execute": "confirm",
                 "confirm": "verify",
             }[phase]

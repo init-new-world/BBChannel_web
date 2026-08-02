@@ -71,8 +71,7 @@ def test_operator_console_references_api_controls():
     assert 'id="inspect-expball"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
-    assert 'id="expball-overflow-action"' in index
-    assert '<option value="sell">' not in index
+    assert 'id="expball-overflow-action"' not in index
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
@@ -94,7 +93,6 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.expball.summon"' in script
     assert 'job.kind === "event.expball.storage"' in script
     assert 'job.kind === "event.expball.sell"' in script
-    assert 'job.kind === "event.expball.store-all"' in script
     assert "result.summons || 0" in script
     assert "result.pieces?.length || 0" in script
     assert 'enqueueJob("battle.restart-game"' in script
@@ -109,8 +107,7 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.expball.inspect"' in script
     assert 'enqueueJob("event.expball.run"' in script
     assert "max_summons: readNumber(els.fpSummonBatches)" in script
-    assert "overflow_action: els.expballOverflowAction.value" in script
-    assert 'enqueueJob("event.expball.store-all"' in script
+    assert 'enqueueJob("event.expball.storage"' in script
     assert 'enqueueJob("event.expball.sell"' in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
     assert '["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server)' in script
