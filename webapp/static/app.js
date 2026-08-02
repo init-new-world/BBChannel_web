@@ -113,6 +113,8 @@ const els = {
   lotteryStar4: document.querySelector("#lottery-star-4"),
   lotteryStar5: document.querySelector("#lottery-star-5"),
   inspectExpball: document.querySelector("#inspect-expball"),
+  expballDestination: document.querySelector("#expball-destination"),
+  navigateExpball: document.querySelector("#navigate-expball"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
@@ -231,6 +233,7 @@ function bindEvents() {
   els.lotteryStar4.addEventListener("change", updateControls);
   els.lotteryStar5.addEventListener("change", updateControls);
   els.inspectExpball.addEventListener("click", inspectExpball);
+  els.navigateExpball.addEventListener("click", navigateExpball);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
@@ -841,6 +844,17 @@ async function inspectExpball() {
   });
 }
 
+async function navigateExpball() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.navigate", {
+    setting_name: settingName,
+    destination: els.expballDestination.value,
+  });
+}
+
 async function runExpballSummon() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -1199,6 +1213,16 @@ function renderJobResult(job) {
     els.jobResult.textContent = details.join(" · ");
     return;
   }
+  if (job.kind === "event.expball.navigate") {
+    const actionCount = result.actions?.length || 0;
+    els.jobResult.textContent = [
+      humanizeResultValue(result.destination || "unknown"),
+      result.completed ? "Reached" : "Navigation stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.run") {
     els.jobResult.textContent = [
       `${result.summons || 0}/${result.max_summons || 0} FP batches`,
@@ -1447,6 +1471,11 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsExpball
     || hasRunningJob;
+  els.navigateExpball.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
+  els.expballDestination.disabled = !supportsExpball || hasRunningJob;
   els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

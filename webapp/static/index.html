@@ -216,6 +216,17 @@
             <div class="section-label">EXP Materials</div>
             <button id="inspect-expball" class="ghost-button wide" type="button">Inspect EXP Flow</button>
             <label class="input-row">
+              <span>Destination</span>
+              <select id="expball-destination" class="field" aria-label="EXP workflow destination">
+                <option value="summon">Summon</option>
+                <option value="sell">Sell</option>
+                <option value="storage">Storage</option>
+                <option value="servant_enhancement">Servant enhance</option>
+                <option value="equipment_enhancement">CE enhance</option>
+              </select>
+            </label>
+            <button id="navigate-expball" class="ghost-button wide" type="button">Navigate</button>
+            <label class="input-row">
               <span>FP batches</span>
               <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">
             </label>
