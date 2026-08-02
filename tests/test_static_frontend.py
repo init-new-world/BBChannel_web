@@ -62,6 +62,12 @@ def test_operator_console_references_api_controls():
     assert 'id="run-chocolate"' in index
     assert 'id="inspect-digdig"' in index
     assert 'id="execute-digdig"' in index
+    assert 'id="inspect-lottery"' in index
+    assert 'id="run-lottery"' in index
+    assert 'id="lottery-pay-slot"' in index
+    assert 'id="lottery-star-3"' in index
+    assert 'id="lottery-star-4"' in index
+    assert 'id="lottery-star-5"' in index
     assert 'id="inspect-expball"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
@@ -79,6 +85,8 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.chocolate.run"' in script
     assert 'job.kind === "event.digdig.inspect"' in script
     assert 'job.kind === "event.digdig.execute"' in script
+    assert 'job.kind === "event.lottery.inspect"' in script
+    assert 'job.kind === "event.lottery.run"' in script
     assert 'job.kind === "event.expball.inspect"' in script
     assert 'job.kind === "event.expball.summon"' in script
     assert 'job.kind === "event.expball.storage"' in script
@@ -90,6 +98,10 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.chocolate.run"' in script
     assert 'enqueueJob("event.digdig.inspect"' in script
     assert 'enqueueJob("event.digdig.execute"' in script
+    assert 'enqueueJob("event.lottery.inspect"' in script
+    assert 'enqueueJob("event.lottery.run"' in script
+    assert "pay_slot: readNumber(els.lotteryPaySlot)" in script
+    assert "stars: selectedLotteryStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script
     assert 'enqueueJob("event.expball.summon"' in script
     assert "max_summons: readNumber(els.fpSummonBatches)" in script

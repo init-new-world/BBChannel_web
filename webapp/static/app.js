@@ -106,6 +106,12 @@ const els = {
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   executeDigdig: document.querySelector("#execute-digdig"),
+  inspectLottery: document.querySelector("#inspect-lottery"),
+  runLottery: document.querySelector("#run-lottery"),
+  lotteryPaySlot: document.querySelector("#lottery-pay-slot"),
+  lotteryStar3: document.querySelector("#lottery-star-3"),
+  lotteryStar4: document.querySelector("#lottery-star-4"),
+  lotteryStar5: document.querySelector("#lottery-star-5"),
   inspectExpball: document.querySelector("#inspect-expball"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
@@ -219,6 +225,11 @@ function bindEvents() {
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.executeDigdig.addEventListener("click", executeDigdig);
+  els.inspectLottery.addEventListener("click", inspectLottery);
+  els.runLottery.addEventListener("click", runLottery);
+  els.lotteryStar3.addEventListener("change", updateControls);
+  els.lotteryStar4.addEventListener("change", updateControls);
+  els.lotteryStar5.addEventListener("change", updateControls);
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
@@ -787,6 +798,39 @@ async function executeDigdig() {
   });
 }
 
+function selectedLotteryStars() {
+  return [
+    [3, els.lotteryStar3],
+    [4, els.lotteryStar4],
+    [5, els.lotteryStar5],
+  ]
+    .filter(([, input]) => input.checked)
+    .map(([star]) => star);
+}
+
+async function inspectLottery() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.lottery.inspect", {
+    setting_name: settingName,
+  });
+}
+
+async function runLottery() {
+  const settingName = els.settingSelect.value;
+  const stars = selectedLotteryStars();
+  if (!settingName || stars.length === 0) {
+    return;
+  }
+  await enqueueJob("event.lottery.run", {
+    setting_name: settingName,
+    pay_slot: readNumber(els.lotteryPaySlot),
+    stars: selectedLotteryStars(),
+  });
+}
+
 async function inspectExpball() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -1119,6 +1163,28 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.lottery.inspect") {
+    const details = [
+      `Lottery: ${humanizeResultValue(result.state || "unknown")}`,
+      humanizeResultValue(result.status || "unknown"),
+    ];
+    if (result.recommended_action) {
+      details.push(`Action: ${humanizeResultValue(result.recommended_action)}`);
+    } else if (result.reason) {
+      details.push(humanizeResultValue(result.reason));
+    }
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
+  if (job.kind === "event.lottery.run") {
+    els.jobResult.textContent = [
+      result.completed ? "Lottery complete" : "Lottery stopped",
+      humanizeResultValue(result.reason || "unknown"),
+      `${result.giftbox_cycles || 0} gift box cycles`,
+      `${result.receive_batches || 0} receive batches`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.inspect") {
     const details = [
       `EXP ${humanizeResultValue(result.flow || "unknown")}`,
@@ -1328,7 +1394,9 @@ function updateControls() {
   const selectedJobStatus = state.activeJob?.status || "idle";
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
   const supportsDigdig = ["CH", "CNTW"].includes(state.selectedSettingPlan?.server);
+  const supportsLottery = ["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server);
   const supportsExpball = ["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server);
+  const hasLotteryStars = selectedLotteryStars().length > 0;
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
@@ -1354,6 +1422,19 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsDigdig
     || hasRunningJob;
+  els.inspectLottery.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsLottery
+    || hasRunningJob;
+  els.runLottery.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsLottery
+    || !hasLotteryStars
+    || hasRunningJob;
+  els.lotteryPaySlot.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryStar3.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryStar4.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryStar5.disabled = !supportsLottery || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

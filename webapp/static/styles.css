@@ -272,6 +272,31 @@ select:disabled {
   accent-color: var(--accent);
 }
 
+.inline-toggles {
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-toggles label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.inline-toggles input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .number-field {
   text-align: right;
 }
