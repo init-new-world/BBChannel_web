@@ -104,6 +104,43 @@ def test_expball_recognizer_supports_jp_assets():
     assert report["recommended_action"] == "summon_free_ten"
 
 
+def test_expball_recognizer_prioritizes_storage_full_over_storage_actions():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/CH"
+            assert limit == 200
+            return {
+                "entries": [
+                    {"path": "expball/CH/store_full.png"},
+                    {"path": "expball/CH/zxStore.png"},
+                    {"path": "expball/CH/in_store.png"},
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [
+                _match(candidate["template_path"], True, 0.99 - index * 0.01)
+                for index, candidate in enumerate(candidates)
+            ]
+
+    report = ExpBallRecognizer(Resources(), Recognition()).recognize(
+        b"storage-screen",
+        "CH",
+    )
+
+    assert report["state"] == "store_full"
+    assert report["flow"] == "storage"
+    assert report["status"] == "blocked"
+    assert report["reason"] == "storage_full"
+    assert report["recommended_action"] is None
+    assert [match["name"] for match in report["matches"]] == [
+        "store_full",
+        "zxStore",
+        "in_store",
+    ]
+
+
 class _ScriptData:
     def get_setting_plan(self, name):
         assert name == "demo"
@@ -488,6 +525,30 @@ def test_expball_storage_refuses_to_store_without_current_selection():
     assert result["completed"] is False
     assert result["reason"] == "no_actionable_selection"
     assert result["actions"] == []
+
+
+def test_expball_storage_stops_when_storage_is_full_without_tapping():
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return _report(
+                "store_full",
+                "storage",
+                "blocked",
+                reason="storage_full",
+            )
+
+    device = _Device()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(_Context(), {"setting_name": "demo"})
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "storage_full"
+    assert result["actions"] == []
+    assert device.taps == []
 
 
 def test_expball_storage_job_requires_connected_device(tmp_path):

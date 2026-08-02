@@ -18,6 +18,7 @@ _STATE_SPECS = (
     ("autoSell", "sell", "actionable", None, "open_auto_sell"),
     ("destroy", "sell", "actionable", None, "execute_sell"),
     ("gotoqhcz", "navigation", "actionable", None, "open_enhancement"),
+    ("store_full", "storage", "blocked", "storage_full", None),
     ("zxStore", "storage", "actionable", None, "execute_storage"),
     ("storeAll", "storage", "actionable", None, "select_all"),
     ("qh_back", "navigation", "actionable", None, "return_from_enhancement"),
