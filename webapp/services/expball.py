@@ -34,6 +34,21 @@ _STATE_SPECS = (
 )
 _SCALES = (1.0, 0.75, 2 / 3, 0.5)
 
+_NAVIGATION_STATE_SPECS = (
+    ("summon_page", "friendpointcall.png", (507, 333, 263, 133)),
+    ("sell_page", "ljbh.png", (673, 93, 133, 67)),
+    ("storage_page", "in_store.png", (1093, 187, 127, 93)),
+    ("sell_menu", "ljbhfm.png", (853, 300, 300, 237)),
+    ("storage_menu", "ljbg.png", (910, 433, 157, 240)),
+    ("menu_expanded", "shop.png", (720, 547, 173, 173)),
+    ("menu_available", "menu.png", (1033, 533, 247, 187)),
+    ("inventory_full", "boxfull.png", (300, 447, 100, 60)),
+    ("summon_picker", "close.png", (0, 0, 200, 93)),
+    ("back", "back.png", (0, 0, 200, 93)),
+    ("enhancement_back", "qh_back.png", (0, 0, 200, 93)),
+    ("dialog_close", "x.png", (1213, 7, 60, 53)),
+)
+
 
 class ExpBallRecognizer:
     def __init__(
@@ -104,6 +119,56 @@ class ExpBallRecognizer:
             "recommended_action": (
                 primary["recommended_action"] if primary else None
             ),
+            "available_template_count": len(candidates),
+            "matches": matches,
+        }
+
+    def recognize_navigation(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.84,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        root = f"expball/{normalized_server}"
+        page = self._resources.template_index(prefix=root, limit=200)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+        specs = [
+            (name, roi, f"{root}/{filename}")
+            for name, filename, roi in _NAVIGATION_STATE_SPECS
+            if f"{root}/{filename}" in available_paths
+        ]
+        candidates = [
+            {
+                "template_path": template_path,
+                "threshold": threshold,
+                "roi": roi,
+                "scales": _SCALES,
+            }
+            for _name, roi, template_path in specs
+        ]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        matches = [
+            {"name": name, **match.to_dict()}
+            for match, (name, _roi, _path) in zip(results, specs, strict=True)
+            if match.matched
+        ]
+        primary = matches[0] if matches else None
+        return {
+            "server": normalized_server,
+            "state": primary["name"] if primary else "unknown",
+            "status": "actionable" if primary else "unknown",
+            "reason": None,
             "available_template_count": len(candidates),
             "matches": matches,
         }
