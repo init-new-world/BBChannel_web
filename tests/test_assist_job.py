@@ -108,6 +108,101 @@ def test_assist_handler_rejects_invalid_configured_swipe_interval():
         handler(None, {"setting_name": "demo"})
 
 
+def test_assist_handler_recovers_ap_before_selecting_support():
+    state = {"screen": "apple"}
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["screen"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            state["screen"] = {
+                "apple": "apple_decide",
+                "apple_decide": "candidate",
+                "candidate": "team",
+            }[state["screen"]]
+            return Operation()
+
+    class Match:
+        size = (100, 50)
+        top_left = (500, 300)
+
+        def __init__(self, matched, center=(640, 420)):
+            self.matched = matched
+            self.center = center
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match(False)
+
+        def match_apple_close(self, screenshot, _server):
+            return Match(screenshot == b"apple", (900, 600))
+
+        def match_apple_decide(self, screenshot, _server):
+            return Match(screenshot == b"apple_decide", (742, 601))
+
+        def match_apple(self, screenshot, _server, apple):
+            return Match(
+                screenshot == b"apple" and apple == "silver",
+                (422, 322),
+            )
+
+        def match_not_available(self, _screenshot, _server):
+            return Match(False)
+
+        def recognize(self, screenshot, _assist, *, server):
+            assert screenshot == b"candidate"
+            return {
+                "candidate_count": 1,
+                "servant_name": "Support",
+                "candidates": [
+                    {"anchor": [70, 225], "scale": 1.0, "checks": {}}
+                ],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True},
+                "run": {
+                    "allow_other_apple": True,
+                    "random_time": 0,
+                    "random_touch": False,
+                },
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {
+            "setting_name": "demo",
+            "apple": "gold",
+            "max_ap_actions": 2,
+            "tap_wait_seconds": 0,
+        },
+    )
+
+    assert taps == [(422, 322), (742, 601), (340, 165)]
+    assert result["ap_actions"] == ["apple_silver", "apple_decide"]
+    assert result["selected"]["anchor"] == [70, 225]
+
+
 def test_assist_handler_uses_recognized_selection_point():
     taps = []
 

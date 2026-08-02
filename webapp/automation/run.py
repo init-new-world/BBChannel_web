@@ -258,11 +258,26 @@ def create_full_run_handler(
                 assist_result, resume_stage = execute_stage(
                     "assist",
                     select_assist,
-                    {"setting_name": normalized_name, **stage_options["assist"]},
+                    {
+                        "setting_name": normalized_name,
+                        "recover_ap": not clearing_ap,
+                        **stage_options["assist"],
+                    },
                 )
                 if resume_stage is not None:
                     continue
                 current_run_results["assist"] = assist_result
+            if assist_result.get("ready") is False:
+                assist_reason = str(
+                    assist_result.get("reason") or "assist_not_ready"
+                )
+                if clearing_ap and assist_reason == "ap_empty":
+                    cleared_ap = True
+                    stop_reason = "ap_cleared"
+                else:
+                    stopped = True
+                    stop_reason = assist_reason
+                break
 
             prepare_result = current_run_results["prepare"]
             if current_stage in {"assist", "prepare"}:

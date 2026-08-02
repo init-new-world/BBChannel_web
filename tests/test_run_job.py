@@ -242,6 +242,46 @@ def test_full_run_clears_remaining_ap_without_consuming_more_items(tmp_path: Pat
     assert completion_payloads[0]["repeat"] is True
 
 
+def test_full_run_stops_clear_ap_when_assist_reports_ap_empty():
+    assist_payloads: list[dict] = []
+    prepare_calls = 0
+
+    def assist(_context, payload):
+        assist_payloads.append(dict(payload))
+        if len(assist_payloads) == 2:
+            return {"ready": False, "reason": "ap_empty"}
+        return {"selected": "support"}
+
+    def prepare(_context, _payload):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return {"ready": True}
+
+    handler = create_full_run_handler(
+        _ScriptData(clear_ap=True),
+        assist,
+        prepare,
+        lambda _context, _payload: {"executed": True},
+        lambda _context, payload: {
+            "complete": True,
+            "repeated": payload["repeat"],
+            "drop_count": 0,
+        },
+    )
+
+    result = handler(
+        _Context(),
+        {"setting_name": "demo", "max_runs": 1, "max_clear_runs": 2},
+    )
+
+    assert [payload["recover_ap"] for payload in assist_payloads] == [True, False]
+    assert prepare_calls == 1
+    assert result["runs_completed"] == 1
+    assert result["cleared_ap"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "ap_cleared"
+
+
 def test_full_run_resumes_from_an_active_battle(tmp_path: Path):
     calls: list[str] = []
 

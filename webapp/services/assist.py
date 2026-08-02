@@ -597,6 +597,54 @@ class AssistRecognizer:
             scales=ASSIST_EQUIP_SCALES,
         )
 
+    def match_apple_close(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/apple_close.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
+    def match_apple_decide(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/apple_decide.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
+    def match_apple(
+        self,
+        screenshot: bytes,
+        server: str,
+        apple: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        template_path = (
+            "battle/public/blue.png"
+            if apple == "blue"
+            else f"battle/{server.upper()}/{apple}.png"
+        )
+        return self._recognition.match_template(
+            screenshot,
+            template_path,
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
     def _servant_templates(self, canonical_name: Any) -> list[str]:
         if not isinstance(canonical_name, str) or not canonical_name:
             return []

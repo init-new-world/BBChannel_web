@@ -106,6 +106,19 @@ def create_assist_handler(
             or not 0 <= max_unavailable <= 100
         ):
             raise ValueError("max_unavailable must be between 0 and 100.")
+        preferred_apple = payload.get("apple", "gold")
+        if preferred_apple not in {"gold", "silver", "blue", "copper"}:
+            raise ValueError("apple must be gold, silver, blue, or copper.")
+        recover_ap = payload.get("recover_ap", True)
+        if not isinstance(recover_ap, bool):
+            raise ValueError("recover_ap must be a boolean.")
+        max_ap_actions = payload.get("max_ap_actions", 10)
+        if (
+            isinstance(max_ap_actions, bool)
+            or not isinstance(max_ap_actions, int)
+            or not 1 <= max_ap_actions <= 100
+        ):
+            raise ValueError("max_ap_actions must be between 1 and 100.")
 
         scroll_limit = payload.get(
             "scroll_limit",
@@ -123,6 +136,7 @@ def create_assist_handler(
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
         reconnects = 0
+        ap_actions: list[str] = []
 
         def snapshot_without_reconnect() -> bytes:
             nonlocal reconnects
@@ -157,6 +171,83 @@ def create_assist_handler(
                 context.sleep(
                     randomized_wait_seconds(tap_wait_seconds, random_time)
                 )
+
+        while True:
+            screenshot = snapshot_without_reconnect()
+            apple_close = _optional_assist_match(
+                assist_recognizer,
+                "match_apple_close",
+                screenshot,
+                plan["server"],
+            )
+            apple_decide = _optional_assist_match(
+                assist_recognizer,
+                "match_apple_decide",
+                screenshot,
+                plan["server"],
+            )
+            if apple_close is not None and apple_close.matched:
+                if not recover_ap:
+                    operation = device_service.tap(
+                        *match_touch_point(apple_close, enabled=random_touch)
+                    )
+                    ap_actions.append("apple_close")
+                    context.emit(
+                        "device_action",
+                        "Closed AP recovery before assist selection.",
+                        data={
+                            "role": "apple_close",
+                            "operation": operation.to_dict(),
+                        },
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "ready": False,
+                        "reason": "ap_empty",
+                        "ap_actions": ap_actions,
+                        "reconnects": reconnects,
+                        "selected": None,
+                    }
+                if len(ap_actions) >= max_ap_actions:
+                    raise RuntimeError("Assist AP recovery action limit was reached.")
+                apple_match = _available_assist_apple(
+                    assist_recognizer,
+                    screenshot,
+                    plan["server"],
+                    preferred=preferred_apple,
+                    allow_other=bool(plan["run"].get("allow_other_apple")),
+                )
+                if apple_match is None:
+                    raise RuntimeError("No available AP recovery item was recognized.")
+                apple_name, match = apple_match
+                operation = device_service.tap(
+                    *match_touch_point(match, enabled=random_touch)
+                )
+                action = f"apple_{apple_name}"
+                ap_actions.append(action)
+                context.emit(
+                    "device_action",
+                    "Selected AP recovery item before assist selection.",
+                    data={"role": action, "operation": operation.to_dict()},
+                )
+            elif apple_decide is not None and apple_decide.matched:
+                if len(ap_actions) >= max_ap_actions:
+                    raise RuntimeError("Assist AP recovery action limit was reached.")
+                operation = device_service.tap(
+                    *match_touch_point(apple_decide, enabled=random_touch)
+                )
+                ap_actions.append("apple_decide")
+                context.emit(
+                    "device_action",
+                    "Confirmed AP recovery before assist selection.",
+                    data={
+                        "role": "apple_decide",
+                        "operation": operation.to_dict(),
+                    },
+                )
+            else:
+                break
+            context.sleep(randomized_wait_seconds(tap_wait_seconds, random_time))
 
         class_selection = None
         if not plan["assist"].get("all_not_skip"):
@@ -300,6 +391,7 @@ def create_assist_handler(
                     "grand_boundary_hits": grand_boundary_hits,
                     "scroll_limit": scroll_limit,
                     "class_selection": class_selection,
+                    "ap_actions": ap_actions,
                     "selected": selected,
                     "tap": selection_operation.to_dict(),
                 }
@@ -445,3 +537,47 @@ def _assist_class_point(class_name: str, *, recommended: bool) -> tuple[int, int
         raise ValueError(f"Unsupported assist class: {class_name}") from exc
     source_x = 225 + index * 91 if recommended else 140 + index * 101
     return round(source_x / 1.5), 128
+
+
+def _optional_assist_match(
+    recognizer: AssistRecognizer,
+    method_name: str,
+    *args: Any,
+):
+    method = getattr(recognizer, method_name, None)
+    if method is None:
+        return None
+    try:
+        return method(*args)
+    except AppError as exc:
+        if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+            return None
+        raise
+
+
+def _available_assist_apple(
+    recognizer: AssistRecognizer,
+    screenshot: bytes,
+    server: str,
+    *,
+    preferred: str,
+    allow_other: bool,
+):
+    candidates = [preferred]
+    if allow_other:
+        candidates.extend(
+            apple
+            for apple in ("gold", "silver", "blue", "copper")
+            if apple != preferred
+        )
+    for apple in candidates:
+        match = _optional_assist_match(
+            recognizer,
+            "match_apple",
+            screenshot,
+            server,
+            apple,
+        )
+        if match is not None and match.matched:
+            return apple, match
+    return None
