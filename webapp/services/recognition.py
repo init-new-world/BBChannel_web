@@ -51,8 +51,20 @@ class RecognitionService:
     ) -> list[MatchResult]:
         screenshot_image = self._decode_screenshot(screenshot, None)
         results: list[MatchResult] = []
+        template_cache: dict[tuple[str, str | None], tuple[Any, Any, bool]] = {}
         for candidate in candidates:
             template_path = str(candidate["template_path"])
+            mask_path = (
+                str(candidate["mask_path"])
+                if candidate.get("mask_path") is not None
+                else None
+            )
+            cache_key = (template_path, mask_path)
+            if cache_key not in template_cache:
+                template_cache[cache_key] = self._load_template(
+                    template_path,
+                    mask_path,
+                )
             results.append(
                 self._match_decoded(
                     screenshot_image,
@@ -60,11 +72,8 @@ class RecognitionService:
                     threshold=float(candidate.get("threshold", 0.8)),
                     roi=candidate.get("roi"),
                     scales=candidate.get("scales"),
-                    mask_path=(
-                        str(candidate["mask_path"])
-                        if candidate.get("mask_path") is not None
-                        else None
-                    ),
+                    mask_path=mask_path,
+                    template_data=template_cache[cache_key],
                 )
             )
         return results
@@ -191,11 +200,13 @@ class RecognitionService:
         scales: object = None,
         mask_path: str | None = None,
         template_size: object = None,
+        template_data: tuple[Any, Any, bool] | None = None,
     ) -> MatchResult:
         cv, numpy = self._require_opencv()
-        template_image, template_mask, explicit_mask = self._load_template(
-            template_path,
-            mask_path,
+        template_image, template_mask, explicit_mask = (
+            template_data
+            if template_data is not None
+            else self._load_template(template_path, mask_path)
         )
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(

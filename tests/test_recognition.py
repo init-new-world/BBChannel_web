@@ -227,6 +227,49 @@ def test_match_templates_decodes_screenshot_once(tmp_path: Path, monkeypatch: py
     assert all(result.matched for result in results)
 
 
+def test_match_templates_loads_a_repeated_template_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = _pattern()
+    template.save(resources.assets_dir / "target.png")
+    screenshot = Image.new("RGB", (100, 60), "black")
+    screenshot.paste(template, (10, 10))
+    screenshot.paste(template, (70, 35))
+    recognition = RecognitionService(resources)
+    load_calls = 0
+    original_load = recognition._load_template
+
+    def count_load(*args, **kwargs):
+        nonlocal load_calls
+        load_calls += 1
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(recognition, "_load_template", count_load)
+    results = recognition.match_templates(
+        _png_bytes(screenshot),
+        [
+            {
+                "template_path": "target.png",
+                "threshold": 0.8,
+                "roi": [0, 0, 40, 40],
+            },
+            {
+                "template_path": "target.png",
+                "threshold": 0.8,
+                "roi": [60, 25, 40, 35],
+            },
+        ],
+    )
+
+    assert load_calls == 1
+    assert [result.top_left for result in results] == [[10, 10], [70, 35]]
+
+
 def test_match_template_all_returns_distinct_occurrences(tmp_path: Path):
     pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService
