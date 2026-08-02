@@ -21,6 +21,8 @@ _STATE_SPECS = (
     ("store_full", "storage", "blocked", "storage_full", None),
     ("zxStore", "storage", "actionable", None, "execute_storage"),
     ("storeAll", "storage", "actionable", None, "select_all"),
+    ("jd", "selection", "actionable", None, "submit_selection"),
+    ("ljbhclose", "confirmation", "actionable", None, "close_result"),
     ("qh_back", "navigation", "actionable", None, "return_from_enhancement"),
     ("back", "navigation", "actionable", None, "back"),
     ("qpfull", "confirmation", "observed", None, None),

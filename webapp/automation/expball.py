@@ -343,7 +343,7 @@ def create_expball_storage_handler(
         started = monotonic()
         attempts = 0
         actions: list[str] = []
-        phase = "execute"
+        phase = "submit"
         idle_polls = 0
         last_report: dict[str, Any] | None = None
 
@@ -405,7 +405,7 @@ def create_expball_storage_handler(
                     reason=str(report.get("reason") or "blocked"),
                     report=report,
                 )
-            if phase == "verify" and flow == "storage" and "in_store" in matches:
+            if phase == "verify" and "in_store" in matches:
                 return finish(
                     completed=True,
                     stopped=False,
@@ -413,8 +413,7 @@ def create_expball_storage_handler(
                     report=report,
                 )
 
-            expected_flow = "confirmation" if phase == "confirm" else "storage"
-            if flow != expected_flow:
+            if phase == "submit" and flow != "storage" and "in_store" not in matches:
                 return finish(
                     completed=False,
                     stopped=True,
@@ -423,11 +422,12 @@ def create_expball_storage_handler(
                 )
 
             target_name = {
+                "submit": "jd",
                 "execute": "zxStore",
-                "confirm": "decide",
+                "close": "ljbhclose",
             }.get(phase)
             target = matches.get(target_name) if target_name is not None else None
-            initial_controls_ready = phase != "execute" or "in_store" in matches
+            initial_controls_ready = phase != "submit" or "in_store" in matches
             if not isinstance(target, dict) or not initial_controls_ready:
                 idle_polls += 1
                 if idle_polls >= max_idle_polls:
@@ -436,7 +436,7 @@ def create_expball_storage_handler(
                         stopped=True,
                         reason=(
                             "no_actionable_selection"
-                            if phase == "execute" and "in_store" in matches
+                            if phase == "submit" and "in_store" in matches
                             else "storage_controls_missing"
                         ),
                         report=report,
@@ -459,8 +459,9 @@ def create_expball_storage_handler(
             )
             operation = device_service.tap(x, y)
             action = {
+                "submit": "submit_storage_selection",
                 "execute": "execute_storage",
-                "confirm": "confirm_storage",
+                "close": "close_storage_result",
             }[phase]
             context.emit(
                 "device_action",
@@ -480,8 +481,9 @@ def create_expball_storage_handler(
                 )
             actions.append(action)
             phase = {
-                "execute": "confirm",
-                "confirm": "verify",
+                "submit": "execute",
+                "execute": "close",
+                "close": "verify",
             }[phase]
             idle_polls = 0
             context.sleep(

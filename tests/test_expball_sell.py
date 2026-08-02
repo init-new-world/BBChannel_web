@@ -46,8 +46,9 @@ class _Context:
 def _report(state, flow, status, *matches, action=None, reason=None):
     centers = {
         "autoSell": (320, 610),
+        "jd": (1120, 650),
         "destroy": (980, 620),
-        "sure": (900, 650),
+        "ljbhclose": (640, 610),
         "qpfull": (640, 320),
     }
     return {
@@ -76,16 +77,21 @@ def test_expball_sell_executes_current_selection_and_confirms():
                 "sell",
                 "actionable",
                 "autoSell",
-                "destroy",
+                "jd",
                 action="open_auto_sell",
             ),
-            _report("sure", "confirmation", "observed", "sure"),
+            _report("destroy", "sell", "actionable", "destroy"),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                "ljbhclose",
+            ),
             _report(
                 "autoSell",
                 "sell",
                 "actionable",
                 "autoSell",
-                "destroy",
                 action="open_auto_sell",
             ),
         )
@@ -110,8 +116,12 @@ def test_expball_sell_executes_current_selection_and_confirms():
     assert result["completed"] is True
     assert result["stopped"] is False
     assert result["reason"] == "sold"
-    assert result["actions"] == ["execute_sell", "confirm_sell"]
-    assert device.taps == [(980, 620), (900, 650)]
+    assert result["actions"] == [
+        "submit_sell_selection",
+        "execute_sell",
+        "close_sell_result",
+    ]
+    assert device.taps == [(1120, 650), (980, 620), (640, 610)]
     assert context.events[-1][0:2] == ("checkpoint", "complete")
 
 
@@ -123,10 +133,11 @@ def test_expball_sell_stops_before_confirmation_when_qp_is_full():
                 "sell",
                 "actionable",
                 "autoSell",
-                "destroy",
+                "jd",
                 action="open_auto_sell",
             ),
-            _report("qpfull", "confirmation", "observed", "qpfull", "sure"),
+            _report("destroy", "sell", "actionable", "destroy"),
+            _report("qpfull", "confirmation", "observed", "qpfull"),
         )
     )
 
@@ -144,8 +155,8 @@ def test_expball_sell_stops_before_confirmation_when_qp_is_full():
 
     assert result["completed"] is False
     assert result["reason"] == "qp_full"
-    assert result["actions"] == ["execute_sell"]
-    assert device.taps == [(980, 620)]
+    assert result["actions"] == ["submit_sell_selection", "execute_sell"]
+    assert device.taps == [(1120, 650), (980, 620)]
 
 
 def test_expball_sell_refuses_to_start_outside_sell_flow():

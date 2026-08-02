@@ -141,6 +141,38 @@ def test_expball_recognizer_prioritizes_storage_full_over_storage_actions():
     ]
 
 
+def test_expball_recognizer_exposes_selection_and_result_controls():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/CH"
+            assert limit == 200
+            return {
+                "entries": [
+                    {"path": "expball/CH/jd.png"},
+                    {"path": "expball/CH/ljbhclose.png"},
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [
+                _match(candidate["template_path"], True, 0.99 - index * 0.01)
+                for index, candidate in enumerate(candidates)
+            ]
+
+    report = ExpBallRecognizer(Resources(), Recognition()).recognize(
+        b"controls",
+        "CH",
+    )
+
+    assert [match["name"] for match in report["matches"]] == [
+        "jd",
+        "ljbhclose",
+    ]
+    assert report["matches"][0]["recommended_action"] == "submit_selection"
+    assert report["matches"][1]["recommended_action"] == "close_result"
+
+
 class _ScriptData:
     def get_setting_plan(self, name):
         assert name == "demo"
@@ -251,8 +283,9 @@ def _storage_report(*names):
     centers = {
         "in_store": (310, 120),
         "storeAll": (720, 310),
+        "jd": (1120, 650),
         "zxStore": (980, 620),
-        "decide": (900, 650),
+        "ljbhclose": (640, 610),
     }
     matches = [
         {
@@ -262,7 +295,7 @@ def _storage_report(*names):
         }
         for name in names
     ]
-    confirmation = "decide" in names
+    confirmation = "ljbhclose" in names
     return {
         "server": "CH",
         "state": names[0] if names else "unknown",
@@ -423,8 +456,9 @@ def test_expball_summon_defaults_to_ten_batches():
 def test_expball_storage_executes_current_selection_and_confirms():
     reports = iter(
         (
-            _storage_report("in_store", "zxStore"),
-            _storage_report("decide"),
+            _storage_report("in_store", "jd"),
+            _storage_report("zxStore"),
+            _storage_report("ljbhclose"),
             _storage_report("in_store"),
         )
     )
@@ -453,10 +487,11 @@ def test_expball_storage_executes_current_selection_and_confirms():
     assert result["stopped"] is False
     assert result["reason"] == "stored"
     assert result["actions"] == [
+        "submit_storage_selection",
         "execute_storage",
-        "confirm_storage",
+        "close_storage_result",
     ]
-    assert device.taps == [(980, 620), (900, 650)]
+    assert device.taps == [(1120, 650), (980, 620), (640, 610)]
     assert context.events[-1][0:2] == ("checkpoint", "complete")
 
 
@@ -489,7 +524,7 @@ def test_expball_storage_stops_when_a_storage_action_fails():
     class Recognizer:
         def recognize(self, _screenshot, _server, *, threshold):
             assert threshold == 0.84
-            return _storage_report("in_store", "zxStore")
+            return _storage_report("in_store", "jd")
 
     class Device(_Device):
         def tap(self, x, y):
@@ -505,7 +540,7 @@ def test_expball_storage_stops_when_a_storage_action_fails():
 
     assert result["reason"] == "device_action_failed"
     assert result["actions"] == []
-    assert device.taps == [(980, 620)]
+    assert device.taps == [(1120, 650)]
 
 
 def test_expball_storage_refuses_to_store_without_current_selection():

@@ -121,7 +121,7 @@ def create_expball_sell_handler(
             )
             return True
 
-        report = inspect("execute")
+        report = inspect("submit")
         if report.get("flow") != "sell":
             return finish(
                 completed=False,
@@ -136,12 +136,33 @@ def create_expball_sell_handler(
         }
         if (
             report.get("status") != "actionable"
-            or "destroy" not in initial_match_names
+            or "jd" not in initial_match_names
         ):
             return finish(
                 completed=False,
                 stopped=True,
                 reason="no_actionable_selection",
+                report=report,
+            )
+        if not tap_match(report, "jd", "submit_sell_selection"):
+            return finish(
+                completed=False,
+                stopped=True,
+                reason="device_action_failed",
+                report=report,
+            )
+
+        report = inspect("execute")
+        match_names = {
+            match.get("name")
+            for match in report.get("matches", [])
+            if isinstance(match, dict)
+        }
+        if report.get("flow") != "sell" or "destroy" not in match_names:
+            return finish(
+                completed=False,
+                stopped=True,
+                reason="confirmation_not_detected",
                 report=report,
             )
         if not tap_match(report, "destroy", "execute_sell"):
@@ -152,7 +173,7 @@ def create_expball_sell_handler(
                 report=report,
             )
 
-        report = inspect("confirm")
+        report = inspect("result")
         match_names = {
             match.get("name")
             for match in report.get("matches", [])
@@ -165,14 +186,14 @@ def create_expball_sell_handler(
                 reason="qp_full",
                 report=report,
             )
-        if report.get("flow") != "confirmation" or "sure" not in match_names:
+        if "ljbhclose" not in match_names:
             return finish(
                 completed=False,
                 stopped=True,
-                reason="confirmation_not_detected",
+                reason="sale_result_not_detected",
                 report=report,
             )
-        if not tap_match(report, "sure", "confirm_sell"):
+        if not tap_match(report, "ljbhclose", "close_sell_result"):
             return finish(
                 completed=False,
                 stopped=True,
