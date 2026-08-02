@@ -686,8 +686,20 @@ def create_battle_execute_plan_handler(
             for round_plan in program["rounds"]
         }
         battle_finished = False
+        detected_round: int | None = None
 
         for turn_number, (round_number, turn) in enumerate(turns, start=1):
+            if detected_round is not None and round_number < detected_round:
+                context.emit(
+                    "battle_turn_skipped",
+                    "Skipped a configured turn after the battle advanced.",
+                    data={
+                        "configured_round": round_number,
+                        "configured_turn": turn["turn"],
+                        "detected_round": detected_round,
+                    },
+                )
+                continue
             skill_actions = [
                 action
                 for action in turn["actions"]
@@ -889,15 +901,15 @@ def create_battle_execute_plan_handler(
                 )
                 if transition["state"] == "finished":
                     battle_finished = True
+                else:
+                    detected_round = int(transition["round"])
             if (
                 not battle_finished
                 and turn["turn"] == last_turns[round_number]
-                and extra_turn["actions"]
+                and transition is not None
+                and transition["round"] == round_number
             ):
                 for extra_number in range(1, 11):
-                    assert transition is not None
-                    if transition["round"] != round_number:
-                        break
                     context.emit(
                         "battle_extra_turn",
                         "Executing configured extra battle turn.",
@@ -933,6 +945,9 @@ def create_battle_execute_plan_handler(
                     )
                     if transition["state"] == "finished":
                         battle_finished = True
+                        break
+                    detected_round = int(transition["round"])
+                    if detected_round != round_number:
                         break
                 else:
                     raise RuntimeError(
