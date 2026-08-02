@@ -17,6 +17,9 @@ SERVANT_SKILL_POINTS = (
 SKILL_TARGET_POINTS = ((350, 440), (640, 440), (970, 440))
 MASTER_SKILL_MENU_POINT = (1217, 320)
 MASTER_SKILL_POINTS = ((905, 310), (997, 310), (1089, 310))
+SKILL_DIALOG_WAIT_SECONDS = 0.5
+MASTER_SKILL_MENU_WAIT_SECONDS = 0.5
+ORDER_CHANGE_WAIT_SECONDS = 0.7
 NP_POINTS = ((500, 110), (650, 200), (870, 200))
 ATTACK_POINT = (1150, 600)
 COMMAND_CARD_BACK_POINT = (1250, 683)
@@ -329,19 +332,28 @@ def _compile_skill(action: dict[str, Any]) -> dict[str, Any]:
                 f"servant_skill_{skill}",
                 x,
                 y,
-                wait_after_seconds=1.0 if target is not None else None,
+                wait_after_seconds=(
+                    SKILL_DIALOG_WAIT_SECONDS if target is not None else None
+                ),
             )
         ]
     else:
         menu_x, menu_y = MASTER_SKILL_MENU_POINT
         x, y = MASTER_SKILL_POINTS[skill - 10]
         steps = [
-            _tap("master_skill_menu", menu_x, menu_y, wait_after_seconds=1.5),
+            _tap(
+                "master_skill_menu",
+                menu_x,
+                menu_y,
+                wait_after_seconds=MASTER_SKILL_MENU_WAIT_SECONDS,
+            ),
             _tap(
                 f"master_skill_{skill}",
                 x,
                 y,
-                wait_after_seconds=1.0 if target is not None else None,
+                wait_after_seconds=(
+                    SKILL_DIALOG_WAIT_SECONDS if target is not None else None
+                ),
             ),
         ]
     if target is not None:
@@ -392,8 +404,17 @@ def _compile_servant_exchange(
     result = _supported(
         action,
         [
-            _tap("master_skill_menu", *MASTER_SKILL_MENU_POINT, wait_after_seconds=1.5),
-            _tap(f"master_skill_{skill}", skill_x, skill_y, wait_after_seconds=1.0),
+            _tap(
+                "master_skill_menu",
+                *MASTER_SKILL_MENU_POINT,
+                wait_after_seconds=MASTER_SKILL_MENU_WAIT_SECONDS,
+            ),
+            _tap(
+                f"master_skill_{skill}",
+                skill_x,
+                skill_y,
+                wait_after_seconds=ORDER_CHANGE_WAIT_SECONDS,
+            ),
             _tap(f"exchange_position_{left}", left_x, left_y),
             _tap(f"exchange_position_{right}", right_x, right_y),
             *[
@@ -507,7 +528,7 @@ def _compile_named_servant_skill(
         skill_step = _tap(
             f"servant_skill_{skill}",
             *SERVANT_SKILL_POINTS[skill - 1],
-            wait_after_seconds=1.0,
+            wait_after_seconds=SKILL_DIALOG_WAIT_SECONDS,
         )
         if not option:
             return _supported(action, [skill_step])
@@ -536,7 +557,7 @@ def _compile_named_servant_skill(
             f"servant_skill_{skill}",
             skill_x,
             skill_y,
-            wait_after_seconds=1.0,
+            wait_after_seconds=SKILL_DIALOG_WAIT_SECONDS,
         ),
         _tap(f"{name}_option_{option}", *option_point),
     ]
@@ -576,7 +597,7 @@ def _compile_special_skill(
                 f"servant_skill_{skill}",
                 skill_x,
                 skill_y,
-                wait_after_seconds=1.0,
+                wait_after_seconds=SKILL_DIALOG_WAIT_SECONDS,
             ),
             _tap(f"special_skill_option_{option}", option_x, option_y),
         ],

@@ -437,7 +437,7 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
             "role": "servant_skill_5",
             "x": 474,
             "y": 590,
-            "wait_after_seconds": 1.0,
+            "wait_after_seconds": 0.5,
         },
         {"type": "tap", "role": "skill_target_2", "x": 640, "y": 440},
     ]
@@ -564,7 +564,7 @@ def test_setting_program_compiles_servant_special_skill_choice(tmp_path: Path):
             "role": "servant_skill_2",
             "x": 163,
             "y": 590,
-            "wait_after_seconds": 1.0,
+            "wait_after_seconds": 0.5,
         },
         {"type": "tap", "role": "special_skill_option_2", "x": 639, "y": 433},
     ]
@@ -643,8 +643,8 @@ def test_setting_program_compiles_master_order_change(tmp_path: Path):
     action = payload["rounds"][0]["turns"][0]["actions"][0]
     assert action["state_change"] == {"type": "servant_exchange", "positions": [1, 4]}
     assert action["steps"] == [
-        {"type": "tap", "role": "master_skill_menu", "x": 1217, "y": 320, "wait_after_seconds": 1.5},
-        {"type": "tap", "role": "master_skill_12", "x": 1089, "y": 310, "wait_after_seconds": 1.0},
+        {"type": "tap", "role": "master_skill_menu", "x": 1217, "y": 320, "wait_after_seconds": 0.5},
+        {"type": "tap", "role": "master_skill_12", "x": 1089, "y": 310, "wait_after_seconds": 0.7},
         {"type": "tap", "role": "exchange_position_1", "x": 137, "y": 352},
         {"type": "tap", "role": "exchange_position_4", "x": 737, "y": 352},
         {"type": "tap", "role": "exchange_confirm_1", "x": 607, "y": 625},
@@ -722,7 +722,7 @@ def test_setting_program_rejects_unhashable_skill_command_without_server_error(t
         (
             ["Kukulkan", 2, 1, 3],
             [
-                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Kukulkan_option_1", "x": 960, "y": 423},
                 {"type": "tap", "role": "skill_target_3", "x": 970, "y": 440},
             ],
@@ -730,63 +730,63 @@ def test_setting_program_rejects_unhashable_skill_command_without_server_error(t
         (
             ["Barghest", 3, 0],
             [
-                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Barghest_option_0", "x": 640, "y": 423},
             ],
         ),
         (
             ["Soujyuro", 3, "B"],
             [
-                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Soujyuro_option_B", "x": 1000, "y": 422},
             ],
         ),
         (
             ["BBDubai", 3, 0],
             [
-                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "BBDubai_option_0", "x": 483, "y": 390},
             ],
         ),
         (
             ["Hakuno", 3, "R"],
             [
-                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Hakuno_option_R", "x": 1000, "y": 422},
             ],
         ),
         (
             ["VanGoghMiner", 1, "B"],
             [
-                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "VanGoghMiner_option_B", "x": 1000, "y": 422},
             ],
         ),
         (
             ["Dante", 2, "A"],
             [
-                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Dante_option_A", "x": 640, "y": 423},
             ],
         ),
         (
             ["Gyokuto", 2, "One"],
             [
-                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_2", "x": 163, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Gyokuto_option_One", "x": 960, "y": 423},
             ],
         ),
         (
             ["Charlotte", 3, "暴"],
             [
-                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Charlotte_option_暴", "x": 767, "y": 422},
             ],
         ),
         (
             ["Flora", 3, "D"],
             [
-                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
                 {"type": "tap", "role": "Flora_option_D", "x": 960, "y": 423},
             ],
         ),
@@ -822,7 +822,7 @@ def test_setting_program_compiles_named_servant_skill_options(
         (
             [],
             [
-                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 1.0},
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 0.5},
             ],
             None,
         ),
@@ -837,7 +837,7 @@ def test_setting_program_compiles_named_servant_skill_options(
                     "role": "servant_skill_1",
                     "x": 70,
                     "y": 590,
-                    "wait_after_seconds": 1.0,
+                    "wait_after_seconds": 0.5,
                 },
                 "max_rerolls": 3,
             },
@@ -942,14 +942,14 @@ def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
             "role": "master_skill_menu",
             "x": 1217,
             "y": 320,
-            "wait_after_seconds": 1.5,
+            "wait_after_seconds": 0.5,
         },
         {
             "type": "tap",
             "role": "master_skill_11",
             "x": 997,
             "y": 310,
-            "wait_after_seconds": 1.0,
+            "wait_after_seconds": 0.5,
         },
         {"type": "tap", "role": "skill_target_1", "x": 350, "y": 440},
     ]

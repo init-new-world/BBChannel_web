@@ -1383,7 +1383,7 @@ def _execution_options(payload: dict[str, Any]) -> tuple[float, float, float, fl
         _number(payload, "threshold", 0.75, minimum=0.0, maximum=1.0),
         _number(payload, "timeout_seconds", 120.0, minimum=0.1, maximum=300.0),
         _number(payload, "poll_interval", 0.25, minimum=0.01, maximum=10.0),
-        _number(payload, "tap_interval_seconds", 0.15, minimum=0.0, maximum=10.0),
+        _number(payload, "tap_interval_seconds", 0.1, minimum=0.0, maximum=10.0),
     )
 
 

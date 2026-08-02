@@ -272,9 +272,10 @@ def test_wait_for_battle_ready_matches_scaled_attack_button():
 
 
 def test_execution_options_allow_long_np_transitions_by_default():
-    _threshold, timeout_seconds, _poll_interval, _tap_interval = _execution_options({})
+    _threshold, timeout_seconds, _poll_interval, tap_interval = _execution_options({})
 
     assert timeout_seconds == 120.0
+    assert tap_interval == 0.1
 
 
 def test_wait_for_command_cards_settles_and_returns_fresh_screenshot():
