@@ -41,6 +41,7 @@ from webapp.automation import (
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
     register_lottery_inspect_job,
+    register_lottery_navigate_job,
     register_recovery_job,
     register_stage_job,
 )
@@ -228,6 +229,12 @@ def create_app(
         lottery_recognizer,
     )
     register_lottery_giftbox_receive_job(
+        job_manager,
+        script_data,
+        device_service,
+        lottery_recognizer,
+    )
+    register_lottery_navigate_job(
         job_manager,
         script_data,
         device_service,

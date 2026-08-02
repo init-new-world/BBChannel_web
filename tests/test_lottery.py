@@ -6,12 +6,15 @@ from webapp.automation.lottery import (
     LOTTERY_DRAW_JOB_KIND,
     LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
     LOTTERY_INSPECT_JOB_KIND,
+    LOTTERY_NAVIGATE_JOB_KIND,
     create_lottery_draw_handler,
     create_lottery_giftbox_receive_handler,
     create_lottery_inspect_handler,
+    create_lottery_navigate_handler,
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
     register_lottery_inspect_job,
+    register_lottery_navigate_job,
 )
 from webapp.core.models import MatchResult, OperationResult
 from webapp.runtime import JobDatabase, JobManager
@@ -133,6 +136,45 @@ def test_lottery_giftbox_recognizer_reads_star_filter_colors():
     recognizer = LotteryRecognizer(object(), object())
 
     assert recognizer._star_filter_states(encoded.getvalue()) == states
+
+
+def test_lottery_navigation_recognizer_prioritizes_specific_pages():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert limit == 100
+            paths = {
+                "unlimitedPool/CH": [
+                    "choose_pay.png",
+                    "giftbox_loaded.png",
+                    "in_box.png",
+                    "pay.png",
+                ],
+                "expball/CH": ["menu.png", "shop.png"],
+            }[prefix]
+            return {"entries": [{"path": f"{prefix}/{path}"} for path in paths]}
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            return [
+                _match(candidate["template_path"], True, 0.95)
+                for candidate in candidates
+            ]
+
+    report = LotteryRecognizer(Resources(), Recognition()).recognize_navigation(
+        b"screen",
+        "CH",
+    )
+
+    assert report["state"] == "choose_pay"
+    assert report["status"] == "actionable"
+    assert [match["name"] for match in report["matches"]] == [
+        "choose_pay",
+        "pay",
+        "giftbox_loaded",
+        "giftbox",
+        "menu_expanded",
+        "menu_available",
+    ]
 
 
 class _ScriptData:
@@ -286,6 +328,116 @@ def test_lottery_draw_stops_when_giftbox_is_full():
     assert device.taps == []
 
 
+def test_lottery_navigate_returns_from_giftbox_to_draw_page():
+    draw_reports = iter(
+        (
+            _report("unknown", "unknown"),
+            _report("unknown", "unknown"),
+            _report("unknown", "unknown"),
+            _report("unknown", "unknown"),
+            _report("unknown", "unknown"),
+            _report(
+                "draw_10",
+                "actionable",
+                action="draw",
+                action_point=(413, 435),
+            ),
+        )
+    )
+    navigation_reports = iter(
+        (
+            {"state": "giftbox_loaded", "status": "actionable"},
+            {"state": "menu_available", "status": "actionable"},
+            {"state": "menu_expanded", "status": "actionable"},
+            {"state": "pay", "status": "actionable"},
+            {"state": "unknown", "status": "unknown"},
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(draw_reports)
+
+        def recognize_navigation(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(navigation_reports)
+
+    device = _Device()
+    result = create_lottery_navigate_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "draw_page"
+    assert result["actions"] == [
+        "close_giftbox",
+        "open_menu",
+        "open_terminal",
+        "open_rewards",
+        "open_event",
+    ]
+    assert device.taps == [
+        (105, 43),
+        (1183, 650),
+        (137, 597),
+        (1183, 40),
+        (743, 140),
+    ]
+
+
+def test_lottery_navigate_selects_configured_reward_slot():
+    draw_reports = iter(
+        (
+            _report("unknown", "unknown"),
+            _report("unknown", "unknown"),
+            _report("draw_10", "actionable", action="draw"),
+        )
+    )
+    navigation_reports = iter(
+        (
+            {"state": "choose_pay", "status": "actionable"},
+            {"state": "unknown", "status": "unknown"},
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(draw_reports)
+
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(navigation_reports)
+
+    device = _Device()
+    result = create_lottery_navigate_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "pay_slot": 2,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["actions"] == ["select_reward_slot_2", "open_event"]
+    assert device.taps == [(640, 527), (743, 140)]
+
+
 def test_lottery_giftbox_receive_configures_filters_and_receives_batches():
     reports = iter(
         (
@@ -425,6 +577,12 @@ def test_lottery_jobs_require_connected_device(tmp_path):
             _Device(),
             object(),
         )
+        register_lottery_navigate_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
 
         assert manager.has_kind(LOTTERY_INSPECT_JOB_KIND)
         assert manager.requires_device(LOTTERY_INSPECT_JOB_KIND) is True
@@ -432,3 +590,5 @@ def test_lottery_jobs_require_connected_device(tmp_path):
         assert manager.requires_device(LOTTERY_DRAW_JOB_KIND) is True
         assert manager.has_kind(LOTTERY_GIFTBOX_RECEIVE_JOB_KIND)
         assert manager.requires_device(LOTTERY_GIFTBOX_RECEIVE_JOB_KIND) is True
+        assert manager.has_kind(LOTTERY_NAVIGATE_JOB_KIND)
+        assert manager.requires_device(LOTTERY_NAVIGATE_JOB_KIND) is True

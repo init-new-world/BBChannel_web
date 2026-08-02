@@ -17,6 +17,7 @@ from webapp.services.script_data import ScriptDataService
 LOTTERY_INSPECT_JOB_KIND = "event.lottery.inspect"
 LOTTERY_DRAW_JOB_KIND = "event.lottery.draw"
 LOTTERY_GIFTBOX_RECEIVE_JOB_KIND = "event.lottery.receive-giftbox"
+LOTTERY_NAVIGATE_JOB_KIND = "event.lottery.navigate"
 OPEN_GIFTBOX_POINT = (860, 565)
 OPEN_FILTER_POINT = (1157, 128)
 CLEAR_FILTERS_POINT = (225, 637)
@@ -25,6 +26,22 @@ STAR_FILTER_POINTS = {3: (640, 483), 4: (453, 483), 5: (265, 483)}
 APPLY_FILTER_POINT = (1060, 635)
 RECEIVE_ALL_POINT = (1150, 222)
 CONFIRM_RECEIVE_POINT = (837, 563)
+CLOSE_GIFTBOX_POINT = (105, 43)
+OPEN_MENU_POINT = (1183, 650)
+OPEN_TERMINAL_POINT = (137, 597)
+OPEN_REWARDS_POINT = (1183, 40)
+OPEN_EVENT_POINT = (743, 140)
+REWARD_SLOT_POINTS = {0: (640, 183), 1: (640, 370), 2: (640, 527)}
+_DRAW_PAGE_STATES = {
+    "confirm_reset",
+    "close_dialog",
+    "drawing",
+    "draw_1",
+    "draw_10",
+    "pool_empty",
+    "reset",
+    "result_close",
+}
 
 
 def create_lottery_inspect_handler(
@@ -245,6 +262,173 @@ def register_lottery_draw_job(
     job_manager.register(
         LOTTERY_DRAW_JOB_KIND,
         create_lottery_draw_handler(script_data, device_service, recognizer),
+        requires_device=True,
+    )
+
+
+def create_lottery_navigate_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: LotteryRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = _setting_name(payload)
+        threshold = _number(payload, "threshold", 0.8, 0, 1)
+        timeout_seconds = _number(payload, "timeout_seconds", 120, 0.1, 600)
+        poll_interval = _number(payload, "poll_interval", 0.25, 0, 10)
+        action_wait_seconds = _number(
+            payload,
+            "action_wait_seconds",
+            0.4,
+            0,
+            30,
+        )
+        max_actions = _integer(payload, "max_actions", 30, 1, 100)
+        max_idle_polls = _integer(payload, "max_idle_polls", 20, 1, 200)
+        pay_slot = _integer(payload, "pay_slot", 1, 0, 2)
+        plan = script_data.get_setting_plan(setting_name)
+        server = str(plan["server"]).upper()
+        run_options = plan.get("run", {})
+        random_touch = bool(run_options.get("random_touch"))
+        random_time = configured_random_time(run_options.get("random_time", 0))
+        started = monotonic()
+        attempts = 0
+        idle_polls = 0
+        actions: list[str] = []
+        last_action_state: str | None = None
+        reward_flow_started = False
+        event_opened = False
+        terminal_opened = False
+        last_report: dict[str, Any] | None = None
+
+        def finish(reason: str, report: dict[str, Any]) -> dict[str, Any]:
+            context.checkpoint(
+                "complete",
+                progress=1.0,
+                message="Navigation to the unlimited lottery completed.",
+            )
+            return {
+                "setting_name": setting_name,
+                "completed": True,
+                "reason": reason,
+                "attempts": attempts,
+                "actions": list(actions),
+                "last_report": report,
+            }
+
+        while monotonic() - started <= timeout_seconds:
+            attempts += 1
+            context.checkpoint(
+                "navigate_lottery",
+                progress=min((monotonic() - started) / timeout_seconds, 0.95),
+            )
+            screenshot = device_service.snapshot()
+            draw_report = recognizer.recognize(
+                screenshot,
+                server,
+                threshold=threshold,
+            )
+            if str(draw_report.get("state") or "unknown") in _DRAW_PAGE_STATES:
+                return finish("draw_page", draw_report)
+
+            report = recognizer.recognize_navigation(
+                screenshot,
+                server,
+                threshold=threshold,
+            )
+            last_report = report
+            state = str(report.get("state") or "unknown")
+            context.emit(
+                "lottery_navigation_state",
+                "Unlimited lottery navigation state was recognized.",
+                data={"attempt": attempts, **report},
+            )
+
+            action = None
+            point = None
+            if state in {"giftbox", "giftbox_loaded"}:
+                action, point = "close_giftbox", CLOSE_GIFTBOX_POINT
+            elif state == "choose_pay" and not reward_flow_started:
+                action = f"select_reward_slot_{pay_slot}"
+                point = REWARD_SLOT_POINTS[pay_slot]
+                reward_flow_started = True
+            elif state == "pay" and not reward_flow_started:
+                action, point = "open_rewards", OPEN_REWARDS_POINT
+                reward_flow_started = True
+            elif state == "menu_expanded" and not terminal_opened:
+                action, point = "open_terminal", OPEN_TERMINAL_POINT
+                terminal_opened = True
+            elif state == "menu_available":
+                action, point = "open_menu", OPEN_MENU_POINT
+            elif state == "unknown" and reward_flow_started and not event_opened:
+                action, point = "open_event", OPEN_EVENT_POINT
+                event_opened = True
+
+            action_state = f"{state}:{action}"
+            if action is None or point is None or action_state == last_action_state:
+                idle_polls += 1
+                if idle_polls >= max_idle_polls:
+                    return {
+                        "setting_name": setting_name,
+                        "completed": False,
+                        "reason": "no_actionable_navigation_state",
+                        "attempts": attempts,
+                        "actions": list(actions),
+                        "last_report": report,
+                    }
+                context.sleep(randomized_wait_seconds(poll_interval, random_time))
+                continue
+            if len(actions) >= max_actions:
+                return {
+                    "setting_name": setting_name,
+                    "completed": False,
+                    "reason": "action_limit",
+                    "attempts": attempts,
+                    "actions": list(actions),
+                    "last_report": report,
+                }
+
+            idle_polls = 0
+            last_action_state = action_state
+            x, y = randomized_touch_point(point, enabled=random_touch)
+            operation = device_service.tap(x, y)
+            actions.append(action)
+            context.emit(
+                "device_action",
+                "Executed an unlimited lottery navigation action.",
+                data={
+                    "role": action,
+                    "state": state,
+                    "operation": operation.to_dict(),
+                },
+            )
+            context.sleep(
+                randomized_wait_seconds(action_wait_seconds, random_time)
+            )
+
+        raise TimeoutError(
+            "Navigation to the unlimited lottery did not finish within "
+            f"{timeout_seconds:.2f} seconds. Last report: {last_report}"
+        )
+
+    return handler
+
+
+def register_lottery_navigate_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: LotteryRecognizer,
+) -> None:
+    if job_manager.has_kind(LOTTERY_NAVIGATE_JOB_KIND):
+        return
+    job_manager.register(
+        LOTTERY_NAVIGATE_JOB_KIND,
+        create_lottery_navigate_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
         requires_device=True,
     )
 

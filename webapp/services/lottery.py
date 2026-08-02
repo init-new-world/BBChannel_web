@@ -146,6 +146,25 @@ _GIFTBOX_TOGGLE_SPECS = (
     ("servant_exp_off", "servant_off.png", (487, 217, 97, 63)),
 )
 
+_NAVIGATION_STATE_SPECS = (
+    (
+        "choose_pay",
+        "unlimitedPool",
+        "choose_pay.png",
+        (600, 587, 80, 60),
+    ),
+    ("pay", "unlimitedPool", "pay.png", (1120, 7, 127, 66)),
+    (
+        "giftbox_loaded",
+        "unlimitedPool",
+        "giftbox_loaded.png",
+        (267, 93, 87, 40),
+    ),
+    ("giftbox", "unlimitedPool", "in_box.png", (253, 13, 80, 67)),
+    ("menu_expanded", "expball", "shop.png", (720, 547, 173, 173)),
+    ("menu_available", "expball", "menu.png", (1033, 533, 247, 187)),
+)
+
 _STAR_FILTER_ROIS = {
     3: (580, 467, 33, 33),
     4: (393, 467, 33, 33),
@@ -341,6 +360,66 @@ class LotteryRecognizer:
             "servant_exp_enabled": servant_exp_enabled,
             "star_filters": star_filters,
             "receive_all_enabled": receive_all_enabled,
+            "available_template_count": len(candidates),
+            "matches": matches,
+        }
+
+    def recognize_navigation(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.8,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        available_by_root: dict[str, set[str]] = {}
+        for resource_root in {spec[1] for spec in _NAVIGATION_STATE_SPECS}:
+            root = f"{resource_root}/{normalized_server}"
+            page = self._resources.template_index(prefix=root, limit=100)
+            available_by_root[resource_root] = {
+                str(entry["path"]) for entry in page["entries"]
+            }
+
+        available_specs = [
+            (name, roi, f"{resource_root}/{normalized_server}/{filename}")
+            for name, resource_root, filename, roi in _NAVIGATION_STATE_SPECS
+            if f"{resource_root}/{normalized_server}/{filename}"
+            in available_by_root[resource_root]
+        ]
+        candidates = [
+            {
+                "template_path": template_path,
+                "threshold": threshold,
+                "roi": roi,
+                "scales": LOTTERY_SCALES,
+            }
+            for _name, roi, template_path in available_specs
+        ]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        matches = [
+            {"name": name, **match.to_dict()}
+            for match, (name, _roi, _path) in zip(
+                results,
+                available_specs,
+                strict=True,
+            )
+            if match.matched
+        ]
+        primary = matches[0] if matches else None
+        return {
+            "server": normalized_server,
+            "state": primary["name"] if primary else "unknown",
+            "status": "actionable" if primary else "unknown",
+            "reason": None,
             "available_template_count": len(candidates),
             "matches": matches,
         }
