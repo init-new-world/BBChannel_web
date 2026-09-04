@@ -8,6 +8,9 @@ const state = {
   settings: [],
   strategies: [],
   equipTemplates: [],
+  equipCandidates: [],
+  equipFullCandidate: null,
+  equipNonFullCandidate: null,
   equipTemplateBusy: false,
   screenshotUrl: null,
   screenshotBase64: "",
@@ -123,8 +126,16 @@ const els = {
   runExpballStorage: document.querySelector("#run-expball-storage"),
   runExpballSell: document.querySelector("#run-expball-sell"),
   equipTemplateName: document.querySelector("#equip-template-name"),
+  captureEquipCandidates: document.querySelector("#capture-equip-candidates"),
+  equipCandidateList: document.querySelector("#equip-candidate-list"),
+  equipCandidatePreview: document.querySelector("#equip-candidate-preview"),
+  equipCandidatePreviewStatus: document.querySelector("#equip-candidate-preview-status"),
+  useEquipFull: document.querySelector("#use-equip-full"),
+  useEquipNonFull: document.querySelector("#use-equip-non-full"),
   equipFullImage: document.querySelector("#equip-full-image"),
   equipNonFullImage: document.querySelector("#equip-non-full-image"),
+  equipFullSource: document.querySelector("#equip-full-source"),
+  equipNonFullSource: document.querySelector("#equip-non-full-source"),
   buildEquipTemplate: document.querySelector("#build-equip-template"),
   equipTemplateList: document.querySelector("#equip-template-list"),
   equipTemplatePreview: document.querySelector("#equip-template-preview"),
@@ -252,8 +263,13 @@ function bindEvents() {
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
   els.equipTemplateName.addEventListener("input", updateControls);
-  els.equipFullImage.addEventListener("change", updateControls);
-  els.equipNonFullImage.addEventListener("change", updateControls);
+  els.captureEquipCandidates.addEventListener("click", captureEquipCandidates);
+  els.equipCandidateList.addEventListener("change", renderSelectedEquipCandidate);
+  els.equipCandidatePreview.addEventListener("error", handleEquipCandidatePreviewError);
+  els.useEquipFull.addEventListener("click", () => assignEquipCandidate("full"));
+  els.useEquipNonFull.addEventListener("click", () => assignEquipCandidate("non-full"));
+  els.equipFullImage.addEventListener("change", () => handleEquipFileChange("full"));
+  els.equipNonFullImage.addEventListener("change", () => handleEquipFileChange("non-full"));
   els.buildEquipTemplate.addEventListener("click", buildEquipTemplate);
   els.equipTemplateList.addEventListener("change", renderSelectedEquipTemplate);
   els.equipTemplatePreview.addEventListener("error", handleEquipTemplatePreviewError);
@@ -389,11 +405,141 @@ function handleEquipTemplatePreviewError() {
   els.equipTemplatePreviewStatus.textContent = "Preview unavailable";
 }
 
+async function captureEquipCandidates() {
+  if (!els.settingSelect.value || (!state.connected && !state.screenshotBase64)) {
+    return;
+  }
+  state.equipTemplateBusy = true;
+  updateControls();
+  try {
+    const payload = await api("/api/equip-templates/candidates", {
+      method: "POST",
+      body: JSON.stringify({
+        setting_name: els.settingSelect.value,
+        screenshot_base64: state.screenshotBase64 || null,
+      }),
+    });
+    state.equipCandidates = payload.candidates || [];
+    if (!state.equipCandidates.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No candidates";
+      els.equipCandidateList.replaceChildren(option);
+    } else {
+      els.equipCandidateList.replaceChildren(
+        ...state.equipCandidates.map((candidate) => {
+          const option = document.createElement("option");
+          option.value = candidate.id;
+          option.textContent = `Row ${candidate.row} | ${formatEquipCandidateKind(candidate.kind)}`;
+          return option;
+        }),
+      );
+    }
+    renderSelectedEquipCandidate();
+  } catch (error) {
+    state.equipCandidates = [];
+    els.equipCandidateList.replaceChildren();
+    renderSelectedEquipCandidate();
+    showError(error);
+  } finally {
+    state.equipTemplateBusy = false;
+    updateControls();
+  }
+}
+
+function selectedEquipCandidate() {
+  return state.equipCandidates.find(
+    (candidate) => candidate.id === els.equipCandidateList.value,
+  ) || null;
+}
+
+function renderSelectedEquipCandidate() {
+  const candidate = selectedEquipCandidate();
+  if (!candidate) {
+    els.equipCandidatePreview.hidden = true;
+    els.equipCandidatePreview.removeAttribute("src");
+    els.equipCandidatePreviewStatus.hidden = false;
+    els.equipCandidatePreviewStatus.textContent = "No candidates";
+    updateControls();
+    return;
+  }
+  els.equipCandidatePreview.hidden = false;
+  els.equipCandidatePreview.src = `data:image/png;base64,${candidate.image_base64}`;
+  els.equipCandidatePreviewStatus.hidden = false;
+  els.equipCandidatePreviewStatus.textContent = `Row ${candidate.row}`;
+  updateControls();
+}
+
+function handleEquipCandidatePreviewError() {
+  els.equipCandidatePreview.hidden = true;
+  els.equipCandidatePreviewStatus.hidden = false;
+  els.equipCandidatePreviewStatus.textContent = "Preview unavailable";
+}
+
+function assignEquipCandidate(target) {
+  const candidate = selectedEquipCandidate();
+  if (!candidate) {
+    return;
+  }
+  if (target === "full") {
+    state.equipFullCandidate = candidate;
+    els.equipFullImage.value = "";
+  } else {
+    state.equipNonFullCandidate = candidate;
+    els.equipNonFullImage.value = "";
+  }
+  renderEquipInputSources();
+  updateControls();
+}
+
+function handleEquipFileChange(target) {
+  if (target === "full" && els.equipFullImage.files[0]) {
+    state.equipFullCandidate = null;
+  }
+  if (target === "non-full" && els.equipNonFullImage.files[0]) {
+    state.equipNonFullCandidate = null;
+  }
+  renderEquipInputSources();
+  updateControls();
+}
+
+function renderEquipInputSources() {
+  els.equipFullSource.textContent = formatEquipInputSource(
+    "Full",
+    els.equipFullImage.files[0],
+    state.equipFullCandidate,
+  );
+  els.equipNonFullSource.textContent = formatEquipInputSource(
+    "Non-full",
+    els.equipNonFullImage.files[0],
+    state.equipNonFullCandidate,
+  );
+}
+
+function formatEquipInputSource(label, file, candidate) {
+  if (file) {
+    return `${label}: ${file.name}`;
+  }
+  if (candidate) {
+    return `${label}: row ${candidate.row} ${formatEquipCandidateKind(candidate.kind)}`;
+  }
+  return `${label}: not set`;
+}
+
+function formatEquipCandidateKind(kind) {
+  if (kind === "equip") {
+    return "Equip";
+  }
+  return String(kind || "candidate").replace("_", " ");
+}
+
 async function buildEquipTemplate() {
   const name = els.equipTemplateName.value.trim();
   const fullImage = els.equipFullImage.files[0] || null;
   const nonFullImage = els.equipNonFullImage.files[0] || null;
-  if (!name || (!fullImage && !nonFullImage)) {
+  const hasFullSource = fullImage || state.equipFullCandidate;
+  const hasNonFullSource = nonFullImage || state.equipNonFullCandidate;
+  if (!name || (!hasFullSource && !hasNonFullSource)) {
     return;
   }
 
@@ -401,8 +547,12 @@ async function buildEquipTemplate() {
   updateControls();
   try {
     const [fullImageBase64, nonFullImageBase64] = await Promise.all([
-      fullImage ? blobToDataUrl(fullImage) : null,
-      nonFullImage ? blobToDataUrl(nonFullImage) : null,
+      fullImage
+        ? blobToDataUrl(fullImage)
+        : equipCandidateDataUrl(state.equipFullCandidate),
+      nonFullImage
+        ? blobToDataUrl(nonFullImage)
+        : equipCandidateDataUrl(state.equipNonFullCandidate),
     ]);
     const request = {
       full_image_base64: fullImageBase64,
@@ -421,6 +571,9 @@ async function buildEquipTemplate() {
     }
     els.equipFullImage.value = "";
     els.equipNonFullImage.value = "";
+    state.equipFullCandidate = null;
+    state.equipNonFullCandidate = null;
+    renderEquipInputSources();
     await Promise.all([
       loadEquipTemplates(template.name, template.location),
       loadTemplates(),
@@ -431,6 +584,10 @@ async function buildEquipTemplate() {
     state.equipTemplateBusy = false;
     updateControls();
   }
+}
+
+function equipCandidateDataUrl(candidate) {
+  return candidate ? `data:image/png;base64,${candidate.image_base64}` : null;
 }
 
 function saveEquipTemplate(name, request) {
@@ -1631,8 +1788,12 @@ function updateControls() {
   const supportsExpball = ["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server);
   const hasLotteryStars = selectedLotteryStars().length > 0;
   const equipTemplate = selectedEquipTemplate();
+  const equipCandidate = selectedEquipCandidate();
   const hasEquipImage = Boolean(
-    els.equipFullImage.files[0] || els.equipNonFullImage.files[0],
+    els.equipFullImage.files[0]
+      || els.equipNonFullImage.files[0]
+      || state.equipFullCandidate
+      || state.equipNonFullCandidate,
   );
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
@@ -1711,6 +1872,12 @@ function updateControls() {
   els.editStrategy.disabled = !els.strategySelect.value;
   els.deleteStrategy.disabled = !els.strategySelect.value;
   els.equipTemplateName.disabled = state.equipTemplateBusy;
+  els.captureEquipCandidates.disabled = state.equipTemplateBusy
+    || !els.settingSelect.value
+    || (!state.connected && !state.screenshotBase64);
+  els.equipCandidateList.disabled = state.equipTemplateBusy || !state.equipCandidates.length;
+  els.useEquipFull.disabled = state.equipTemplateBusy || !equipCandidate;
+  els.useEquipNonFull.disabled = state.equipTemplateBusy || !equipCandidate;
   els.equipFullImage.disabled = state.equipTemplateBusy;
   els.equipNonFullImage.disabled = state.equipTemplateBusy;
   els.equipTemplateList.disabled = state.equipTemplateBusy || !state.equipTemplates.length;

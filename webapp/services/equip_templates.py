@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import tempfile
 from io import BytesIO
@@ -15,6 +16,13 @@ from webapp.services.resources import ResourceService
 TEMPLATE_SIZE = (237, 68)
 CHECK_BOX = (194, 34, 228, 68)
 INVALID_NAME_CHARACTERS = set('<>:"/\\|?*')
+EXTRACTION_REFERENCE_SIZE = (1788, 1006)
+EXTRACTION_REGIONS = (
+    ("equip", (-110, 58, 110, 122)),
+    ("skill_1", (127, -78, 347, -15)),
+    ("skill_2", (127, -13, 347, 50)),
+    ("skill_3", (127, 52, 347, 115)),
+)
 
 
 class EquipTemplateService:
@@ -124,6 +132,48 @@ class EquipTemplateService:
                     {"name": normalized_name, "location": location},
                 )
             return image_path.read_bytes()
+
+    def extract_candidates(
+        self,
+        screenshot: bytes,
+        anchors: list[list[int]],
+    ) -> list[dict[str, object]]:
+        image = _load_image(screenshot, "screenshot_base64")
+        width, height = image.size
+        reference_width, reference_height = EXTRACTION_REFERENCE_SIZE
+        candidates: list[dict[str, object]] = []
+        for row_index, anchor in enumerate(anchors[:20], start=1):
+            if len(anchor) != 2:
+                continue
+            anchor_x, anchor_y = anchor
+            adjusted_x = anchor_x + 10 * width / reference_width
+            adjusted_y = anchor_y + 20 * height / reference_height
+            for kind, offsets in EXTRACTION_REGIONS:
+                left_offset, top_offset, right_offset, bottom_offset = offsets
+                bounds = (
+                    round(adjusted_x + left_offset * width / reference_width),
+                    round(adjusted_y + top_offset * height / reference_height),
+                    round(adjusted_x + right_offset * width / reference_width),
+                    round(adjusted_y + bottom_offset * height / reference_height),
+                )
+                if not _box_inside(bounds, image.size):
+                    continue
+                candidate_image = image.crop(bounds).resize(
+                    TEMPLATE_SIZE,
+                    Image.Resampling.LANCZOS,
+                )
+                candidates.append(
+                    {
+                        "id": f"{row_index}:{kind}",
+                        "row": row_index,
+                        "kind": kind,
+                        "bounds": list(bounds),
+                        "image_base64": base64.b64encode(_encode_png(candidate_image)).decode(
+                            "ascii"
+                        ),
+                    }
+                )
+        return candidates
 
     def _move(
         self,
@@ -280,3 +330,15 @@ def _reserve_temporary_path(path: Path, *, suffix: str) -> Path:
         temporary_path = Path(temporary.name)
     temporary_path.unlink()
     return temporary_path
+
+
+def _box_inside(box: tuple[int, int, int, int], image_size: tuple[int, int]) -> bool:
+    left, top, right, bottom = box
+    width, height = image_size
+    return 0 <= left < right <= width and 0 <= top < bottom <= height
+
+
+def _encode_png(image: Image.Image) -> bytes:
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()

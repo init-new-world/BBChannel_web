@@ -240,6 +240,16 @@
               <span>Name</span>
               <input id="equip-template-name" class="field" type="text" maxlength="100" autocomplete="off">
             </label>
+            <button id="capture-equip-candidates" class="ghost-button wide" type="button">Extract Candidates</button>
+            <select id="equip-candidate-list" class="field" aria-label="Extracted equip candidate"></select>
+            <div class="equip-template-preview-frame">
+              <img id="equip-candidate-preview" alt="Extracted assist row candidate" hidden>
+              <span id="equip-candidate-preview-status" class="equip-template-preview-status">No candidates</span>
+            </div>
+            <div class="equip-template-actions">
+              <button id="use-equip-full" class="ghost-button" type="button">Set Full</button>
+              <button id="use-equip-non-full" class="ghost-button" type="button">Set Non-full</button>
+            </div>
             <div class="equip-template-files">
               <label class="field-stack file-field">
                 <span>Limit broken</span>
@@ -249,6 +259,10 @@
                 <span>Not limit broken</span>
                 <input id="equip-non-full-image" class="field" type="file" accept="image/*">
               </label>
+            </div>
+            <div class="equip-input-state">
+              <span id="equip-full-source">Full: not set</span>
+              <span id="equip-non-full-source">Non-full: not set</span>
             </div>
             <button id="build-equip-template" class="primary-button wide" type="button">Build Template</button>
             <select id="equip-template-list" class="field" aria-label="Assist equip template"></select>

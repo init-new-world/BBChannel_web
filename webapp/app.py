@@ -143,6 +143,12 @@ class MoveEquipTemplateRequest(BaseModel):
     overwrite: bool = False
 
 
+class CaptureEquipCandidatesRequest(BaseModel):
+    setting_name: str = Field(min_length=1)
+    screenshot_base64: str | None = None
+    threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -497,6 +503,42 @@ def create_app(
             media_type="image/png",
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.post("/api/equip-templates/candidates")
+    def capture_equip_template_candidates(request: CaptureEquipCandidatesRequest) -> dict:
+        screenshot = _decode_optional_image(request.screenshot_base64) or device_service.snapshot()
+        plan = script_data.get_setting_plan(request.setting_name)
+        assist = plan.get("assist") or {}
+        capture_assist = {
+            "mode": "仅从者",
+            "servant_name": assist.get("servant_name"),
+            "servant_canonical_name": assist.get("servant_canonical_name"),
+            "servant_sn": assist.get("servant_sn"),
+        }
+        if not capture_assist["servant_canonical_name"]:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "The selected script does not have a recognized assist servant.",
+                {"setting_name": request.setting_name},
+            )
+        recognition_result = assist_recognizer.recognize(
+            screenshot,
+            capture_assist,
+            server=str(plan.get("server") or "CH"),
+            threshold=request.threshold,
+        )
+        servant_candidates = recognition_result["candidates"]
+        candidates = equip_templates.extract_candidates(
+            screenshot,
+            [candidate["anchor"] for candidate in servant_candidates],
+        )
+        return {
+            "servant_name": capture_assist["servant_name"],
+            "servant_canonical_name": capture_assist["servant_canonical_name"],
+            "servant_match_count": len(servant_candidates),
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+        }
 
     @app.post("/api/equip-templates/{name}")
     def build_equip_template(name: str, request: BuildEquipTemplateRequest) -> dict[str, object]:

@@ -307,6 +307,20 @@ select:disabled {
   gap: 8px;
 }
 
+.equip-input-state {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.equip-input-state span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .toggle-row {
   min-height: 30px;
   display: flex;

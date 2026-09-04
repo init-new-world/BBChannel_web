@@ -78,6 +78,11 @@ def test_operator_console_references_api_controls():
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
     assert 'id="equip-template-name"' in index
+    assert 'id="capture-equip-candidates"' in index
+    assert 'id="equip-candidate-list"' in index
+    assert 'id="equip-candidate-preview"' in index
+    assert 'id="use-equip-full"' in index
+    assert 'id="use-equip-non-full"' in index
     assert 'id="equip-full-image"' in index
     assert 'id="equip-non-full-image"' in index
     assert 'id="build-equip-template"' in index
@@ -130,6 +135,8 @@ def test_operator_console_references_api_controls():
     assert "full_image_base64" in script
     assert "non_full_image_base64" in script
     assert "loadEquipTemplates" in script
+    assert "captureEquipCandidates" in script
+    assert "screenshot_base64: state.screenshotBase64 || null" in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
     assert '["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server)' in script
     assert "!supportsExpball" in script

@@ -343,6 +343,67 @@ def test_equip_template_overwrite_removes_stale_precision_checks(tmp_path: Path)
     assert not (assets / "assist" / "equip_check" / "Event CE_1.png").exists()
 
 
+def test_equip_template_candidate_route_extracts_assist_row_regions(tmp_path: Path):
+    import base64
+    from io import BytesIO
+
+    pytest.importorskip("cv2")
+    from PIL import Image, ImageDraw
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    data = Path(client.app.state.resources.data_dir)
+    servant_faces = assets / "servantface"
+    servant_faces.mkdir(parents=True)
+    portrait = Image.new("RGB", (60, 60), (20, 35, 50))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((4, 4, 55, 55), outline=(50, 170, 230), width=4)
+    portrait_draw.ellipse((15, 12, 44, 41), fill=(240, 210, 160))
+    portrait_draw.line((8, 52, 52, 8), fill=(230, 40, 80), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    _write_json(
+        data / "servant_info_CH.json",
+        {"Support": {"SN": "314", "class": "Caster"}},
+    )
+    _write_json(
+        data / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_3_name": "Support",
+            "assistIdx": 3,
+            "assistMode": "从者礼装",
+        },
+    )
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    screenshot.paste(portrait, (200, 180))
+    screenshot_output = BytesIO()
+    screenshot.save(screenshot_output, format="PNG")
+
+    response = client.post(
+        "/api/equip-templates/candidates",
+        json={
+            "setting_name": "demo",
+            "screenshot_base64": base64.b64encode(screenshot_output.getvalue()).decode("ascii"),
+            "threshold": 0.99,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["servant_name"] == "Support"
+    assert payload["servant_match_count"] == 1
+    assert payload["candidate_count"] == 4
+    assert [candidate["kind"] for candidate in payload["candidates"]] == [
+        "equip",
+        "skill_1",
+        "skill_2",
+        "skill_3",
+    ]
+    for candidate in payload["candidates"]:
+        image = Image.open(BytesIO(base64.b64decode(candidate["image_base64"])))
+        assert image.size == (237, 68)
+
+
 def test_match_route_accepts_roi_and_scales(tmp_path: Path):
     pytest.importorskip("cv2")
     import base64
