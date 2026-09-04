@@ -490,6 +490,14 @@ def create_app(
     def equip_template_inventory() -> dict[str, list[dict[str, object]]]:
         return {"templates": equip_templates.inventory()}
 
+    @app.get("/api/equip-templates/{name}/image")
+    def equip_template_image(name: str, location: str = Query(default="active")) -> Response:
+        return Response(
+            content=equip_templates.read_image(name, location=location),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.post("/api/equip-templates/{name}")
     def build_equip_template(name: str, request: BuildEquipTemplateRequest) -> dict[str, object]:
         return equip_templates.build(

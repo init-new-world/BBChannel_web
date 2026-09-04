@@ -77,6 +77,14 @@ def test_operator_console_references_api_controls():
     assert 'id="expball-overflow-action"' not in index
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
+    assert 'id="equip-template-name"' in index
+    assert 'id="equip-full-image"' in index
+    assert 'id="equip-non-full-image"' in index
+    assert 'id="build-equip-template"' in index
+    assert 'id="equip-template-list"' in index
+    assert 'id="equip-template-preview"' in index
+    assert 'id="activate-equip-template"' in index
+    assert 'id="archive-equip-template"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
     assert '!["free_quest", "main_story"].includes(' in script
@@ -118,6 +126,10 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.expball.storage"' in script
     assert 'enqueueJob("event.expball.sell"' in script
     assert "overflowCycles" not in script
+    assert "/api/equip-templates" in script
+    assert "full_image_base64" in script
+    assert "non_full_image_base64" in script
+    assert "loadEquipTemplates" in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
     assert '["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server)' in script
     assert "!supportsExpball" in script

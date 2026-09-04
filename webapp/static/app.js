@@ -7,6 +7,8 @@ const state = {
   devices: [],
   settings: [],
   strategies: [],
+  equipTemplates: [],
+  equipTemplateBusy: false,
   screenshotUrl: null,
   screenshotBase64: "",
   debugOverlayDataUrl: null,
@@ -120,6 +122,15 @@ const els = {
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
   runExpballSell: document.querySelector("#run-expball-sell"),
+  equipTemplateName: document.querySelector("#equip-template-name"),
+  equipFullImage: document.querySelector("#equip-full-image"),
+  equipNonFullImage: document.querySelector("#equip-non-full-image"),
+  buildEquipTemplate: document.querySelector("#build-equip-template"),
+  equipTemplateList: document.querySelector("#equip-template-list"),
+  equipTemplatePreview: document.querySelector("#equip-template-preview"),
+  equipTemplatePreviewStatus: document.querySelector("#equip-template-preview-status"),
+  activateEquipTemplate: document.querySelector("#activate-equip-template"),
+  archiveEquipTemplate: document.querySelector("#archive-equip-template"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -171,6 +182,7 @@ async function init() {
     loadSettings(),
     loadStrategies(),
     loadTemplates(),
+    loadEquipTemplates(),
     loadEvents(),
     loadJobs(),
   ]);
@@ -239,6 +251,14 @@ function bindEvents() {
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
+  els.equipTemplateName.addEventListener("input", updateControls);
+  els.equipFullImage.addEventListener("change", updateControls);
+  els.equipNonFullImage.addEventListener("change", updateControls);
+  els.buildEquipTemplate.addEventListener("click", buildEquipTemplate);
+  els.equipTemplateList.addEventListener("change", renderSelectedEquipTemplate);
+  els.equipTemplatePreview.addEventListener("error", handleEquipTemplatePreviewError);
+  els.activateEquipTemplate.addEventListener("click", () => moveEquipTemplate("activate"));
+  els.archiveEquipTemplate.addEventListener("click", () => moveEquipTemplate("archive"));
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -298,6 +318,164 @@ async function loadTemplates() {
   } catch (error) {
     showError(error);
   }
+}
+
+async function loadEquipTemplates(preferredName = "", preferredLocation = "") {
+  try {
+    const selectedKey = preferredName
+      ? equipTemplateKey({ name: preferredName, location: preferredLocation })
+      : els.equipTemplateList.value;
+    const payload = await api("/api/equip-templates");
+    state.equipTemplates = payload.templates || [];
+    if (!state.equipTemplates.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No templates";
+      els.equipTemplateList.replaceChildren(option);
+    } else {
+      els.equipTemplateList.replaceChildren(
+        ...state.equipTemplates.map((template) => {
+          const option = document.createElement("option");
+          option.value = equipTemplateKey(template);
+          const location = template.location === "active" ? "Active" : "Archive";
+          const mode = template.precise ? "precise" : "simple";
+          option.textContent = `${location} | ${template.name} | ${mode}`;
+          return option;
+        }),
+      );
+      if (state.equipTemplates.some((template) => equipTemplateKey(template) === selectedKey)) {
+        els.equipTemplateList.value = selectedKey;
+      }
+    }
+    renderSelectedEquipTemplate();
+  } catch (error) {
+    state.equipTemplates = [];
+    els.equipTemplateList.replaceChildren();
+    renderSelectedEquipTemplate();
+    showError(error);
+  }
+}
+
+function equipTemplateKey(template) {
+  return `${template.location}:${template.name}`;
+}
+
+function selectedEquipTemplate() {
+  return state.equipTemplates.find(
+    (template) => equipTemplateKey(template) === els.equipTemplateList.value,
+  ) || null;
+}
+
+function renderSelectedEquipTemplate() {
+  const template = selectedEquipTemplate();
+  if (!template) {
+    els.equipTemplatePreview.hidden = true;
+    els.equipTemplatePreview.removeAttribute("src");
+    els.equipTemplatePreviewStatus.hidden = false;
+    els.equipTemplatePreviewStatus.textContent = "No templates";
+    updateControls();
+    return;
+  }
+  els.equipTemplatePreviewStatus.hidden = false;
+  els.equipTemplatePreviewStatus.textContent = template.precise ? "Precise" : "Simple";
+  els.equipTemplatePreview.hidden = false;
+  els.equipTemplatePreview.src = `/api/equip-templates/${encodeURIComponent(template.name)}/image?location=${template.location}`;
+  updateControls();
+}
+
+function handleEquipTemplatePreviewError() {
+  els.equipTemplatePreview.hidden = true;
+  els.equipTemplatePreviewStatus.hidden = false;
+  els.equipTemplatePreviewStatus.textContent = "Preview unavailable";
+}
+
+async function buildEquipTemplate() {
+  const name = els.equipTemplateName.value.trim();
+  const fullImage = els.equipFullImage.files[0] || null;
+  const nonFullImage = els.equipNonFullImage.files[0] || null;
+  if (!name || (!fullImage && !nonFullImage)) {
+    return;
+  }
+
+  state.equipTemplateBusy = true;
+  updateControls();
+  try {
+    const [fullImageBase64, nonFullImageBase64] = await Promise.all([
+      fullImage ? blobToDataUrl(fullImage) : null,
+      nonFullImage ? blobToDataUrl(nonFullImage) : null,
+    ]);
+    const request = {
+      full_image_base64: fullImageBase64,
+      non_full_image_base64: nonFullImageBase64,
+      overwrite: false,
+    };
+    let template;
+    try {
+      template = await saveEquipTemplate(name, request);
+    } catch (error) {
+      const conflict = error?.payload?.error?.code === "data_file_conflict";
+      if (!conflict || !window.confirm(`Replace archived template ${name}?`)) {
+        throw error;
+      }
+      template = await saveEquipTemplate(name, { ...request, overwrite: true });
+    }
+    els.equipFullImage.value = "";
+    els.equipNonFullImage.value = "";
+    await Promise.all([
+      loadEquipTemplates(template.name, template.location),
+      loadTemplates(),
+    ]);
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.equipTemplateBusy = false;
+    updateControls();
+  }
+}
+
+function saveEquipTemplate(name, request) {
+  return api(`/api/equip-templates/${encodeURIComponent(name)}`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+async function moveEquipTemplate(action) {
+  const template = selectedEquipTemplate();
+  if (!template) {
+    return;
+  }
+  state.equipTemplateBusy = true;
+  updateControls();
+  try {
+    let moved;
+    try {
+      moved = await requestEquipTemplateMove(template, action, false);
+    } catch (error) {
+      const conflict = error?.payload?.error?.code === "data_file_conflict";
+      const destination = action === "activate" ? "active" : "archive";
+      if (!conflict || !window.confirm(`Replace ${destination} template ${template.name}?`)) {
+        throw error;
+      }
+      moved = await requestEquipTemplateMove(template, action, true);
+    }
+    await Promise.all([
+      loadEquipTemplates(moved.name, moved.location),
+      loadTemplates(),
+    ]);
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.equipTemplateBusy = false;
+    updateControls();
+  }
+}
+
+function requestEquipTemplateMove(template, action, overwrite) {
+  return api(`/api/equip-templates/${encodeURIComponent(template.name)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({ overwrite }),
+  });
 }
 
 async function loadSettings(preferredName = "") {
@@ -1452,6 +1630,10 @@ function updateControls() {
   const supportsLottery = ["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server);
   const supportsExpball = ["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server);
   const hasLotteryStars = selectedLotteryStars().length > 0;
+  const equipTemplate = selectedEquipTemplate();
+  const hasEquipImage = Boolean(
+    els.equipFullImage.files[0] || els.equipNonFullImage.files[0],
+  );
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
@@ -1528,6 +1710,19 @@ function updateControls() {
   els.deleteSetting.disabled = !els.settingSelect.value;
   els.editStrategy.disabled = !els.strategySelect.value;
   els.deleteStrategy.disabled = !els.strategySelect.value;
+  els.equipTemplateName.disabled = state.equipTemplateBusy;
+  els.equipFullImage.disabled = state.equipTemplateBusy;
+  els.equipNonFullImage.disabled = state.equipTemplateBusy;
+  els.equipTemplateList.disabled = state.equipTemplateBusy || !state.equipTemplates.length;
+  els.buildEquipTemplate.disabled = state.equipTemplateBusy
+    || !els.equipTemplateName.value.trim()
+    || !hasEquipImage;
+  els.activateEquipTemplate.disabled = state.equipTemplateBusy
+    || !equipTemplate
+    || equipTemplate.location === "active";
+  els.archiveEquipTemplate.disabled = state.equipTemplateBusy
+    || !equipTemplate
+    || equipTemplate.location === "archive";
 }
 
 function mergeDevice(device) {

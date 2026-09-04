@@ -106,6 +106,25 @@ class EquipTemplateService:
     def archive(self, name: str, *, overwrite: bool = False) -> dict[str, object]:
         return self._move(name, source="active", destination="archive", overwrite=overwrite)
 
+    def read_image(self, name: str, *, location: str) -> bytes:
+        normalized_name = _validate_name(name)
+        if location not in self._locations:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Equip template location is invalid.",
+                {"location": location},
+            )
+        with self._lock:
+            image_dir, _check_dir = self._locations[location]
+            image_path = image_dir / f"{normalized_name}.png"
+            if not image_path.is_file():
+                raise AppError(
+                    ErrorCode.DATA_FILE_NOT_FOUND,
+                    f"Equip template was not found in {location}: {normalized_name}",
+                    {"name": normalized_name, "location": location},
+                )
+            return image_path.read_bytes()
+
     def _move(
         self,
         name: str,
@@ -126,12 +145,18 @@ class EquipTemplateService:
                     {"name": normalized_name, "location": source},
                 )
 
-            pairs = [(source_image, destination_image_dir / source_image.name)]
+            destination_image = destination_image_dir / source_image.name
+            destination_checks = [
+                destination_check_dir / f"{normalized_name}{suffix}"
+                for suffix in ("_0.png", "_1.png")
+            ]
+            pairs = [(source_image, destination_image)]
             for suffix in ("_0.png", "_1.png"):
                 source_check = source_check_dir / f"{normalized_name}{suffix}"
                 if source_check.is_file():
                     pairs.append((source_check, destination_check_dir / source_check.name))
-            conflicts = [target for _source, target in pairs if target.exists()]
+            destination_files = [destination_image, *destination_checks]
+            conflicts = [target for target in destination_files if target.exists()]
             if conflicts and not overwrite:
                 raise AppError(
                     ErrorCode.DATA_FILE_CONFLICT,
@@ -142,7 +167,12 @@ class EquipTemplateService:
             destination_image_dir.mkdir(parents=True, exist_ok=True)
             destination_check_dir.mkdir(parents=True, exist_ok=True)
             moved: list[tuple[Path, Path]] = []
+            backups: list[tuple[Path, Path]] = []
             try:
+                for destination_path in conflicts:
+                    backup_path = _reserve_temporary_path(destination_path, suffix=".backup")
+                    os.replace(destination_path, backup_path)
+                    backups.append((destination_path, backup_path))
                 for source_path, destination_path in pairs:
                     os.replace(source_path, destination_path)
                     moved.append((source_path, destination_path))
@@ -150,11 +180,17 @@ class EquipTemplateService:
                 for source_path, destination_path in reversed(moved):
                     if destination_path.exists() and not source_path.exists():
                         os.replace(destination_path, source_path)
+                for destination_path, backup_path in reversed(backups):
+                    if backup_path.exists():
+                        os.replace(backup_path, destination_path)
                 raise AppError(
                     ErrorCode.DATA_FILE_INVALID,
                     f"Equip template could not be moved to {destination}.",
                     {"name": normalized_name, "error": str(exc)},
                 ) from exc
+            finally:
+                for _destination_path, backup_path in backups:
+                    backup_path.unlink(missing_ok=True)
 
             self._resources.refresh_template_index()
             return self._describe(normalized_name, destination, destination_check_dir)
@@ -232,3 +268,15 @@ def _save_png_atomic(image: Image.Image | None, path: Path) -> None:
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def _reserve_temporary_path(path: Path, *, suffix: str) -> Path:
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{path.stem}-",
+        suffix=suffix,
+        dir=path.parent,
+        delete=False,
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    temporary_path.unlink()
+    return temporary_path

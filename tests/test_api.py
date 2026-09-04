@@ -228,6 +228,16 @@ def test_equip_template_routes_build_and_move_precise_template(tmp_path: Path):
     assert Image.open(archive_full_check).size == (34, 34)
     assert Image.open(archive_non_full_check).size == (34, 34)
 
+    preview_response = client.get(
+        "/api/equip-templates/Event%20CE/image",
+        params={"location": "archive"},
+    )
+
+    assert preview_response.status_code == 200
+    assert preview_response.headers["content-type"] == "image/png"
+    assert preview_response.headers["cache-control"] == "no-store"
+    assert Image.open(BytesIO(preview_response.content)).size == (237, 68)
+
     activate_response = client.post("/api/equip-templates/Event%20CE/activate", json={})
     inventory_response = client.get("/api/equip-templates")
 
@@ -293,6 +303,44 @@ def test_equip_template_routes_reject_invalid_name_image_and_conflict(tmp_path: 
     assert first.json()["precise"] is False
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "data_file_conflict"
+
+
+def test_equip_template_overwrite_removes_stale_precision_checks(tmp_path: Path):
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    output = BytesIO()
+    Image.new("RGB", (237, 68), "red").save(output, format="PNG")
+    image_base64 = base64.b64encode(output.getvalue()).decode("ascii")
+
+    precise = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={
+            "full_image_base64": image_base64,
+            "non_full_image_base64": image_base64,
+        },
+    )
+    activate_precise = client.post("/api/equip-templates/Event%20CE/activate", json={})
+    simple = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={"full_image_base64": image_base64},
+    )
+    activate_simple = client.post(
+        "/api/equip-templates/Event%20CE/activate",
+        json={"overwrite": True},
+    )
+
+    assert precise.status_code == 200
+    assert activate_precise.status_code == 200
+    assert simple.status_code == 200
+    assert activate_simple.status_code == 200
+    assert activate_simple.json()["precise"] is False
+    assert not (assets / "assist" / "equip_check" / "Event CE_0.png").exists()
+    assert not (assets / "assist" / "equip_check" / "Event CE_1.png").exists()
 
 
 def test_match_route_accepts_roi_and_scales(tmp_path: Path):

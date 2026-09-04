@@ -235,6 +235,32 @@
             <button id="run-expball-storage" class="ghost-button wide" type="button">Store Current Selection</button>
             <button id="run-expball-sell" class="danger-button wide" type="button">Sell Current Selection</button>
             <div class="panel-divider"></div>
+            <div class="section-label">Assist Equip Templates</div>
+            <label class="field-stack">
+              <span>Name</span>
+              <input id="equip-template-name" class="field" type="text" maxlength="100" autocomplete="off">
+            </label>
+            <div class="equip-template-files">
+              <label class="field-stack file-field">
+                <span>Limit broken</span>
+                <input id="equip-full-image" class="field" type="file" accept="image/*">
+              </label>
+              <label class="field-stack file-field">
+                <span>Not limit broken</span>
+                <input id="equip-non-full-image" class="field" type="file" accept="image/*">
+              </label>
+            </div>
+            <button id="build-equip-template" class="primary-button wide" type="button">Build Template</button>
+            <select id="equip-template-list" class="field" aria-label="Assist equip template"></select>
+            <div class="equip-template-preview-frame">
+              <img id="equip-template-preview" alt="Selected assist equip template" hidden>
+              <span id="equip-template-preview-status" class="equip-template-preview-status">No templates</span>
+            </div>
+            <div class="equip-template-actions">
+              <button id="activate-equip-template" class="ghost-button" type="button">Activate</button>
+              <button id="archive-equip-template" class="ghost-button" type="button">Archive</button>
+            </div>
+            <div class="panel-divider"></div>
             <div class="section-label">Diagnostic Job</div>
             <label class="field-stack">
               <span>Verify after tap</span>
