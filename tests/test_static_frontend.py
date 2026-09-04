@@ -23,6 +23,9 @@ def test_operator_console_references_api_controls():
     assert 'id="edit-setting"' in index
     assert 'id="delete-setting"' in index
     assert 'id="refresh-settings" class="ghost-button wide"' in index
+    assert 'id="import-setting"' in index
+    assert 'id="export-setting"' in index
+    assert 'id="setting-file-input"' in index
     assert index.index('id="delete-setting"') < index.index('id="refresh-settings"')
     assert index.index('id="refresh-settings"') < index.index('id="setting-validation"')
     assert 'id="strategy-select"' in index
@@ -148,6 +151,9 @@ def test_operator_console_references_api_controls():
     assert "queryMaterialDrops" in script
     assert 'api("/api/notebook")' in script
     assert "saveNotebook" in script
+    assert "handleSettingImport" in script
+    assert "exportSelectedSetting" in script
+    assert "URL.createObjectURL" in script
     assert "full_image_base64" in script
     assert "non_full_image_base64" in script
     assert "loadEquipTemplates" in script

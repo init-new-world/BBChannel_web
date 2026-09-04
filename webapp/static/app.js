@@ -48,6 +48,9 @@ const els = {
   editSetting: document.querySelector("#edit-setting"),
   deleteSetting: document.querySelector("#delete-setting"),
   refreshSettings: document.querySelector("#refresh-settings"),
+  importSetting: document.querySelector("#import-setting"),
+  exportSetting: document.querySelector("#export-setting"),
+  settingFileInput: document.querySelector("#setting-file-input"),
   strategySelect: document.querySelector("#strategy-select"),
   strategySummary: document.querySelector("#strategy-summary"),
   newStrategy: document.querySelector("#new-strategy"),
@@ -242,6 +245,9 @@ function bindEvents() {
   els.editSetting.addEventListener("click", () => openPresetEditor("settings", true));
   els.deleteSetting.addEventListener("click", () => deletePreset("settings"));
   els.refreshSettings.addEventListener("click", () => loadSettings());
+  els.importSetting.addEventListener("click", () => els.settingFileInput.click());
+  els.settingFileInput.addEventListener("change", handleSettingImport);
+  els.exportSetting.addEventListener("click", exportSelectedSetting);
   els.newStrategy.addEventListener("click", () => openPresetEditor("strategies", false));
   els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
@@ -1004,6 +1010,54 @@ async function openPresetEditor(kind, editing) {
     els.presetJson.value = JSON.stringify(value, null, 2);
     setPresetError("");
     els.presetName.focus();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function handleSettingImport() {
+  const file = els.settingFileInput.files[0];
+  if (!file) {
+    return;
+  }
+  try {
+    const value = JSON.parse(await file.text());
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Script JSON must contain an object.");
+    }
+    const proposedName = file.name.replace(/\.json$/i, "") || "imported-script";
+    state.presetEditor = { kind: "settings", originalName: "" };
+    els.presetDialogTitle.textContent = "Import Script";
+    els.presetName.value = proposedName;
+    els.presetJson.value = JSON.stringify(value, null, 2);
+    setPresetError("");
+    els.presetDialog.showModal();
+    els.presetName.focus();
+  } catch (error) {
+    showError(error);
+  } finally {
+    els.settingFileInput.value = "";
+  }
+}
+
+async function exportSelectedSetting() {
+  const name = els.settingSelect.value;
+  if (!name) {
+    return;
+  }
+  try {
+    const detail = await api(`/api/settings/${encodeURIComponent(name)}`);
+    const blob = new Blob([`${JSON.stringify(detail.config, null, 2)}\n`], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${name}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   } catch (error) {
     showError(error);
   }
@@ -2121,6 +2175,7 @@ function updateControls() {
     || selectedJobStatus === "cancelling";
   els.editSetting.disabled = !els.settingSelect.value;
   els.deleteSetting.disabled = !els.settingSelect.value;
+  els.exportSetting.disabled = !els.settingSelect.value;
   els.editStrategy.disabled = !els.strategySelect.value;
   els.deleteStrategy.disabled = !els.strategySelect.value;
   els.equipTemplateName.disabled = state.equipTemplateBusy;

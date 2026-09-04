@@ -37,6 +37,11 @@
               <button id="delete-setting" class="danger-button" type="button">Delete</button>
             </div>
             <button id="refresh-settings" class="ghost-button wide" type="button" title="Reload scripts from disk" aria-label="Refresh scripts">↻ Refresh Scripts</button>
+            <div class="setting-file-actions">
+              <button id="import-setting" class="ghost-button" type="button">Import</button>
+              <button id="export-setting" class="ghost-button" type="button">Export</button>
+            </div>
+            <input id="setting-file-input" type="file" accept=".json,application/json" hidden>
             <div id="setting-validation" class="status-line">No setting</div>
             <div id="setting-plan" class="result-box detail-box">No script selected</div>
           </section>
