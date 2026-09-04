@@ -322,6 +322,21 @@ class ScriptDataService:
             if SETTING_STRATEGY_FIELD_RE.match(field) and value is not None:
                 errors.extend(self._validate_strategy_entries(value, field, tagged=False))
 
+        if config.get("stuckRestart"):
+            stuck_interval = config.get("checkStuckInterval", 30)
+            if (
+                isinstance(stuck_interval, bool)
+                or not isinstance(stuck_interval, (int, float))
+                or not 1 <= stuck_interval <= 600
+            ):
+                errors.append(
+                    self._issue(
+                        "invalid_stuck_interval",
+                        "checkStuckInterval",
+                        "Stuck watchdog interval must be between 1 and 600 seconds.",
+                    )
+                )
+
         return {"ok": not errors, "errors": errors, "warnings": warnings}
 
     def _setting_summary(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -503,6 +518,8 @@ class ScriptDataService:
             "drop_stop_num": config.get("dropStopNum", 0),
             "drop_image": config.get("dropImage"),
             "game_crash_restart": bool(config.get("gameCrushRestart")),
+            "stuck_restart": bool(config.get("stuckRestart")),
+            "check_stuck_interval": config.get("checkStuckInterval", 30),
             "add_friend": bool(config.get("addFriend")),
         }
 

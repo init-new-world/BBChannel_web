@@ -850,6 +850,33 @@ def test_setting_program_route_compiles_skill_targets_and_np_to_logical_taps(tmp
         ],
         "reason": None,
     }
+
+
+def test_setting_program_is_not_ready_when_script_validation_fails(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {})
+    _write_json(
+        data / "settings" / "invalid-watchdog.json",
+        {
+            "server": "CH",
+            "stuckRestart": 1,
+            "checkStuckInterval": 0,
+            "round1_turns": 1,
+            "round1_turn0_skill": [1],
+        },
+    )
+
+    response = client.get("/api/settings/invalid-watchdog/program")
+
+    assert response.status_code == 200
+    assert response.json()["validation"]["ok"] is False
+    assert response.json()["execution"]["battle"] == {
+        "ready": False,
+        "reason": "Script validation failed.",
+    }
+
+
 def test_setting_program_compiles_runtime_card_strategy(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

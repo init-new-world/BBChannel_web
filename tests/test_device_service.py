@@ -9,6 +9,7 @@ from webapp.core.models import Capability, DeviceInfo, OperationResult
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
+from webapp.services.frame_watchdog import FrameStabilityTracker
 
 
 class FakeBackend:
@@ -58,6 +59,26 @@ def test_device_service_connects_and_disconnects():
     assert connected.connected is True
     assert connected.backend == "fake"
     assert disconnected.connected is False
+
+
+def test_device_service_reports_stable_frames_and_resets_on_disconnect():
+    now = [0.0]
+    backend = FakeBackend()
+    tracker = FrameStabilityTracker(clock=lambda: now[0])
+    service = DeviceService([backend], EventLog(), frame_watchdog=tracker)
+    service.connect("fake", "dev1")
+
+    service.snapshot()
+    now[0] = 31.0
+    service.snapshot()
+
+    assert service.screen_is_stuck(30) is True
+    backend.snapshot = lambda _device_id: b"changed"
+    now[0] = 32.0
+    service.snapshot()
+    assert service.screen_is_stuck(30) is False
+    service.disconnect()
+    assert service.screen_is_stuck(30) is False
 
 
 def test_device_service_close_disconnects_and_closes_backends_once():

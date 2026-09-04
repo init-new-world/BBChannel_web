@@ -14,6 +14,7 @@ from webapp.core.models import (
 from webapp.devices.base import DeviceBackend
 from webapp.devices.coordinates import FrameNormalizer, ScreenTransform
 from webapp.services.event_log import EventLog
+from webapp.services.frame_watchdog import FrameStabilityTracker
 
 
 class DeviceService:
@@ -22,12 +23,14 @@ class DeviceService:
         backends: list[DeviceBackend],
         event_log: EventLog,
         frame_normalizer: FrameNormalizer | None = None,
+        frame_watchdog: FrameStabilityTracker | None = None,
     ) -> None:
         self._backends = {backend.name: backend for backend in backends}
         self._event_log = event_log
         self._capture: DeviceEndpoint | None = None
         self._control: DeviceEndpoint | None = None
         self._frame_normalizer = frame_normalizer
+        self._frame_watchdog = frame_watchdog or FrameStabilityTracker()
         self._screen_transform: ScreenTransform | None = None
         self._control_transform: ScreenTransform | None = None
         self._state_lock = threading.RLock()
@@ -112,6 +115,7 @@ class DeviceService:
             self._control = control
             self._screen_transform = None
             self._control_transform = control_transform
+        self._frame_watchdog.reset()
         self._event_log.info(
             "connect",
             "Device session connected.",
@@ -147,6 +151,7 @@ class DeviceService:
             self._control = None
             self._screen_transform = None
             self._control_transform = None
+        self._frame_watchdog.reset()
         if previous_state.capture is not None or previous_state.control is not None:
             self._event_log.info(
                 "disconnect",
@@ -199,6 +204,7 @@ class DeviceService:
                         self._screen_transform = None
                 self._event_log.error("snapshot", exc.message, exc.details)
                 raise
+        self._frame_watchdog.observe(data)
         self._event_log.info(
             "snapshot",
             "Screenshot captured.",
@@ -209,6 +215,9 @@ class DeviceService:
             },
         )
         return data
+
+    def screen_is_stuck(self, minimum_seconds: float) -> bool:
+        return self._frame_watchdog.is_stuck(minimum_seconds)
 
     def tap(self, x: int, y: int) -> OperationResult:
         backend, endpoint = self._require_control()
@@ -293,6 +302,7 @@ class DeviceService:
                     "package": result.data.get("package"),
                 },
             )
+            self._frame_watchdog.reset()
             return result
 
         raise AppError(

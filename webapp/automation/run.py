@@ -9,6 +9,7 @@ from webapp.services.script_data import ScriptDataService
 
 FULL_RUN_JOB_KIND = "battle.run"
 StageHandler = Callable[[RunContext, dict[str, Any]], dict[str, Any] | None]
+ScreenStuckCheck = Callable[[float], bool]
 
 
 def create_full_run_handler(
@@ -21,6 +22,7 @@ def create_full_run_handler(
     recover_game: StageHandler | None = None,
     enter_free_quest: StageHandler | None = None,
     enter_main_story: StageHandler | None = None,
+    screen_is_stuck: ScreenStuckCheck | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +69,12 @@ def create_full_run_handler(
         clear_ap = bool(run_options.get("clear_ap"))
         first_battle_set = bool(run_options.get("first_battle_set"))
         game_crash_restart = bool(run_options.get("game_crash_restart"))
+        stuck_restart = bool(run_options.get("stuck_restart"))
+        check_stuck_interval = (
+            _configured_stuck_interval(run_options.get("check_stuck_interval", 30))
+            if stuck_restart
+            else 30.0
+        )
         stage_options = {
             name: _stage_options(payload, name)
             for name in (
@@ -106,8 +114,13 @@ def create_full_run_handler(
             try:
                 return stage_handler(context, stage_payload) or {}, None
             except TimeoutError as exc:
+                screen_stuck = bool(
+                    stuck_restart
+                    and screen_is_stuck is not None
+                    and screen_is_stuck(check_stuck_interval)
+                )
                 if (
-                    not game_crash_restart
+                    not (game_crash_restart or screen_stuck)
                     or recover_game is None
                     or restart_count >= max_restarts
                 ):
@@ -115,7 +128,11 @@ def create_full_run_handler(
                 context.checkpoint(
                     "run.recover_game",
                     progress=min(completed_runs / max(max_runs, 1), 0.95),
-                    message=f"Recovering after {stage_name} timeout.",
+                    message=(
+                        f"Recovering frozen screen after {stage_name} timeout."
+                        if screen_stuck
+                        else f"Recovering after {stage_name} timeout."
+                    ),
                 )
                 recovered = recover_game(
                     context,
@@ -131,6 +148,7 @@ def create_full_run_handler(
                         "trigger_stage": stage_name,
                         "error": str(exc),
                         **recovered,
+                        **({"trigger_reason": "screen_stuck"} if screen_stuck else {}),
                     }
                 )
                 if recovered.get("recovered") is False:
@@ -433,6 +451,7 @@ def register_full_run_job(
     recover_game: StageHandler | None = None,
     enter_free_quest: StageHandler | None = None,
     enter_main_story: StageHandler | None = None,
+    screen_is_stuck: ScreenStuckCheck | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
         return
@@ -448,6 +467,7 @@ def register_full_run_job(
             recover_game,
             enter_free_quest,
             enter_main_story,
+            screen_is_stuck,
         ),
         requires_device=True,
     )
@@ -466,4 +486,13 @@ def _configured_interval(value: object, name: str) -> float:
     result = float(value)
     if not 0 <= result <= 600:
         raise ValueError(f"{name} must be between 0 and 600.")
+    return result
+
+
+def _configured_stuck_interval(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("check_stuck_interval must be a number.")
+    result = float(value)
+    if not 1 <= result <= 600:
+        raise ValueError("check_stuck_interval must be between 1 and 600.")
     return result

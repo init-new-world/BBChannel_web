@@ -137,16 +137,19 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
     total_unsupported_action_count = (
         unsupported_action_count + extra_unsupported_action_count
     )
+    validation_ok = bool(plan.get("validation", {}).get("ok", True))
     skill_execution = _skill_execution_status(
         action_count + extra_action_count,
         total_unsupported_action_count,
         source_types,
+        validation_ok,
     )
     battle_execution = _battle_execution_status(
         len(command_phases),
         total_unsupported_action_count,
         source_types,
         command_phases,
+        validation_ok,
     )
     return {
         "name": plan["name"],
@@ -171,7 +174,10 @@ def _skill_execution_status(
     action_count: int,
     unsupported_action_count: int,
     source_types: list[object],
+    validation_ok: bool,
 ) -> dict[str, Any]:
+    if not validation_ok:
+        return {"ready": False, "reason": "Script validation failed."}
     if action_count == 0:
         return {"ready": False, "reason": "Program contains no actions."}
     if unsupported_action_count:
@@ -186,7 +192,10 @@ def _battle_execution_status(
     unsupported_action_count: int,
     source_types: list[object],
     command_phases: list[dict[str, Any]],
+    validation_ok: bool,
 ) -> dict[str, Any]:
+    if not validation_ok:
+        return {"ready": False, "reason": "Script validation failed."}
     if turn_count == 0:
         return {"ready": False, "reason": "Program contains no turns."}
     if unsupported_action_count or any(not phase["supported"] for phase in command_phases):

@@ -327,6 +327,8 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
             "dropStopNum": 2,
             "dropImage": "assets/drop/item.png",
             "gameCrushRestart": 1,
+            "stuckRestart": 1,
+            "checkStuckInterval": 45,
             "addFriend": 1,
         },
     )
@@ -348,8 +350,31 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
         "drop_stop_num": 2,
         "drop_image": "assets/drop/item.png",
         "game_crash_restart": True,
+        "stuck_restart": True,
+        "check_stuck_interval": 45,
         "add_friend": True,
     }
+
+
+def test_get_setting_rejects_invalid_stuck_watchdog_interval(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "stuckRestart": 1,
+            "checkStuckInterval": 0,
+        },
+    )
+
+    detail = ScriptDataService(tmp_path).get_setting("demo")
+
+    assert detail["validation"]["ok"] is False
+    assert {
+        "code": "invalid_stuck_interval",
+        "field": "checkStuckInterval",
+        "message": "Stuck watchdog interval must be between 1 and 600 seconds.",
+    } in detail["validation"]["errors"]
 
 
 def test_get_setting_reports_unknown_servants(tmp_path: Path):

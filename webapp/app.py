@@ -401,6 +401,7 @@ def create_app(
             quest_recognizer,
             stage_handler,
         ),
+        screen_is_stuck=device_service.screen_is_stuck,
     )
 
     def active_device_key() -> str | None:

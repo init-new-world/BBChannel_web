@@ -18,12 +18,16 @@ class _ScriptData:
         clear_ap: bool = False,
         first_battle_set: bool = False,
         game_crash_restart: bool = False,
+        stuck_restart: bool = False,
+        check_stuck_interval: float = 30,
     ) -> None:
         self.before = before
         self.after = after
         self.clear_ap = clear_ap
         self.first_battle_set = first_battle_set
         self.game_crash_restart = game_crash_restart
+        self.stuck_restart = stuck_restart
+        self.check_stuck_interval = check_stuck_interval
 
     def get_setting_plan(self, _name: str):
         return {
@@ -33,6 +37,8 @@ class _ScriptData:
                 "clear_ap": self.clear_ap,
                 "first_battle_set": self.first_battle_set,
                 "game_crash_restart": self.game_crash_restart,
+                "stuck_restart": self.stuck_restart,
+                "check_stuck_interval": self.check_stuck_interval,
             }
         }
 
@@ -605,6 +611,69 @@ def test_full_run_does_not_recover_timeout_when_restart_is_disabled():
 
     with pytest.raises(TimeoutError, match="assist remains unavailable"):
         handler(_Context(), {"setting_name": "demo", "max_restarts": 2})
+
+    assert recovery_calls == 0
+
+
+def test_full_run_recovers_timeout_when_stuck_watchdog_confirms_freeze():
+    calls: list[str] = []
+    checked_intervals: list[float] = []
+    battle_attempts = 0
+
+    def battle(_context, _payload):
+        nonlocal battle_attempts
+        calls.append("battle")
+        battle_attempts += 1
+        if battle_attempts == 1:
+            raise TimeoutError("battle frame stopped changing")
+        return {"executed": True}
+
+    def recover(_context, _payload):
+        calls.append("recover")
+        return {"recovered": True, "stage": "battle"}
+
+    def screen_is_stuck(interval: float) -> bool:
+        checked_intervals.append(interval)
+        return True
+
+    handler = create_full_run_handler(
+        _ScriptData(stuck_restart=True, check_stuck_interval=45),
+        lambda _context, _payload: calls.append("assist") or {},
+        lambda _context, _payload: calls.append("prepare") or {"ready": True},
+        battle,
+        lambda _context, _payload: calls.append("complete") or {"complete": True},
+        recover_game=recover,
+        screen_is_stuck=screen_is_stuck,
+    )
+
+    result = handler(_Context(), {"setting_name": "demo", "max_restarts": 1})
+
+    assert checked_intervals == [45.0]
+    assert calls == ["assist", "prepare", "battle", "recover", "battle", "complete"]
+    assert result["restart_count"] == 1
+    assert result["recoveries"][0]["trigger_reason"] == "screen_stuck"
+
+
+def test_full_run_does_not_recover_stuck_timeout_when_frames_changed():
+    recovery_calls = 0
+
+    def recover(_context, _payload):
+        nonlocal recovery_calls
+        recovery_calls += 1
+        return {"recovered": True, "stage": "battle"}
+
+    handler = create_full_run_handler(
+        _ScriptData(stuck_restart=True, check_stuck_interval=20),
+        lambda _context, _payload: {},
+        lambda _context, _payload: {"ready": True},
+        lambda _context, _payload: (_ for _ in ()).throw(TimeoutError("battle timeout")),
+        lambda _context, _payload: {"complete": True},
+        recover_game=recover,
+        screen_is_stuck=lambda interval: interval == 999,
+    )
+
+    with pytest.raises(TimeoutError, match="battle timeout"):
+        handler(_Context(), {"setting_name": "demo", "max_restarts": 1})
 
     assert recovery_calls == 0
 
