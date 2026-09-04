@@ -192,6 +192,109 @@ def test_template_index_and_metadata_routes(tmp_path: Path):
     assert metadata_response.json()["height"] == 8
 
 
+def test_equip_template_routes_build_and_move_precise_template(tmp_path: Path):
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+
+    def encoded_image(color: tuple[int, int, int]) -> str:
+        output = BytesIO()
+        Image.new("RGB", (474, 136), color).save(output, format="PNG")
+        return base64.b64encode(output.getvalue()).decode("ascii")
+
+    create_response = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={
+            "full_image_base64": encoded_image((240, 180, 30)),
+            "non_full_image_base64": encoded_image((30, 90, 180)),
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.json() == {
+        "name": "Event CE",
+        "location": "archive",
+        "precise": True,
+        "image_path": "equipmaker/assist_equip_store/Event CE.png",
+    }
+    archive_image = assets / "equipmaker" / "assist_equip_store" / "Event CE.png"
+    archive_full_check = assets / "equipmaker" / "equip_check_store" / "Event CE_1.png"
+    archive_non_full_check = assets / "equipmaker" / "equip_check_store" / "Event CE_0.png"
+    assert Image.open(archive_image).size == (237, 68)
+    assert Image.open(archive_full_check).size == (34, 34)
+    assert Image.open(archive_non_full_check).size == (34, 34)
+
+    activate_response = client.post("/api/equip-templates/Event%20CE/activate", json={})
+    inventory_response = client.get("/api/equip-templates")
+
+    assert activate_response.status_code == 200
+    assert activate_response.json()["location"] == "active"
+    assert inventory_response.status_code == 200
+    assert inventory_response.json() == {
+        "templates": [
+            {
+                "name": "Event CE",
+                "location": "active",
+                "precise": True,
+                "image_path": "assist/assist_equip/Event CE.png",
+            }
+        ]
+    }
+    assert (assets / "assist" / "assist_equip" / "Event CE.png").is_file()
+    assert (assets / "assist" / "equip_check" / "Event CE_1.png").is_file()
+    assert not archive_image.exists()
+
+    archive_response = client.post("/api/equip-templates/Event%20CE/archive", json={})
+
+    assert archive_response.status_code == 200
+    assert archive_response.json()["location"] == "archive"
+    assert archive_image.is_file()
+    assert archive_full_check.is_file()
+    assert archive_non_full_check.is_file()
+
+
+def test_equip_template_routes_reject_invalid_name_image_and_conflict(tmp_path: Path):
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+
+    client = _client(tmp_path)
+    output = BytesIO()
+    Image.new("RGB", (237, 68), "red").save(output, format="PNG")
+    image_base64 = base64.b64encode(output.getvalue()).decode("ascii")
+
+    invalid_name = client.post(
+        "/api/equip-templates/bad%3Aname",
+        json={"full_image_base64": image_base64},
+    )
+    invalid_image = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={"full_image_base64": base64.b64encode(b"not an image").decode("ascii")},
+    )
+    first = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={"full_image_base64": image_base64},
+    )
+    conflict = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={"full_image_base64": image_base64},
+    )
+
+    assert invalid_name.status_code == 400
+    assert invalid_name.json()["error"]["code"] == "data_file_invalid"
+    assert invalid_image.status_code == 400
+    assert invalid_image.json()["error"]["code"] == "data_file_invalid"
+    assert first.status_code == 200
+    assert first.json()["precise"] is False
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "data_file_conflict"
+
+
 def test_match_route_accepts_roi_and_scales(tmp_path: Path):
     pytest.importorskip("cv2")
     import base64

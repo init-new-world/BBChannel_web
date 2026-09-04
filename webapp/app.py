@@ -62,6 +62,7 @@ from webapp.services.devices import DeviceService
 from webapp.services.digdig import DigdigRecognizer
 from webapp.services.event_log import EventLog
 from webapp.services.expball import ExpBallRecognizer
+from webapp.services.equip_templates import EquipTemplateService
 from webapp.services.lottery import LotteryRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.quest import QuestRecognizer
@@ -132,6 +133,16 @@ class SaveStrategyRequest(BaseModel):
     overwrite: bool = False
 
 
+class BuildEquipTemplateRequest(BaseModel):
+    full_image_base64: str | None = None
+    non_full_image_base64: str | None = None
+    overwrite: bool = False
+
+
+class MoveEquipTemplateRequest(BaseModel):
+    overwrite: bool = False
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -162,6 +173,7 @@ def create_app(
     chocolate_recognizer = ChocolateRecognizer(resources, recognition)
     digdig_recognizer = DigdigRecognizer(resources, recognition)
     expball_recognizer = ExpBallRecognizer(resources, recognition)
+    equip_templates = EquipTemplateService(resources)
     lottery_recognizer = LotteryRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
@@ -398,6 +410,7 @@ def create_app(
     app.state.digdig_recognizer = digdig_recognizer
     app.state.lottery_recognizer = lottery_recognizer
     app.state.expball_recognizer = expball_recognizer
+    app.state.equip_templates = equip_templates
     app.state.script_data = script_data
     app.state.job_manager = job_manager
 
@@ -472,6 +485,27 @@ def create_app(
     @app.get("/api/templates")
     def templates() -> dict[str, list[str]]:
         return {"templates": resources.list_templates()}
+
+    @app.get("/api/equip-templates")
+    def equip_template_inventory() -> dict[str, list[dict[str, object]]]:
+        return {"templates": equip_templates.inventory()}
+
+    @app.post("/api/equip-templates/{name}")
+    def build_equip_template(name: str, request: BuildEquipTemplateRequest) -> dict[str, object]:
+        return equip_templates.build(
+            name,
+            full_image=_decode_optional_image(request.full_image_base64),
+            non_full_image=_decode_optional_image(request.non_full_image_base64),
+            overwrite=request.overwrite,
+        )
+
+    @app.post("/api/equip-templates/{name}/activate")
+    def activate_equip_template(name: str, request: MoveEquipTemplateRequest) -> dict[str, object]:
+        return equip_templates.activate(name, overwrite=request.overwrite)
+
+    @app.post("/api/equip-templates/{name}/archive")
+    def archive_equip_template(name: str, request: MoveEquipTemplateRequest) -> dict[str, object]:
+        return equip_templates.archive(name, overwrite=request.overwrite)
 
     @app.get("/api/template-index")
     def template_index(
@@ -612,6 +646,20 @@ def _decode_base64(value: str) -> bytes:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise AppError(ErrorCode.MATCH_FAILED, "Screenshot payload is not valid base64.") from exc
+
+
+def _decode_optional_image(value: str | None) -> bytes | None:
+    if value is None:
+        return None
+    if "," in value and value.lstrip().startswith("data:"):
+        value = value.split(",", 1)[1]
+    try:
+        return base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise AppError(
+            ErrorCode.DATA_FILE_INVALID,
+            "Equip image payload is not valid base64.",
+        ) from exc
 
 
 def _status_code_for(code: ErrorCode) -> int:
