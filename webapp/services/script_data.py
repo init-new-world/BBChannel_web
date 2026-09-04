@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from webapp.core.errors import AppError, ErrorCode
+from webapp.services.assist_tags import parse_assist_tag_filename
 
 
 VALID_SERVERS = {"CH", "CNTW", "JP"}
@@ -527,20 +528,10 @@ class ScriptDataService:
                 raise ValueError(f"assistTags[{index}] must contain an image path.")
             normalized_path = raw_path.strip().replace("\\", "/")
             template_name = normalized_path.rsplit("/", 1)[-1]
-            stem = template_name.rsplit(".", 1)[0].split("]")[-1]
-            match = SPECIAL_KEY_NAME_RE.fullmatch(stem)
-            if match is None:
-                raise ValueError(f"assistTags[{index}] has an invalid filename.")
-            values = {name: int(raw) for name, raw in match.groupdict().items()}
-            threshold = float(f"0.{values['CON']}0")
-            if (
-                values["W"] <= 0
-                or values["H"] <= 0
-                or values["DXL"] >= values["DXR"]
-                or values["DYT"] >= values["DYB"]
-                or not 0 <= threshold <= 1
-            ):
-                raise ValueError(f"assistTags[{index}] has invalid metadata.")
+            try:
+                metadata = parse_assist_tag_filename(template_name)
+            except ValueError as exc:
+                raise ValueError(f"assistTags[{index}] {exc}") from exc
 
             assets_marker = "/assets/"
             if assets_marker in normalized_path:
@@ -555,13 +546,13 @@ class ScriptDataService:
                 {
                     "template_name": template_name,
                     "template_path": template_path,
-                    "threshold": threshold,
-                    "source_width": values["W"],
-                    "source_height": values["H"],
-                    "left": values["DXL"],
-                    "right": values["DXR"],
-                    "top": values["DYT"],
-                    "bottom": values["DYB"],
+                    "threshold": metadata.threshold,
+                    "source_width": metadata.source_width,
+                    "source_height": metadata.source_height,
+                    "left": metadata.left,
+                    "right": metadata.right,
+                    "top": metadata.top,
+                    "bottom": metadata.bottom,
                 }
             )
         return tags

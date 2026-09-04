@@ -498,6 +498,103 @@ def test_equip_template_candidate_route_extracts_assist_row_regions(tmp_path: Pa
         assert image.size == (237, 68)
 
 
+def test_assist_tag_candidate_route_returns_screenshot_and_servant_anchors(tmp_path: Path):
+    import base64
+    from io import BytesIO
+
+    pytest.importorskip("cv2")
+    from PIL import Image, ImageDraw
+
+    client = _client(tmp_path)
+    assets = Path(client.app.state.resources.assets_dir)
+    data = Path(client.app.state.resources.data_dir)
+    servant_faces = assets / "servantface"
+    servant_faces.mkdir(parents=True)
+    portrait = Image.new("RGB", (60, 60), (20, 35, 50))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((4, 4, 55, 55), outline=(50, 170, 230), width=4)
+    portrait_draw.ellipse((15, 12, 44, 41), fill=(240, 210, 160))
+    portrait_draw.line((8, 52, 52, 8), fill=(230, 40, 80), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+    _write_json(
+        data / "servant_info_CH.json",
+        {"Support": {"SN": "314", "class": "Caster"}},
+    )
+    _write_json(
+        data / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "servant_3_name": "Support",
+            "assistIdx": 3,
+            "assistMode": "从者礼装",
+        },
+    )
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    screenshot.paste(portrait, (200, 180))
+    screenshot_output = BytesIO()
+    screenshot.save(screenshot_output, format="PNG")
+    encoded = base64.b64encode(screenshot_output.getvalue()).decode("ascii")
+
+    response = client.post(
+        "/api/assist-tags/candidates",
+        json={
+            "setting_name": "demo",
+            "screenshot_base64": encoded,
+            "threshold": 0.99,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["servant_name"] == "Support"
+    assert payload["candidate_count"] == 1
+    assert payload["candidates"][0]["anchor"] == [230, 210]
+    assert payload["candidates"][0]["bounds"] == [200, 180, 60, 60]
+    assert base64.b64decode(payload["screenshot_base64"]) == screenshot_output.getvalue()
+
+
+def test_assist_tag_routes_build_preview_list_and_delete(tmp_path: Path):
+    import base64
+    from io import BytesIO
+    from urllib.parse import quote
+
+    from PIL import Image, ImageDraw
+
+    client = _client(tmp_path)
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    ImageDraw.Draw(screenshot).rectangle((250, 120, 289, 149), fill=(220, 70, 135))
+    screenshot_output = BytesIO()
+    screenshot.save(screenshot_output, format="PNG")
+
+    create_response = client.post(
+        "/api/assist-tags",
+        json={
+            "label": "Guild",
+            "screenshot_base64": base64.b64encode(screenshot_output.getvalue()).decode("ascii"),
+            "anchor": [100, 95],
+            "bounds": [250, 120, 290, 150],
+            "threshold": 0.85,
+        },
+    )
+
+    assert create_response.status_code == 200
+    created = create_response.json()
+    name = "[Guild]W1280H720DXL150DXR190DYT25DYB55CON85.png"
+    assert created["name"] == name
+    inventory_response = client.get("/api/assist-tags")
+    assert inventory_response.status_code == 200
+    assert inventory_response.json()["tags"] == [created]
+
+    image_response = client.get(f"/api/assist-tags/{quote(name, safe='')}/image")
+    assert image_response.status_code == 200
+    assert Image.open(BytesIO(image_response.content)).size == (40, 30)
+
+    delete_response = client.delete(f"/api/assist-tags/{quote(name, safe='')}")
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"name": name, "deleted": True}
+    assert client.get("/api/assist-tags").json() == {"tags": []}
+
+
 def test_equip_template_test_route_reports_precise_limit_break_match(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

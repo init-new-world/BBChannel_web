@@ -58,6 +58,7 @@ from webapp.runtime import JobDatabase, JobManager
 from webapp.services.cards import CommandCardRecognizer
 from webapp.services.chocolate import ChocolateRecognizer
 from webapp.services.assist import AssistRecognizer
+from webapp.services.assist_tags import AssistTagService
 from webapp.services.devices import DeviceService
 from webapp.services.digdig import DigdigRecognizer
 from webapp.services.event_log import EventLog
@@ -161,6 +162,21 @@ class SaveNotebookRequest(BaseModel):
     content: str = Field(max_length=1_000_000)
 
 
+class BuildAssistTagRequest(BaseModel):
+    screenshot_base64: str | None = None
+    anchor: list[int] = Field(min_length=2, max_length=2)
+    bounds: list[int] = Field(min_length=4, max_length=4)
+    label: str = Field(min_length=1, max_length=64)
+    threshold: float = Field(default=0.8, gt=0.0, lt=1.0)
+    overwrite: bool = False
+
+
+class ImportAssistTagRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    image_base64: str
+    overwrite: bool = False
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -185,6 +201,7 @@ def create_app(
     )
     recognition = RecognitionService(resources)
     assist_recognizer = AssistRecognizer(resources, recognition)
+    assist_tags = AssistTagService(resources)
     card_recognizer = CommandCardRecognizer(resources, recognition)
     team_recognizer = TeamRecognizer(resources, recognition)
     quest_recognizer = QuestRecognizer(recognition)
@@ -425,6 +442,7 @@ def create_app(
     app.state.device_service = device_service
     app.state.recognition = recognition
     app.state.assist_recognizer = assist_recognizer
+    app.state.assist_tags = assist_tags
     app.state.card_recognizer = card_recognizer
     app.state.quest_recognizer = quest_recognizer
     app.state.chocolate_recognizer = chocolate_recognizer
@@ -524,6 +542,81 @@ def create_app(
     @app.put("/api/notebook")
     def save_notebook(request: SaveNotebookRequest) -> dict[str, object]:
         return notebook.save(request.content)
+
+    @app.get("/api/assist-tags")
+    def assist_tag_inventory() -> dict[str, list[dict[str, object]]]:
+        return {"tags": assist_tags.inventory()}
+
+    @app.post("/api/assist-tags/candidates")
+    def capture_assist_tag_candidates(request: CaptureEquipCandidatesRequest) -> dict:
+        screenshot = _decode_optional_image(request.screenshot_base64) or device_service.snapshot()
+        plan = script_data.get_setting_plan(request.setting_name)
+        assist = plan.get("assist") or {}
+        capture_assist = {
+            "mode": "仅从者",
+            "servant_name": assist.get("servant_name"),
+            "servant_canonical_name": assist.get("servant_canonical_name"),
+            "servant_sn": assist.get("servant_sn"),
+        }
+        if not capture_assist["servant_canonical_name"]:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "The selected script does not have a recognized assist servant.",
+                {"setting_name": request.setting_name},
+            )
+        recognition_result = assist_recognizer.recognize(
+            screenshot,
+            capture_assist,
+            server=str(plan.get("server") or "CH"),
+            threshold=request.threshold,
+        )
+        candidates = [
+            {
+                "anchor": candidate["anchor"],
+                "bounds": candidate["bounds"],
+                "confidence": candidate["confidence"],
+            }
+            for candidate in recognition_result["candidates"]
+        ]
+        return {
+            "servant_name": capture_assist["servant_name"],
+            "servant_canonical_name": capture_assist["servant_canonical_name"],
+            "candidate_count": len(candidates),
+            "candidates": candidates,
+            "screenshot_base64": base64.b64encode(screenshot).decode("ascii"),
+        }
+
+    @app.post("/api/assist-tags")
+    def build_assist_tag(request: BuildAssistTagRequest) -> dict[str, object]:
+        screenshot = _decode_optional_image(request.screenshot_base64) or device_service.snapshot()
+        return assist_tags.build(
+            label=request.label,
+            screenshot=screenshot,
+            anchor=request.anchor,
+            bounds=request.bounds,
+            threshold=request.threshold,
+            overwrite=request.overwrite,
+        )
+
+    @app.post("/api/assist-tags/import")
+    def import_assist_tag(request: ImportAssistTagRequest) -> dict[str, object]:
+        return assist_tags.import_image(
+            request.name,
+            _decode_optional_image(request.image_base64) or b"",
+            overwrite=request.overwrite,
+        )
+
+    @app.get("/api/assist-tags/{name}/image")
+    def assist_tag_image(name: str) -> Response:
+        return Response(
+            content=assist_tags.read_image(name),
+            media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.delete("/api/assist-tags/{name}")
+    def delete_assist_tag(name: str) -> dict[str, object]:
+        return assist_tags.delete(name)
 
     @app.get("/api/equip-templates")
     def equip_template_inventory() -> dict[str, list[dict[str, object]]]:
