@@ -127,6 +127,204 @@ def test_assist_recognizer_matches_enlarged_face_beneath_card_overlays(tmp_path:
     assert result["candidates"][0]["anchor"] == [151, 146]
 
 
+def test_assist_recognizer_requires_every_custom_tag(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    assist_tags = assets / "assist" / "assist_tags"
+    servant_faces.mkdir(parents=True)
+    assist_tags.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 70, 105))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.ellipse((8, 7, 52, 53), fill=(210, 95, 170))
+    portrait_draw.line((5, 54, 54, 5), fill=(45, 225, 190), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+
+    tag_a = Image.new("RGB", (24, 18), (55, 100, 150))
+    tag_a_draw = ImageDraw.Draw(tag_a)
+    tag_a_draw.rectangle((2, 2, 21, 15), outline=(245, 215, 65), width=2)
+    tag_a_draw.line((3, 14, 20, 3), fill=(220, 65, 125), width=2)
+    tag_a_name = "[Guild]W1280H720DXL150DXR174DYT20DYB38CON99.png"
+    tag_a.save(assist_tags / tag_a_name)
+
+    tag_b = Image.new("RGB", (20, 16), (80, 45, 125))
+    tag_b_draw = ImageDraw.Draw(tag_b)
+    tag_b_draw.ellipse((2, 2, 17, 13), outline=(70, 225, 185), width=2)
+    tag_b_draw.line((3, 3, 16, 12), fill=(245, 185, 55), width=2)
+    tag_b_name = "[Badge]W1280H720DXL190DXR210DYT22DYB38CON99.png"
+    tag_b.save(assist_tags / tag_b_name)
+
+    screenshot = Image.new("RGB", (420, 360), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    screenshot.paste(portrait, (70, 225))
+    screenshot.paste(tag_a, (250, 115))
+    screenshot.paste(tag_b, (290, 117))
+    screenshot.paste(tag_a, (250, 275))
+
+    tags = [
+        {
+            "template_name": tag_a_name,
+            "template_path": f"assist/assist_tags/{tag_a_name}",
+            "threshold": 0.99,
+            "source_width": 1280,
+            "source_height": 720,
+            "left": 150,
+            "right": 174,
+            "top": 20,
+            "bottom": 38,
+        },
+        {
+            "template_name": tag_b_name,
+            "template_path": f"assist/assist_tags/{tag_b_name}",
+            "threshold": 0.99,
+            "source_width": 1280,
+            "source_height": 720,
+            "left": 190,
+            "right": 210,
+            "top": 22,
+            "bottom": 38,
+        },
+    ]
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "tags": tags,
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["anchor"] == [100, 95]
+    assert result["candidates"][0]["checks"]["custom_tags"] == [
+        tag_a_name,
+        tag_b_name,
+    ]
+    assert all(
+        confidence >= 0.99
+        for confidence in result["candidates"][0]["checks"]["custom_tag_confidences"]
+    )
+
+
+def test_assist_recognizer_scales_custom_tag_from_recorded_source_resolution(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    assist_tags = assets / "assist" / "assist_tags"
+    servant_faces.mkdir(parents=True)
+    assist_tags.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (40, 75, 110))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((7, 7, 52, 52), fill=(205, 90, 175))
+    portrait_draw.line((5, 53, 54, 6), fill=(45, 225, 190), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+
+    source_tag = Image.new("RGB", (36, 24), (70, 45, 125))
+    source_draw = ImageDraw.Draw(source_tag)
+    source_draw.rectangle((3, 3, 32, 20), outline=(245, 215, 65), width=3)
+    source_draw.line((4, 19, 31, 4), fill=(55, 220, 190), width=3)
+    tag_name = "[Scaled]W1920H1080DXL150DXR186DYT30DYB54CON95.png"
+    source_tag.save(assist_tags / tag_name)
+
+    screenshot = Image.new("RGB", (420, 260), (18, 24, 32))
+    screenshot.paste(portrait, (70, 65))
+    scaled_tag = source_tag.resize((24, 16), Image.Resampling.BILINEAR)
+    screenshot.paste(scaled_tag, (200, 115))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "tags": [
+                {
+                    "template_name": tag_name,
+                    "template_path": f"assist/assist_tags/{tag_name}",
+                    "threshold": 0.95,
+                    "source_width": 1920,
+                    "source_height": 1080,
+                    "left": 150,
+                    "right": 186,
+                    "top": 30,
+                    "bottom": 54,
+                }
+            ],
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["checks"]["custom_tag_scales"] == [
+        pytest.approx(2 / 3)
+    ]
+
+
+def test_assist_recognizer_clips_custom_tag_search_at_screen_edge(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    assist_tags = assets / "assist" / "assist_tags"
+    servant_faces.mkdir(parents=True)
+    assist_tags.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 70, 105))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.ellipse((8, 7, 52, 53), fill=(210, 95, 170))
+    portrait_draw.line((5, 54, 54, 5), fill=(45, 225, 190), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+
+    tag = Image.new("RGB", (24, 18), (55, 100, 150))
+    tag_draw = ImageDraw.Draw(tag)
+    tag_draw.rectangle((2, 2, 21, 15), outline=(245, 215, 65), width=2)
+    tag_draw.line((3, 14, 20, 3), fill=(220, 65, 125), width=2)
+    tag_name = "[Edge]W1280H720DXL150DXR174DYT10DYB28CON99.png"
+    tag.save(assist_tags / tag_name)
+
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    screenshot.paste(portrait, (70, 650))
+    screenshot.paste(tag, (250, 690))
+    resources = ResourceService(assets, data)
+
+    result = AssistRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot),
+        {
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "tags": [
+                {
+                    "template_name": tag_name,
+                    "template_path": f"assist/assist_tags/{tag_name}",
+                    "threshold": 0.99,
+                    "source_width": 1280,
+                    "source_height": 720,
+                    "left": 150,
+                    "right": 174,
+                    "top": 10,
+                    "bottom": 28,
+                }
+            ],
+        },
+        threshold=0.99,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["checks"]["custom_tags"] == [tag_name]
+
+
 def test_grand_limit_break_marker_uses_grand_card_layout():
     marker = _match_result("assist/满破标记.png", [362, 303])
 

@@ -337,6 +337,17 @@ class ScriptDataService:
                     )
                 )
 
+        try:
+            self._plan_assist_tags(config.get("assistTags"))
+        except ValueError as exc:
+            errors.append(
+                self._issue(
+                    "invalid_assist_tags",
+                    "assistTags",
+                    str(exc),
+                )
+            )
+
         return {"ok": not errors, "errors": errors, "warnings": warnings}
 
     def _setting_summary(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -463,6 +474,7 @@ class ScriptDataService:
                 break
 
         equip_names = self._assist_equip_names(config.get("assistEquip"))
+        tags = self._plan_assist_tags(config.get("assistTags"))
 
         skill_levels = config.get("skillsLevel")
         return {
@@ -483,6 +495,7 @@ class ScriptDataService:
             "no_grand_refresh": bool(config.get("noGrandRefresh")),
             "bond_equip_type": config.get("jbType", "任意"),
             "all_not_skip": bool(config.get("allNotSkip", 1)),
+            "tags": tags,
         }
 
     @staticmethod
@@ -500,6 +513,58 @@ class ScriptDataService:
 
         collect(value)
         return names
+
+    @staticmethod
+    def _plan_assist_tags(value: Any) -> list[dict[str, Any]]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("assistTags must be a list.")
+
+        tags: list[dict[str, Any]] = []
+        for index, raw_path in enumerate(value):
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ValueError(f"assistTags[{index}] must contain an image path.")
+            normalized_path = raw_path.strip().replace("\\", "/")
+            template_name = normalized_path.rsplit("/", 1)[-1]
+            stem = template_name.rsplit(".", 1)[0].split("]")[-1]
+            match = SPECIAL_KEY_NAME_RE.fullmatch(stem)
+            if match is None:
+                raise ValueError(f"assistTags[{index}] has an invalid filename.")
+            values = {name: int(raw) for name, raw in match.groupdict().items()}
+            threshold = float(f"0.{values['CON']}0")
+            if (
+                values["W"] <= 0
+                or values["H"] <= 0
+                or values["DXL"] >= values["DXR"]
+                or values["DYT"] >= values["DYB"]
+                or not 0 <= threshold <= 1
+            ):
+                raise ValueError(f"assistTags[{index}] has invalid metadata.")
+
+            assets_marker = "/assets/"
+            if assets_marker in normalized_path:
+                template_path = normalized_path.split(assets_marker, 1)[1]
+            elif normalized_path.startswith("assets/"):
+                template_path = normalized_path[7:]
+            elif normalized_path.startswith("assist/"):
+                template_path = normalized_path
+            else:
+                template_path = f"assist/assist_tags/{template_name}"
+            tags.append(
+                {
+                    "template_name": template_name,
+                    "template_path": template_path,
+                    "threshold": threshold,
+                    "source_width": values["W"],
+                    "source_height": values["H"],
+                    "left": values["DXL"],
+                    "right": values["DXR"],
+                    "top": values["DYT"],
+                    "bottom": values["DYB"],
+                }
+            )
+        return tags
 
     @staticmethod
     def _plan_run(config: dict[str, Any]) -> dict[str, Any]:

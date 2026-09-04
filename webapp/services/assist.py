@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from webapp.core.errors import AppError
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
@@ -12,6 +13,7 @@ ASSIST_LIMIT_BREAK_SCALES = (1.25, *ASSIST_EQUIP_SCALES)
 ASSIST_FACE_MASK_PATH = "assist/servant_face_mask.png"
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
+NORMALIZED_FRAME_SCALE = 2 / 3
 GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
 GRAND_BOND_TEMPLATES = {
     "初始": "UIimage/jb_normal.png",
@@ -63,6 +65,12 @@ class AssistRecognizer:
         grand_only_equip = mode == "冠位助战仅礼装"
         only_equip = mode == "仅礼装" or grand_only_equip
         grand_layout = mode in GRAND_ASSIST_MODES
+        configured_tags = assist.get("tags")
+        tag_image_size = (
+            self._recognition.image_size(screenshot)
+            if isinstance(configured_tags, list) and configured_tags and not only_equip
+            else None
+        )
         canonical_name = assist.get("servant_canonical_name")
         templates = [] if only_equip else self._servant_templates(canonical_name)
         equip_templates = (
@@ -303,6 +311,31 @@ class AssistRecognizer:
                         ],
                         "skill_confidences": [
                             match.confidence for _, match in recognized_skills
+                        ],
+                    }
+                )
+            tag_matches = self._candidate_tag_matches(
+                screenshot,
+                candidate["anchor"],
+                configured_tags,
+                image_size=tag_image_size,
+            )
+            if tag_matches is None:
+                continue
+            if tag_matches:
+                candidate["checks"].update(
+                    {
+                        "custom_tags": [
+                            tag["template_name"] for tag, _match in tag_matches
+                        ],
+                        "custom_tag_templates": [
+                            match.template_path for _tag, match in tag_matches
+                        ],
+                        "custom_tag_confidences": [
+                            match.confidence for _tag, match in tag_matches
+                        ],
+                        "custom_tag_scales": [
+                            match.scale for _tag, match in tag_matches
                         ],
                     }
                 )
@@ -678,6 +711,72 @@ class AssistRecognizer:
                 == equip_name
             ]
         return templates
+
+    def _candidate_tag_matches(
+        self,
+        screenshot: bytes,
+        anchor: list[int],
+        tags: Any,
+        *,
+        image_size: tuple[int, int] | None,
+    ) -> list[tuple[dict[str, Any], Any]] | None:
+        if not isinstance(tags, list) or not tags:
+            return []
+
+        anchor_x, anchor_y = anchor
+        matches: list[tuple[dict[str, Any], Any]] = []
+        for tag in tags:
+            if not isinstance(tag, dict):
+                return None
+            source_width = tag.get("source_width")
+            source_height = tag.get("source_height")
+            if (
+                not isinstance(source_width, int)
+                or isinstance(source_width, bool)
+                or source_width <= 0
+                or not isinstance(source_height, int)
+                or isinstance(source_height, bool)
+                or source_height <= 0
+            ):
+                return None
+            source_scale = (
+                source_width / 1920
+                if source_width / source_height < 16 / 9
+                else source_height / 1080
+            )
+            tag_scale = NORMALIZED_FRAME_SCALE / source_scale
+            try:
+                left = round(anchor_x + float(tag["left"]) * tag_scale) - 3
+                top = round(
+                    anchor_y
+                    + float(tag["top"]) * tag_scale
+                    - 25 * NORMALIZED_FRAME_SCALE
+                ) - 3
+                right = round(anchor_x + float(tag["right"]) * tag_scale) + 3
+                bottom = round(
+                    anchor_y
+                    + float(tag["bottom"]) * tag_scale
+                    + 25 * NORMALIZED_FRAME_SCALE
+                ) + 3
+                if image_size is not None:
+                    image_width, image_height = image_size
+                    left = max(left, 0)
+                    top = max(top, 0)
+                    right = min(right, image_width)
+                    bottom = min(bottom, image_height)
+                match = self._recognition.match_template(
+                    screenshot,
+                    str(tag["template_path"]),
+                    threshold=float(tag["threshold"]),
+                    roi=(left, top, right - left, bottom - top),
+                    scales=(tag_scale,),
+                )
+            except (AppError, KeyError, TypeError, ValueError):
+                return None
+            if not match.matched:
+                return None
+            matches.append((tag, match))
+        return matches
 
     def _np_level_matches(
         self,

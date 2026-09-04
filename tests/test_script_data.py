@@ -256,6 +256,9 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
             "intervalAFswipeAssist": 0.7,
             "noGrandRefresh": 1,
             "jbType": "NP50",
+            "assistTags": [
+                r"D:\old\assist_tags\[Guild]W1920H1080DXL100DXR300DYT200DYB500CON85.png"
+            ],
         },
     )
 
@@ -279,6 +282,19 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
         "no_grand_refresh": True,
         "bond_equip_type": "NP50",
         "all_not_skip": False,
+        "tags": [
+            {
+                "template_name": "[Guild]W1920H1080DXL100DXR300DYT200DYB500CON85.png",
+                "template_path": "assist/assist_tags/[Guild]W1920H1080DXL100DXR300DYT200DYB500CON85.png",
+                "threshold": 0.85,
+                "source_width": 1920,
+                "source_height": 1080,
+                "left": 100,
+                "right": 300,
+                "top": 200,
+                "bottom": 500,
+            }
+        ],
     }
 
 
@@ -374,6 +390,28 @@ def test_get_setting_rejects_invalid_stuck_watchdog_interval(tmp_path: Path):
         "code": "invalid_stuck_interval",
         "field": "checkStuckInterval",
         "message": "Stuck watchdog interval must be between 1 and 600 seconds.",
+    } in detail["validation"]["errors"]
+
+
+def test_get_setting_rejects_invalid_assist_tag_metadata(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(
+        tmp_path / "settings" / "demo.json",
+        {
+            "server": "CH",
+            "assistTags": [
+                r"D:\old\assist_tags\[Broken]W0H1080DXL300DXR100DYT20DYB20CON85.png"
+            ],
+        },
+    )
+
+    detail = ScriptDataService(tmp_path).get_setting("demo")
+
+    assert detail["validation"]["ok"] is False
+    assert {
+        "code": "invalid_assist_tags",
+        "field": "assistTags",
+        "message": "assistTags[0] has invalid metadata.",
     } in detail["validation"]["errors"]
 
 

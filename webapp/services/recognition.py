@@ -44,6 +44,11 @@ class RecognitionService:
             template_size=template_size,
         )
 
+    def image_size(self, screenshot: bytes) -> tuple[int, int]:
+        screenshot_image = self._decode_screenshot(screenshot, None)
+        height, width = screenshot_image.shape[:2]
+        return width, height
+
     def match_templates(
         self,
         screenshot: bytes,
