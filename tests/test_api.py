@@ -263,6 +263,29 @@ def test_material_drop_catalog_and_query_routes(tmp_path: Path):
     }
 
 
+def test_notebook_routes_persist_utf8_text(tmp_path: Path):
+    client = _client(tmp_path)
+
+    empty_response = client.get("/api/notebook")
+    save_response = client.put(
+        "/api/notebook",
+        json={"content": "周回备忘\n苹果: 12\n"},
+    )
+    loaded_response = client.get("/api/notebook")
+
+    assert empty_response.status_code == 200
+    assert empty_response.json() == {"content": "", "bytes": 0}
+    assert save_response.status_code == 200
+    assert save_response.json() == {
+        "content": "周回备忘\n苹果: 12\n",
+        "bytes": len("周回备忘\n苹果: 12\n".encode("utf-8")),
+    }
+    assert loaded_response.json() == save_response.json()
+    assert (Path(client.app.state.resources.data_dir) / "notice.txt").read_text(
+        encoding="utf-8"
+    ) == "周回备忘\n苹果: 12\n"
+
+
 def test_equip_template_routes_build_and_move_precise_template(tmp_path: Path):
     import base64
     from io import BytesIO

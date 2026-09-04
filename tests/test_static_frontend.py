@@ -98,6 +98,10 @@ def test_operator_console_references_api_controls():
     assert 'id="material-quality"' in index
     assert 'id="material-name"' in index
     assert 'id="material-results"' in index
+    assert 'id="open-notebook"' in index
+    assert 'id="notebook-dialog"' in index
+    assert 'id="notebook-content"' in index
+    assert 'id="save-notebook"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
     assert '!["free_quest", "main_story"].includes(' in script
@@ -142,6 +146,8 @@ def test_operator_console_references_api_controls():
     assert "/api/equip-templates" in script
     assert "/api/material-drops/catalog" in script
     assert "queryMaterialDrops" in script
+    assert 'api("/api/notebook")' in script
+    assert "saveNotebook" in script
     assert "full_image_base64" in script
     assert "non_full_image_base64" in script
     assert "loadEquipTemplates" in script

@@ -14,6 +14,8 @@ const state = {
   equipTemplateBusy: false,
   materialCatalog: null,
   materialQuerySequence: 0,
+  notebookSavedContent: "",
+  notebookBusy: false,
   screenshotUrl: null,
   screenshotBase64: "",
   debugOverlayDataUrl: null,
@@ -155,6 +157,13 @@ const els = {
   materialName: document.querySelector("#material-name"),
   materialResultStatus: document.querySelector("#material-result-status"),
   materialResults: document.querySelector("#material-results"),
+  openNotebook: document.querySelector("#open-notebook"),
+  notebookDialog: document.querySelector("#notebook-dialog"),
+  notebookForm: document.querySelector("#notebook-form"),
+  closeNotebookDialog: document.querySelector("#close-notebook-dialog"),
+  notebookContent: document.querySelector("#notebook-content"),
+  notebookStatus: document.querySelector("#notebook-status"),
+  saveNotebook: document.querySelector("#save-notebook"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -298,6 +307,18 @@ function bindEvents() {
     queryMaterialDrops();
   });
   els.materialName.addEventListener("change", queryMaterialDrops);
+  els.openNotebook.addEventListener("click", openNotebook);
+  els.notebookForm.addEventListener("submit", saveNotebook);
+  els.closeNotebookDialog.addEventListener("click", closeNotebook);
+  els.notebookDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeNotebook();
+  });
+  els.notebookContent.addEventListener("input", () => {
+    els.notebookStatus.textContent = els.notebookContent.value === state.notebookSavedContent
+      ? "Saved"
+      : "Unsaved changes";
+  });
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -806,6 +827,64 @@ function materialTableCell(value) {
   const cell = document.createElement("td");
   cell.textContent = String(value ?? "");
   return cell;
+}
+
+async function openNotebook() {
+  if (state.notebookBusy) {
+    return;
+  }
+  state.notebookBusy = true;
+  els.openNotebook.disabled = true;
+  try {
+    const result = await api("/api/notebook");
+    state.notebookSavedContent = result.content || "";
+    els.notebookContent.value = state.notebookSavedContent;
+    els.notebookStatus.textContent = `Loaded | ${result.bytes || 0} bytes`;
+    els.notebookDialog.showModal();
+    els.notebookContent.focus();
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.notebookBusy = false;
+    els.openNotebook.disabled = false;
+  }
+}
+
+async function saveNotebook(event, closeAfterSave = false) {
+  event?.preventDefault();
+  if (state.notebookBusy) {
+    return false;
+  }
+  state.notebookBusy = true;
+  els.saveNotebook.disabled = true;
+  els.notebookStatus.textContent = "Saving...";
+  try {
+    const result = await api("/api/notebook", {
+      method: "PUT",
+      body: JSON.stringify({ content: els.notebookContent.value }),
+    });
+    state.notebookSavedContent = result.content;
+    els.notebookStatus.textContent = `Saved | ${result.bytes} bytes`;
+    if (closeAfterSave) {
+      els.notebookDialog.close();
+    }
+    return true;
+  } catch (error) {
+    els.notebookStatus.textContent = "Save failed";
+    showError(error);
+    return false;
+  } finally {
+    state.notebookBusy = false;
+    els.saveNotebook.disabled = false;
+  }
+}
+
+async function closeNotebook() {
+  if (els.notebookContent.value === state.notebookSavedContent) {
+    els.notebookDialog.close();
+    return;
+  }
+  await saveNotebook(undefined, true);
 }
 
 async function loadSettings(preferredName = "") {

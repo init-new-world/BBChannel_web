@@ -279,6 +279,7 @@
             <div class="panel-divider"></div>
             <div class="section-label">Material Drops</div>
             <button id="open-material-drops" class="ghost-button wide" type="button">Open Drop Query</button>
+            <button id="open-notebook" class="ghost-button wide" type="button">Open Notebook</button>
             <div class="panel-divider"></div>
             <div class="section-label">Diagnostic Job</div>
             <label class="field-stack">
@@ -397,6 +398,25 @@
             </thead>
             <tbody id="material-results"></tbody>
           </table>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="notebook-dialog" class="notebook-dialog">
+      <form id="notebook-form" class="notebook-form">
+        <div class="preset-dialog-header">
+          <div>
+            <div class="section-label">Notebook</div>
+            <h2>Run Notes</h2>
+          </div>
+          <button id="close-notebook-dialog" class="icon-button" type="button" title="Save and close" aria-label="Save and close">&times;</button>
+        </div>
+        <label class="field-stack notebook-content-field">
+          <span>Notes</span>
+          <textarea id="notebook-content" class="field notebook-content" maxlength="1000000" spellcheck="true"></textarea>
+        </label>
+        <div class="notebook-footer">
+          <span id="notebook-status" class="notebook-status" aria-live="polite">Not loaded</span>
+          <button id="save-notebook" class="primary-button" type="submit">Save</button>
         </div>
       </form>
     </dialog>

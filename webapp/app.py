@@ -65,6 +65,7 @@ from webapp.services.expball import ExpBallRecognizer
 from webapp.services.equip_templates import EquipTemplateService
 from webapp.services.lottery import LotteryRecognizer
 from webapp.services.materials import MaterialDropService
+from webapp.services.notebook import NotebookService
 from webapp.services.recognition import RecognitionService
 from webapp.services.quest import QuestRecognizer
 from webapp.services.resources import ResourceService
@@ -156,6 +157,10 @@ class TestEquipTemplateRequest(BaseModel):
     threshold: float = Field(default=0.9, ge=0.0, le=1.0)
 
 
+class SaveNotebookRequest(BaseModel):
+    content: str = Field(max_length=1_000_000)
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -189,6 +194,7 @@ def create_app(
     equip_templates = EquipTemplateService(resources, recognition)
     lottery_recognizer = LotteryRecognizer(resources, recognition)
     material_drops = MaterialDropService(resources.data_dir)
+    notebook = NotebookService(resources.data_dir)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -426,6 +432,7 @@ def create_app(
     app.state.expball_recognizer = expball_recognizer
     app.state.equip_templates = equip_templates
     app.state.material_drops = material_drops
+    app.state.notebook = notebook
     app.state.script_data = script_data
     app.state.job_manager = job_manager
 
@@ -508,6 +515,14 @@ def create_app(
     @app.get("/api/material-drops")
     def material_drop_query(server: str, quality: str, material: str) -> dict[str, object]:
         return material_drops.query(server, quality, material)
+
+    @app.get("/api/notebook")
+    def read_notebook() -> dict[str, object]:
+        return notebook.read()
+
+    @app.put("/api/notebook")
+    def save_notebook(request: SaveNotebookRequest) -> dict[str, object]:
+        return notebook.save(request.content)
 
     @app.get("/api/equip-templates")
     def equip_template_inventory() -> dict[str, list[dict[str, object]]]:

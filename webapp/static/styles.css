@@ -462,6 +462,64 @@ select:disabled {
   background: rgba(21, 26, 32, 0.52);
 }
 
+.notebook-dialog {
+  width: min(720px, calc(100vw - 28px));
+  height: min(620px, calc(100vh - 28px));
+  max-width: none;
+  max-height: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 0;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgba(30, 37, 45, 0.24);
+}
+
+.notebook-dialog::backdrop {
+  background: rgba(21, 26, 32, 0.52);
+}
+
+.notebook-form {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 16px;
+}
+
+.notebook-content-field {
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.notebook-content {
+  min-height: 240px;
+  height: auto;
+  resize: none;
+  padding: 12px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.notebook-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notebook-status {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.notebook-footer button {
+  min-width: 92px;
+}
+
 .material-form {
   height: 100%;
   display: grid;
@@ -1036,6 +1094,11 @@ select:disabled {
   }
 
   .material-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+  }
+
+  .notebook-dialog {
     width: calc(100vw - 16px);
     height: calc(100vh - 16px);
   }
