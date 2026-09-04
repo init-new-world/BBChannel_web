@@ -10,11 +10,15 @@ from threading import RLock
 from PIL import Image, UnidentifiedImageError
 
 from webapp.core.errors import AppError, ErrorCode
+from webapp.core.models import MatchResult
+from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
 
 TEMPLATE_SIZE = (237, 68)
 CHECK_BOX = (194, 34, 228, 68)
+MAIN_MATCH_BOX = (39, 0, 194, 56)
+MATCH_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 INVALID_NAME_CHARACTERS = set('<>:"/\\|?*')
 EXTRACTION_REFERENCE_SIZE = (1788, 1006)
 EXTRACTION_REGIONS = (
@@ -26,8 +30,13 @@ EXTRACTION_REGIONS = (
 
 
 class EquipTemplateService:
-    def __init__(self, resources: ResourceService) -> None:
+    def __init__(
+        self,
+        resources: ResourceService,
+        recognition: RecognitionService | None = None,
+    ) -> None:
         self._resources = resources
+        self._recognition = recognition or RecognitionService(resources)
         self._lock = RLock()
         assets = resources.assets_dir
         self._locations = {
@@ -174,6 +183,147 @@ class EquipTemplateService:
                     }
                 )
         return candidates
+
+    def test_template(
+        self,
+        name: str,
+        *,
+        location: str,
+        screenshot: bytes,
+        threshold: float = 0.9,
+    ) -> dict[str, object]:
+        normalized_name = _validate_name(name)
+        if location not in self._locations:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Equip template location is invalid.",
+                {"location": location},
+            )
+        screenshot_size = _load_image(screenshot, "screenshot_base64").size
+        with self._lock:
+            image_dir, check_dir = self._locations[location]
+            image_path = image_dir / f"{normalized_name}.png"
+            if not image_path.is_file():
+                raise AppError(
+                    ErrorCode.DATA_FILE_NOT_FOUND,
+                    f"Equip template was not found in {location}: {normalized_name}",
+                    {"name": normalized_name, "location": location},
+                )
+            relative_image_path = image_path.relative_to(self._resources.assets_dir).as_posix()
+            precise = all(
+                (check_dir / f"{normalized_name}_{flag}.png").is_file()
+                for flag in (0, 1)
+            )
+            matches = self._recognition.match_template_all(
+                screenshot,
+                relative_image_path,
+                threshold=threshold,
+                scales=MATCH_SCALES,
+                template_crop=MAIN_MATCH_BOX,
+                max_results=20,
+            )
+            results = [self._test_match(match) for match in matches]
+            valid_matches = [
+                (index, match, result)
+                for index, (match, result) in enumerate(zip(matches, results, strict=True))
+                if _roi_inside(tuple(result["check_roi"]), screenshot_size)
+            ]
+            if precise and valid_matches:
+                check_prefix = (
+                    "assist/equip_check"
+                    if location == "active"
+                    else "equipmaker/equip_check_store"
+                )
+                check_requests = []
+                for _index, match, result in valid_matches:
+                    common = {
+                        "threshold": 0.0,
+                        "roi": result["check_roi"],
+                        "scales": [match.scale],
+                    }
+                    check_requests.extend(
+                        [
+                            {
+                                **common,
+                                "template_path": f"{check_prefix}/{normalized_name}_0.png",
+                            },
+                            {
+                                **common,
+                                "template_path": f"{check_prefix}/{normalized_name}_1.png",
+                            },
+                        ]
+                    )
+                check_results = self._recognition.match_templates(screenshot, check_requests)
+                for position, (index, _match, _result) in enumerate(valid_matches):
+                    non_full = check_results[position * 2]
+                    full = check_results[position * 2 + 1]
+                    results[index].update(
+                        {
+                            "full_limit_break": full.confidence >= non_full.confidence,
+                            "limit_break_method": "precise",
+                            "limit_break_confidence": full.confidence,
+                            "non_full_confidence": non_full.confidence,
+                        }
+                    )
+            elif valid_matches:
+                star_path = self._resources.assets_dir / "assist" / "equip_check" / "star.png"
+                mask_path = self._resources.assets_dir / "assist" / "equip_check" / "starMask.png"
+                if star_path.is_file():
+                    marker_results = self._recognition.match_templates(
+                        screenshot,
+                        [
+                            {
+                                "template_path": "assist/equip_check/star.png",
+                                "threshold": 0.8,
+                                "roi": result["check_roi"],
+                                "scales": [match.scale],
+                                "mask_path": (
+                                    "assist/equip_check/starMask.png"
+                                    if mask_path.is_file()
+                                    else None
+                                ),
+                            }
+                            for _index, match, result in valid_matches
+                        ],
+                    )
+                    for (index, _match, _result), marker in zip(
+                        valid_matches,
+                        marker_results,
+                        strict=True,
+                    ):
+                        results[index].update(
+                            {
+                                "full_limit_break": marker.matched,
+                                "limit_break_method": "star_marker",
+                                "limit_break_confidence": marker.confidence,
+                            }
+                        )
+            return {
+                "name": normalized_name,
+                "location": location,
+                "precise": precise,
+                "match_count": len(results),
+                "matches": results,
+            }
+
+    def _test_match(
+        self,
+        match: MatchResult,
+    ) -> dict[str, object]:
+        scale = float(match.scale)
+        check_roi = _check_roi(match.top_left, scale)
+        return {
+            "top_left": list(match.top_left),
+            "size": list(match.size),
+            "center": list(match.center),
+            "confidence": float(match.confidence),
+            "scale": scale,
+            "check_roi": list(check_roi),
+            "full_limit_break": None,
+            "limit_break_method": "unavailable",
+            "limit_break_confidence": None,
+            "non_full_confidence": None,
+        }
 
     def _move(
         self,
@@ -342,3 +492,29 @@ def _encode_png(image: Image.Image) -> bytes:
     output = BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
+
+
+def _check_roi(top_left: list[int], scale: float) -> tuple[int, int, int, int]:
+    full_left = top_left[0] - MAIN_MATCH_BOX[0] * scale
+    full_top = top_left[1] - MAIN_MATCH_BOX[1] * scale
+    left = round(full_left + CHECK_BOX[0] * scale)
+    top = round(full_top + CHECK_BOX[1] * scale)
+    width = max(round((CHECK_BOX[2] - CHECK_BOX[0]) * scale), 1)
+    height = max(round((CHECK_BOX[3] - CHECK_BOX[1]) * scale), 1)
+    return left, top, width, height
+
+
+def _roi_inside(
+    roi: tuple[int, int, int, int],
+    image_size: tuple[int, int],
+) -> bool:
+    left, top, width, height = roi
+    image_width, image_height = image_size
+    return (
+        left >= 0
+        and top >= 0
+        and width > 0
+        and height > 0
+        and left + width <= image_width
+        and top + height <= image_height
+    )

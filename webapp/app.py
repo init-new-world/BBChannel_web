@@ -149,6 +149,12 @@ class CaptureEquipCandidatesRequest(BaseModel):
     threshold: float = Field(default=0.85, ge=0.0, le=1.0)
 
 
+class TestEquipTemplateRequest(BaseModel):
+    location: str = "active"
+    screenshot_base64: str | None = None
+    threshold: float = Field(default=0.9, ge=0.0, le=1.0)
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -179,7 +185,7 @@ def create_app(
     chocolate_recognizer = ChocolateRecognizer(resources, recognition)
     digdig_recognizer = DigdigRecognizer(resources, recognition)
     expball_recognizer = ExpBallRecognizer(resources, recognition)
-    equip_templates = EquipTemplateService(resources)
+    equip_templates = EquipTemplateService(resources, recognition)
     lottery_recognizer = LotteryRecognizer(resources, recognition)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
@@ -539,6 +545,16 @@ def create_app(
             "candidate_count": len(candidates),
             "candidates": candidates,
         }
+
+    @app.post("/api/equip-templates/{name}/test")
+    def test_equip_template(name: str, request: TestEquipTemplateRequest) -> dict[str, object]:
+        screenshot = _decode_optional_image(request.screenshot_base64) or device_service.snapshot()
+        return equip_templates.test_template(
+            name,
+            location=request.location,
+            screenshot=screenshot,
+            threshold=request.threshold,
+        )
 
     @app.post("/api/equip-templates/{name}")
     def build_equip_template(name: str, request: BuildEquipTemplateRequest) -> dict[str, object]:

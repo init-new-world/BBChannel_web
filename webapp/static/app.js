@@ -140,6 +140,8 @@ const els = {
   equipTemplateList: document.querySelector("#equip-template-list"),
   equipTemplatePreview: document.querySelector("#equip-template-preview"),
   equipTemplatePreviewStatus: document.querySelector("#equip-template-preview-status"),
+  testEquipTemplate: document.querySelector("#test-equip-template"),
+  equipTestStatus: document.querySelector("#equip-test-status"),
   activateEquipTemplate: document.querySelector("#activate-equip-template"),
   archiveEquipTemplate: document.querySelector("#archive-equip-template"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
@@ -273,6 +275,7 @@ function bindEvents() {
   els.buildEquipTemplate.addEventListener("click", buildEquipTemplate);
   els.equipTemplateList.addEventListener("change", renderSelectedEquipTemplate);
   els.equipTemplatePreview.addEventListener("error", handleEquipTemplatePreviewError);
+  els.testEquipTemplate.addEventListener("click", testEquipTemplate);
   els.activateEquipTemplate.addEventListener("click", () => moveEquipTemplate("activate"));
   els.archiveEquipTemplate.addEventListener("click", () => moveEquipTemplate("archive"));
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
@@ -389,6 +392,7 @@ function renderSelectedEquipTemplate() {
     els.equipTemplatePreview.removeAttribute("src");
     els.equipTemplatePreviewStatus.hidden = false;
     els.equipTemplatePreviewStatus.textContent = "No templates";
+    els.equipTestStatus.textContent = "Not tested";
     updateControls();
     return;
   }
@@ -396,6 +400,7 @@ function renderSelectedEquipTemplate() {
   els.equipTemplatePreviewStatus.textContent = template.precise ? "Precise" : "Simple";
   els.equipTemplatePreview.hidden = false;
   els.equipTemplatePreview.src = `/api/equip-templates/${encodeURIComponent(template.name)}/image?location=${template.location}`;
+  els.equipTestStatus.textContent = "Not tested";
   updateControls();
 }
 
@@ -403,6 +408,38 @@ function handleEquipTemplatePreviewError() {
   els.equipTemplatePreview.hidden = true;
   els.equipTemplatePreviewStatus.hidden = false;
   els.equipTemplatePreviewStatus.textContent = "Preview unavailable";
+}
+
+async function testEquipTemplate() {
+  const template = selectedEquipTemplate();
+  if (!template || (!state.connected && !state.screenshotBase64)) {
+    return;
+  }
+  state.equipTemplateBusy = true;
+  els.equipTestStatus.textContent = "Testing...";
+  updateControls();
+  try {
+    const result = await api(
+      `/api/equip-templates/${encodeURIComponent(template.name)}/test`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          location: template.location,
+          screenshot_base64: state.screenshotBase64 || null,
+        }),
+      },
+    );
+    const fullCount = result.matches.filter((match) => match.full_limit_break === true).length;
+    const nonFullCount = result.matches.filter((match) => match.full_limit_break === false).length;
+    const unknownCount = result.match_count - fullCount - nonFullCount;
+    els.equipTestStatus.textContent = `${result.match_count} matches | ${fullCount} full | ${nonFullCount} non-full | ${unknownCount} unknown`;
+  } catch (error) {
+    els.equipTestStatus.textContent = "Test failed";
+    showError(error);
+  } finally {
+    state.equipTemplateBusy = false;
+    updateControls();
+  }
 }
 
 async function captureEquipCandidates() {
@@ -1881,6 +1918,9 @@ function updateControls() {
   els.equipFullImage.disabled = state.equipTemplateBusy;
   els.equipNonFullImage.disabled = state.equipTemplateBusy;
   els.equipTemplateList.disabled = state.equipTemplateBusy || !state.equipTemplates.length;
+  els.testEquipTemplate.disabled = state.equipTemplateBusy
+    || !equipTemplate
+    || (!state.connected && !state.screenshotBase64);
   els.buildEquipTemplate.disabled = state.equipTemplateBusy
     || !els.equipTemplateName.value.trim()
     || !hasEquipImage;

@@ -86,6 +86,7 @@ class RecognitionService:
         roi: Sequence[int] | None = None,
         scales: Sequence[float] | None = None,
         mask_path: str | None = None,
+        template_crop: Sequence[int] | None = None,
         max_results: int = 20,
     ) -> list[MatchResult]:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
@@ -96,6 +97,7 @@ class RecognitionService:
             roi=roi,
             scales=scales,
             mask_path=mask_path,
+            template_crop=template_crop,
             max_results=max_results,
         )
 
@@ -290,6 +292,7 @@ class RecognitionService:
         roi: object = None,
         scales: object = None,
         mask_path: str | None = None,
+        template_crop: object = None,
         max_results: int,
     ) -> list[MatchResult]:
         cv, numpy = self._require_opencv()
@@ -297,6 +300,17 @@ class RecognitionService:
             template_path,
             mask_path,
         )
+        if template_crop is not None:
+            template_height, template_width = template_image.shape[:2]
+            left, top, right, bottom = self._normalize_template_crop(
+                template_crop,
+                template_width,
+                template_height,
+                template_path,
+            )
+            template_image = template_image[top:bottom, left:right]
+            if template_mask is not None:
+                template_mask = template_mask[top:bottom, left:right]
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
             roi,
@@ -354,6 +368,40 @@ class RecognitionService:
             if len(selected) >= max(max_results, 1):
                 break
         return sorted(selected, key=lambda result: (result.top_left[1], result.top_left[0]))
+
+    @staticmethod
+    def _normalize_template_crop(
+        crop: object,
+        template_width: int,
+        template_height: int,
+        template_path: str,
+    ) -> tuple[int, int, int, int]:
+        try:
+            values = [int(value) for value in crop]  # type: ignore[union-attr]
+        except (TypeError, ValueError) as exc:
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Template crop must contain four integer coordinates.",
+                {"template_path": template_path, "template_crop": crop},
+            ) from exc
+        if len(values) != 4:
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Template crop must contain four integer coordinates.",
+                {"template_path": template_path, "template_crop": values},
+            )
+        left, top, right, bottom = values
+        if not (0 <= left < right <= template_width and 0 <= top < bottom <= template_height):
+            raise AppError(
+                ErrorCode.MATCH_FAILED,
+                "Template crop is outside the template image.",
+                {
+                    "template_path": template_path,
+                    "template_crop": values,
+                    "template_size": [template_width, template_height],
+                },
+            )
+        return left, top, right, bottom
 
     def _load_template(self, template_path: str, mask_path: str | None):
         cv, _ = self._require_opencv()

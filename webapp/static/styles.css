@@ -321,6 +321,13 @@ select:disabled {
   white-space: nowrap;
 }
 
+.equip-test-status {
+  min-height: 16px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .toggle-row {
   min-height: 30px;
   display: flex;

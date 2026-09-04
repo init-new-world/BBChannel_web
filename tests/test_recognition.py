@@ -293,6 +293,30 @@ def test_match_template_all_returns_distinct_occurrences(tmp_path: Path):
     assert all(result.confidence >= 0.99 for result in results)
 
 
+def test_match_template_all_supports_template_crop(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    inner = _pattern((12, 10))
+    template = Image.new("RGB", (20, 16), "magenta")
+    template.paste(inner, (4, 3))
+    template.save(resources.assets_dir / "target.png")
+    screenshot = Image.new("RGB", (100, 70), "black")
+    screenshot.paste(inner, (57, 31))
+
+    results = RecognitionService(resources).match_template_all(
+        _png_bytes(screenshot),
+        "target.png",
+        threshold=0.99,
+        template_crop=(4, 3, 16, 13),
+        max_results=5,
+    )
+
+    assert [result.top_left for result in results] == [[57, 31]]
+    assert results[0].size == [12, 10]
+
+
 def test_match_template_rejects_roi_outside_screenshot(tmp_path: Path):
     pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService

@@ -404,6 +404,96 @@ def test_equip_template_candidate_route_extracts_assist_row_regions(tmp_path: Pa
         assert image.size == (237, 68)
 
 
+def test_equip_template_test_route_reports_precise_limit_break_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import base64
+    import random
+    from io import BytesIO
+
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    from PIL import Image
+
+    client = _client(tmp_path)
+    randomizer = random.Random(37)
+    full = Image.new("RGB", (237, 68))
+    full.putdata(
+        [
+            (
+                randomizer.randrange(256),
+                randomizer.randrange(256),
+                randomizer.randrange(256),
+            )
+            for _ in range(237 * 68)
+        ]
+    )
+    non_full = full.copy()
+    non_full.paste(Image.new("RGB", (34, 34), "black"), (194, 34))
+
+    def encoded(image: Image.Image) -> str:
+        output = BytesIO()
+        image.save(output, format="PNG")
+        return base64.b64encode(output.getvalue()).decode("ascii")
+
+    create_response = client.post(
+        "/api/equip-templates/Event%20CE",
+        json={
+            "full_image_base64": encoded(full),
+            "non_full_image_base64": encoded(non_full),
+        },
+    )
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    scale = 2 / 3
+    main = Image.fromarray(
+        cv2.resize(
+            np.asarray(full.crop((39, 0, 194, 56))),
+            (round(155 * scale), round(56 * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+    )
+    check = Image.fromarray(
+        cv2.resize(
+            np.asarray(full.crop((194, 34, 228, 68))),
+            (round(34 * scale), round(34 * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+    )
+    screenshot.paste(main, (126, 250))
+    screenshot.paste(check, (229, 273))
+    decode_calls = 0
+    original_decode = cv2.imdecode
+
+    def count_decode(*args, **kwargs):
+        nonlocal decode_calls
+        decode_calls += 1
+        return original_decode(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "imdecode", count_decode)
+
+    response = client.post(
+        "/api/equip-templates/Event%20CE/test",
+        json={
+            "location": "archive",
+            "screenshot_base64": encoded(screenshot),
+            "threshold": 0.99,
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["name"] == "Event CE"
+    assert payload["location"] == "archive"
+    assert payload["precise"] is True
+    assert payload["match_count"] == 1
+    assert payload["matches"][0]["top_left"] == [126, 250]
+    assert payload["matches"][0]["full_limit_break"] is True
+    assert payload["matches"][0]["limit_break_method"] == "precise"
+    assert decode_calls == 2
+
+
 def test_match_route_accepts_roi_and_scales(tmp_path: Path):
     pytest.importorskip("cv2")
     import base64

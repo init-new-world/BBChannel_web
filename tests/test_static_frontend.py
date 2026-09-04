@@ -88,6 +88,8 @@ def test_operator_console_references_api_controls():
     assert 'id="build-equip-template"' in index
     assert 'id="equip-template-list"' in index
     assert 'id="equip-template-preview"' in index
+    assert 'id="test-equip-template"' in index
+    assert 'id="equip-test-status"' in index
     assert 'id="activate-equip-template"' in index
     assert 'id="archive-equip-template"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
@@ -136,6 +138,8 @@ def test_operator_console_references_api_controls():
     assert "non_full_image_base64" in script
     assert "loadEquipTemplates" in script
     assert "captureEquipCandidates" in script
+    assert "testEquipTemplate" in script
+    assert "/test`" in script
     assert "screenshot_base64: state.screenshotBase64 || null" in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
     assert '["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server)' in script
