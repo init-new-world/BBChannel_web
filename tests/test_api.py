@@ -192,6 +192,77 @@ def test_template_index_and_metadata_routes(tmp_path: Path):
     assert metadata_response.json()["height"] == 8
 
 
+def test_material_drop_catalog_and_query_routes(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(
+        data / "material_quality.json",
+        {"铜素材": ["英雄之证", "凶骨"], "银素材": ["世界树之种"]},
+    )
+    _write_json(
+        data / "material_info.json",
+        {
+            "CH": {
+                "铜素材": {
+                    "英雄之证": [
+                        {
+                            "chapter": "第三特异点/关卡配置#自由关卡",
+                            "section": "海盗船",
+                            "AP": 18.9,
+                            "P": "63.4%",
+                        },
+                        {
+                            "chapter": "第一特异点/关卡配置#自由关卡",
+                            "section": "马赛",
+                            "AP": 20.3,
+                            "P": "34.4%",
+                        },
+                    ]
+                }
+            },
+            "JP": {},
+        },
+    )
+
+    catalog_response = client.get("/api/material-drops/catalog")
+    query_response = client.get(
+        "/api/material-drops",
+        params={"server": "ch", "quality": "铜素材", "material": "英雄之证"},
+    )
+
+    assert catalog_response.status_code == 200
+    assert catalog_response.json() == {
+        "servers": ["CH", "JP"],
+        "qualities": [
+            {"name": "铜素材", "materials": ["英雄之证", "凶骨"]},
+            {"name": "银素材", "materials": ["世界树之种"]},
+        ],
+    }
+    assert query_response.status_code == 200
+    assert query_response.json() == {
+        "server": "CH",
+        "quality": "铜素材",
+        "material": "英雄之证",
+        "count": 2,
+        "stages": [
+            {
+                "chapter": "第三特异点",
+                "section": "海盗船",
+                "average_ap": 18.9,
+                "drop_rate": "63.4%",
+                "drop_rate_percent": 63.4,
+            },
+            {
+                "chapter": "第一特异点",
+                "section": "马赛",
+                "average_ap": 20.3,
+                "drop_rate": "34.4%",
+                "drop_rate_percent": 34.4,
+            },
+        ],
+    }
+
+
 def test_equip_template_routes_build_and_move_precise_template(tmp_path: Path):
     import base64
     from io import BytesIO

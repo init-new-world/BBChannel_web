@@ -92,6 +92,12 @@ def test_operator_console_references_api_controls():
     assert 'id="equip-test-status"' in index
     assert 'id="activate-equip-template"' in index
     assert 'id="archive-equip-template"' in index
+    assert 'id="open-material-drops"' in index
+    assert 'id="material-dialog"' in index
+    assert 'id="material-server"' in index
+    assert 'id="material-quality"' in index
+    assert 'id="material-name"' in index
+    assert 'id="material-results"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
     assert '!["free_quest", "main_story"].includes(' in script
@@ -134,6 +140,8 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.expball.sell"' in script
     assert "overflowCycles" not in script
     assert "/api/equip-templates" in script
+    assert "/api/material-drops/catalog" in script
+    assert "queryMaterialDrops" in script
     assert "full_image_base64" in script
     assert "non_full_image_base64" in script
     assert "loadEquipTemplates" in script

@@ -12,6 +12,8 @@ const state = {
   equipFullCandidate: null,
   equipNonFullCandidate: null,
   equipTemplateBusy: false,
+  materialCatalog: null,
+  materialQuerySequence: 0,
   screenshotUrl: null,
   screenshotBase64: "",
   debugOverlayDataUrl: null,
@@ -144,6 +146,15 @@ const els = {
   equipTestStatus: document.querySelector("#equip-test-status"),
   activateEquipTemplate: document.querySelector("#activate-equip-template"),
   archiveEquipTemplate: document.querySelector("#archive-equip-template"),
+  openMaterialDrops: document.querySelector("#open-material-drops"),
+  materialDialog: document.querySelector("#material-dialog"),
+  materialForm: document.querySelector("#material-form"),
+  closeMaterialDialog: document.querySelector("#close-material-dialog"),
+  materialServer: document.querySelector("#material-server"),
+  materialQuality: document.querySelector("#material-quality"),
+  materialName: document.querySelector("#material-name"),
+  materialResultStatus: document.querySelector("#material-result-status"),
+  materialResults: document.querySelector("#material-results"),
   startBattleDryRun: document.querySelector("#start-battle-dry-run"),
   startBattlePlan: document.querySelector("#start-battle-plan"),
   jobHistory: document.querySelector("#job-history"),
@@ -278,6 +289,15 @@ function bindEvents() {
   els.testEquipTemplate.addEventListener("click", testEquipTemplate);
   els.activateEquipTemplate.addEventListener("click", () => moveEquipTemplate("activate"));
   els.archiveEquipTemplate.addEventListener("click", () => moveEquipTemplate("archive"));
+  els.openMaterialDrops.addEventListener("click", openMaterialDrops);
+  els.closeMaterialDialog.addEventListener("click", () => els.materialDialog.close());
+  els.materialForm.addEventListener("submit", queryMaterialDrops);
+  els.materialServer.addEventListener("change", queryMaterialDrops);
+  els.materialQuality.addEventListener("change", () => {
+    updateMaterialNames();
+    queryMaterialDrops();
+  });
+  els.materialName.addEventListener("change", queryMaterialDrops);
   els.jobHistory.addEventListener("change", () => selectJob(els.jobHistory.value));
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
@@ -670,6 +690,122 @@ function requestEquipTemplateMove(template, action, overwrite) {
     method: "POST",
     body: JSON.stringify({ overwrite }),
   });
+}
+
+async function openMaterialDrops() {
+  try {
+    state.materialCatalog = await api("/api/material-drops/catalog");
+    populateMaterialFilters();
+    els.materialDialog.showModal();
+    await queryMaterialDrops();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function populateMaterialFilters() {
+  const preferredServer = state.selectedSettingPlan?.server || els.materialServer.value;
+  els.materialServer.replaceChildren(
+    ...(state.materialCatalog?.servers || []).map((server) => {
+      const option = document.createElement("option");
+      option.value = server;
+      option.textContent = server;
+      return option;
+    }),
+  );
+  if ((state.materialCatalog?.servers || []).includes(preferredServer)) {
+    els.materialServer.value = preferredServer;
+  }
+  const preferredQuality = els.materialQuality.value;
+  els.materialQuality.replaceChildren(
+    ...(state.materialCatalog?.qualities || []).map((quality) => {
+      const option = document.createElement("option");
+      option.value = quality.name;
+      option.textContent = quality.name;
+      return option;
+    }),
+  );
+  if ((state.materialCatalog?.qualities || []).some((item) => item.name === preferredQuality)) {
+    els.materialQuality.value = preferredQuality;
+  }
+  updateMaterialNames();
+}
+
+function updateMaterialNames() {
+  const preferredMaterial = els.materialName.value;
+  const quality = (state.materialCatalog?.qualities || []).find(
+    (item) => item.name === els.materialQuality.value,
+  );
+  const materials = quality?.materials || [];
+  els.materialName.replaceChildren(
+    ...materials.map((material) => {
+      const option = document.createElement("option");
+      option.value = material;
+      option.textContent = material;
+      return option;
+    }),
+  );
+  if (materials.includes(preferredMaterial)) {
+    els.materialName.value = preferredMaterial;
+  }
+}
+
+async function queryMaterialDrops(event) {
+  event?.preventDefault();
+  const server = els.materialServer.value;
+  const quality = els.materialQuality.value;
+  const material = els.materialName.value;
+  if (!server || !quality || !material) {
+    return;
+  }
+  const sequence = ++state.materialQuerySequence;
+  els.materialResultStatus.textContent = "Loading...";
+  try {
+    const parameters = new URLSearchParams({ server, quality, material });
+    const result = await api(`/api/material-drops?${parameters}`);
+    if (sequence !== state.materialQuerySequence) {
+      return;
+    }
+    renderMaterialDrops(result.stages || []);
+    els.materialResultStatus.textContent = `${result.count} stages | sorted by average AP`;
+  } catch (error) {
+    if (sequence !== state.materialQuerySequence) {
+      return;
+    }
+    els.materialResults.replaceChildren();
+    els.materialResultStatus.textContent = "Query failed";
+    showError(error);
+  }
+}
+
+function renderMaterialDrops(stages) {
+  if (!stages.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 4;
+    cell.textContent = "No data";
+    row.append(cell);
+    els.materialResults.replaceChildren(row);
+    return;
+  }
+  els.materialResults.replaceChildren(
+    ...stages.map((stage) => {
+      const row = document.createElement("tr");
+      row.append(
+        materialTableCell(stage.chapter),
+        materialTableCell(stage.section),
+        materialTableCell(Number(stage.average_ap).toFixed(1)),
+        materialTableCell(stage.drop_rate),
+      );
+      return row;
+    }),
+  );
+}
+
+function materialTableCell(value) {
+  const cell = document.createElement("td");
+  cell.textContent = String(value ?? "");
+  return cell;
 }
 
 async function loadSettings(preferredName = "") {

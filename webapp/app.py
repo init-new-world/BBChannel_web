@@ -64,6 +64,7 @@ from webapp.services.event_log import EventLog
 from webapp.services.expball import ExpBallRecognizer
 from webapp.services.equip_templates import EquipTemplateService
 from webapp.services.lottery import LotteryRecognizer
+from webapp.services.materials import MaterialDropService
 from webapp.services.recognition import RecognitionService
 from webapp.services.quest import QuestRecognizer
 from webapp.services.resources import ResourceService
@@ -187,6 +188,7 @@ def create_app(
     expball_recognizer = ExpBallRecognizer(resources, recognition)
     equip_templates = EquipTemplateService(resources, recognition)
     lottery_recognizer = LotteryRecognizer(resources, recognition)
+    material_drops = MaterialDropService(resources.data_dir)
     script_data = ScriptDataService(resources.data_dir)
     owns_job_manager = job_manager is None
     if job_manager is None:
@@ -423,6 +425,7 @@ def create_app(
     app.state.lottery_recognizer = lottery_recognizer
     app.state.expball_recognizer = expball_recognizer
     app.state.equip_templates = equip_templates
+    app.state.material_drops = material_drops
     app.state.script_data = script_data
     app.state.job_manager = job_manager
 
@@ -497,6 +500,14 @@ def create_app(
     @app.get("/api/templates")
     def templates() -> dict[str, list[str]]:
         return {"templates": resources.list_templates()}
+
+    @app.get("/api/material-drops/catalog")
+    def material_drop_catalog() -> dict[str, object]:
+        return material_drops.catalog()
+
+    @app.get("/api/material-drops")
+    def material_drop_query(server: str, quality: str, material: str) -> dict[str, object]:
+        return material_drops.query(server, quality, material)
 
     @app.get("/api/equip-templates")
     def equip_template_inventory() -> dict[str, list[dict[str, object]]]:

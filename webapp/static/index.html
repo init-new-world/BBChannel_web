@@ -277,6 +277,9 @@
               <button id="archive-equip-template" class="ghost-button" type="button">Archive</button>
             </div>
             <div class="panel-divider"></div>
+            <div class="section-label">Material Drops</div>
+            <button id="open-material-drops" class="ghost-button wide" type="button">Open Drop Query</button>
+            <div class="panel-divider"></div>
             <div class="section-label">Diagnostic Job</div>
             <label class="field-stack">
               <span>Verify after tap</span>
@@ -354,6 +357,46 @@
         <div class="preset-dialog-actions">
           <button id="cancel-preset" class="ghost-button" type="button">Cancel</button>
           <button id="save-preset" class="primary-button" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="material-dialog" class="material-dialog">
+      <form id="material-form" class="material-form">
+        <div class="preset-dialog-header">
+          <div>
+            <div class="section-label">Material Drops</div>
+            <h2>Drop Query</h2>
+          </div>
+          <button id="close-material-dialog" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="material-filters">
+          <label class="field-stack">
+            <span>Server</span>
+            <select id="material-server" class="field"></select>
+          </label>
+          <label class="field-stack">
+            <span>Quality</span>
+            <select id="material-quality" class="field"></select>
+          </label>
+          <label class="field-stack">
+            <span>Material</span>
+            <select id="material-name" class="field"></select>
+          </label>
+          <button id="query-material-drops" class="primary-button" type="submit">Query</button>
+        </div>
+        <div id="material-result-status" class="material-result-status" aria-live="polite">No query</div>
+        <div class="material-table-wrap">
+          <table class="material-table">
+            <thead>
+              <tr>
+                <th scope="col">Chapter</th>
+                <th scope="col">Stage</th>
+                <th scope="col">Avg. AP</th>
+                <th scope="col">Drop rate</th>
+              </tr>
+            </thead>
+            <tbody id="material-results"></tbody>
+          </table>
         </div>
       </form>
     </dialog>
