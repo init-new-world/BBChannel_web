@@ -362,6 +362,23 @@ class ScriptDataService:
                     )
                 )
 
+        skill_levels = config.get("skillsLevel")
+        if skill_levels is not None and (
+            not isinstance(skill_levels, list)
+            or len(skill_levels) > 8
+            or any(isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 10
+                   for level in skill_levels)
+        ):
+            errors.append(self._issue(
+                "invalid_skill_levels", "skillsLevel",
+                "Skill requirements must contain up to eight integer levels between 0 and 10.",
+            ))
+        elif server == "CNTW" and skill_levels and any(skill_levels[6:]):
+            errors.append(self._issue(
+                "unsupported_append_skill", "skillsLevel",
+                "The CNTW assist layout supports three append skill requirements.",
+            ))
+
         try:
             tags = self._plan_assist_tags(config.get("assistTags"))
         except ValueError as exc:
@@ -527,6 +544,7 @@ class ScriptDataService:
             tags = []
 
         skill_levels = config.get("skillsLevel")
+        skill_levels = (skill_levels + [0] * 8)[:8] if isinstance(skill_levels, list) else [0] * 8
         return {
             "mode": config.get("assistMode"),
             "slot": slot,
@@ -539,7 +557,8 @@ class ScriptDataService:
             "friend_only": bool(config.get("onlyFriendAssist")),
             "np_level": config.get("NPlevel"),
             "servant_level": config.get("servantLevel", 1),
-            "skill_levels": skill_levels[:3] if isinstance(skill_levels, list) else [],
+            "skill_levels": skill_levels[:3],
+            "append_skill_levels": skill_levels[3:6] if server == "CNTW" else skill_levels[3:8],
             "scroll_limit": config.get("scrollLimit"),
             "interval_after_swipe": config.get("intervalAFswipeAssist", 0.5),
             "no_grand_refresh": bool(config.get("noGrandRefresh")),

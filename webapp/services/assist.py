@@ -164,7 +164,7 @@ class AssistRecognizer:
             else []
         )
         skill_level_matches = (
-            self._skill_level_matches(screenshot, threshold)
+            self._skill_level_matches(screenshot, threshold, server=server)
             if normalized_skill_levels and not only_equip
             else []
         )
@@ -881,31 +881,102 @@ class AssistRecognizer:
         best = max(matched, key=lambda match: match.confidence) if matched else None
         return best if best is not None and best.template_path == paths[special_filter] else None
 
+    def match_skill_view(
+        self, screenshot: bytes, server: str, *, anchor: list[int] | None = None,
+    ) -> dict[str, Any] | None:
+        image_width, image_height = self._recognition.image_size(screenshot)
+        scale = min(image_width / 1920, image_height / 1080)
+        left, right = round(1230 * scale), round(1430 * scale)
+        top, bottom = 0, image_height
+        if anchor is not None:
+            expected_y = anchor[1] + 20 * 1080 * scale / 1006 + 44 * scale
+            top = max(0, round(expected_y - 60 * scale))
+            bottom = min(image_height, round(expected_y + 60 * scale))
+        if top >= bottom:
+            return None
+        paths = {view: f"battle/{server.upper()}/{view}_skill.png" for view in ("main", "append")}
+        matches = self._recognition.match_templates(screenshot, [
+            {"template_path": path, "threshold": 0.7,
+             "roi": [left, top, right - left, bottom - top], "scales": [scale]}
+            for path in paths.values()
+        ])
+        matched = [match for match in matches if match.matched]
+        if not matched:
+            return None
+        best = max(matched, key=lambda match: match.confidence)
+        return {
+            "view": next(view for view, path in paths.items() if path == best.template_path),
+            "match": best, "scale": scale,
+        }
+
+    def check_append_skills(
+        self, screenshot: bytes, candidate: dict[str, Any], required: list[int],
+        *, server: str, threshold: float = 0.85,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {"matched": False, "levels": [None] * len(required), "confidences": [None] * len(required)}
+        marker = self.match_skill_view(screenshot, server, anchor=candidate["anchor"])
+        if marker is None or marker["view"] != "append":
+            return result
+        scale = marker["scale"]
+        width, height = 1920 * scale, 1080 * scale
+        # Align the digit row to its recognized header after the view changes.
+        anchor_y = marker["match"].center[1] - 44 * scale
+        top = round(anchor_y + 84 * height / 1006) - 1
+        bottom = round(anchor_y + 110 * height / 1006) + 1
+        if top < 0 or bottom > height:
+            return result
+        spacing = 63 if server.upper() == "CNTW" else 52.5
+        templates = self._skill_level_templates(server)
+        for index, minimum in enumerate(required):
+            if minimum == 0:
+                continue
+            left = round((1158 + index * spacing) * width / 1788) - 1
+            right = round((1195 + index * spacing) * width / 1788) + 1
+            if right > width:
+                return result
+            matches = self._recognition.match_templates(screenshot, [
+                {"template_path": path, "mask_path": mask_path, "threshold": threshold,
+                 "roi": [left, top, right - left, bottom - top],
+                 "scales": [scale * 0.95, scale, scale * 1.05]}
+                for _level, path, mask_path in templates
+            ])
+            found = [(level, match) for (level, _path, _mask), match in zip(templates, matches, strict=True) if match.matched]
+            complete_ten = [item for item in found if item[1].template_path.endswith("/10.png")]
+            best = max(complete_ten or found, key=lambda item: item[1].confidence) if found else None
+            if best is not None:
+                result["levels"][index] = best[0]
+                result["confidences"][index] = best[1].confidence
+            if best is None or best[0] < minimum:
+                return result
+        result["matched"] = True
+        return result
+
+    def _skill_level_templates(self, server: str) -> list[tuple[int, str, str | None]]:
+        prefix = "assist/full_skill/CNTW" if server.upper() == "CNTW" else "assist/full_skill"
+        entries = self._resources.template_index(prefix=prefix, limit=1000)["entries"]
+        paths_by_stem = {
+            str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]: str(entry["path"])
+            for entry in entries if str(entry["path"]).rsplit("/", 1)[0] == prefix
+        }
+        templates = []
+        for stem, template_path in paths_by_stem.items():
+            if stem == "10":
+                level = 10
+            elif stem.startswith("num") and stem[3:].isdigit() and 0 <= int(stem[3:]) <= 9:
+                level = int(stem[3:]) or 10
+            else:
+                continue
+            templates.append((level, template_path, paths_by_stem.get(f"{stem}mask")))
+        return templates
+
     def _skill_level_matches(
         self,
         screenshot: bytes,
         threshold: float,
+        *, server: str = "CH",
     ) -> list[tuple[int, Any]]:
-        entries = self._resources.template_index(
-            prefix="assist/full_skill",
-            limit=1000,
-        )["entries"]
-        paths_by_stem = {
-            str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]: str(entry["path"])
-            for entry in entries
-        }
         matches: list[tuple[int, Any]] = []
-        for stem, template_path in paths_by_stem.items():
-            if stem == "10":
-                level = 10
-            elif stem.startswith("num") and stem[3:].isdigit() and "mask" not in stem:
-                number = int(stem[3:])
-                if not 0 <= number <= 9:
-                    continue
-                level = 10 if number == 0 else number
-            else:
-                continue
-            mask_path = paths_by_stem.get(f"{stem}mask")
+        for level, template_path, mask_path in self._skill_level_templates(server):
             matches.extend(
                 (level, match)
                 for match in self._recognition.match_template_all(

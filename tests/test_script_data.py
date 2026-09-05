@@ -277,6 +277,7 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
         "np_level": 2,
         "servant_level": 90,
         "skill_levels": [10, 9, 8],
+        "append_skill_levels": [0, 0, 0, 0, 0],
         "scroll_limit": 0.96,
         "interval_after_swipe": 0.7,
         "no_grand_refresh": True,
@@ -296,6 +297,37 @@ def test_get_setting_plan_normalizes_assist_criteria(tmp_path: Path):
             }
         ],
     }
+
+
+@pytest.mark.parametrize("levels", [
+    [10, 9, 8, 0, 10, 0, 8, 9], [0, 0, 0, 5, 6, 7], [1, 2, 3], [],
+])
+def test_assist_plan_preserves_append_skill_requirements(tmp_path: Path, levels):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CH", "skillsLevel": levels})
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+    assert plan["validation"]["ok"]
+    assert plan["assist"]["append_skill_levels"] == (levels[3:] + [0] * 5)[:5]
+
+
+@pytest.mark.parametrize("levels", ["10/10/10", [True, 0, 0], [11], [-1], [1.5], [0] * 9])
+def test_assist_plan_rejects_invalid_skill_requirements(tmp_path: Path, levels):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CH", "skillsLevel": levels})
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+    assert not plan["validation"]["ok"]
+    assert any(issue["field"] == "skillsLevel" for issue in plan["validation"]["errors"])
+
+
+def test_cntw_assist_append_layout_rejects_unavailable_slots(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CNTW.json", {})
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CNTW", "skillsLevel": [0] * 6 + [10, 0]})
+    service = ScriptDataService(tmp_path)
+    plan = service.get_setting_plan("demo")
+    assert not plan["validation"]["ok"]
+    assert plan["validation"]["errors"][0]["code"] == "unsupported_append_skill"
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CNTW", "skillsLevel": [1, 2, 3, 4, 5, 6]})
+    assert service.get_setting_plan("demo")["assist"]["append_skill_levels"] == [4, 5, 6]
 
 
 def test_get_setting_plan_flattens_grand_assist_equip_groups(tmp_path: Path):

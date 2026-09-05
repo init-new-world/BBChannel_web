@@ -21,6 +21,7 @@ ASSIST_SCROLL_X = 700
 ASSIST_SCROLL_START_Y = 620
 ASSIST_SCROLL_END_Y = 380
 ASSIST_SCROLL_DURATION_MS = 700
+ASSIST_SKILL_TOGGLE_POINT = (847, 130)
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -142,6 +143,11 @@ def create_assist_handler(
         scroll_limit = float(scroll_limit)
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
+        append_levels = plan["assist"].get("append_skill_levels", [])
+        check_append = (
+            plan["assist"].get("mode") not in {"不识别", "仅礼装", "冠位助战仅礼装"}
+            and any(append_levels)
+        )
         reconnects = 0
         ap_actions: list[str] = []
 
@@ -178,6 +184,26 @@ def create_assist_handler(
                 context.sleep(
                     randomized_wait_seconds(tap_wait_seconds, random_time)
                 )
+
+        def ensure_skill_view(view: str, screenshot: bytes) -> bytes:
+            for attempt in range(6):
+                context.checkpoint("assist_skill_view")
+                marker = assist_recognizer.match_skill_view(screenshot, plan["server"])
+                if marker is not None and marker["view"] == view:
+                    return screenshot
+                if attempt == 5:
+                    break
+                if marker is not None:
+                    operation = device_service.tap(*randomized_touch_point(
+                        ASSIST_SKILL_TOGGLE_POINT, enabled=random_touch,
+                    ))
+                    context.emit(
+                        "device_action", "Switched assist skill display.",
+                        data={"role": "assist_skill_view", "target": view, "operation": operation.to_dict()},
+                    )
+                context.sleep(randomized_wait_seconds(max(0.1, tap_wait_seconds), random_time))
+                screenshot = snapshot_without_reconnect()
+            raise RuntimeError(f"Assist {view} skill view could not be confirmed.")
 
         while True:
             screenshot = snapshot_without_reconnect()
@@ -298,11 +324,44 @@ def create_assist_handler(
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
             screenshot = snapshot_without_reconnect()
+            if check_append:
+                screenshot = ensure_skill_view("main", screenshot)
             recognition = assist_recognizer.recognize(
                 screenshot,
                 plan["assist"],
                 server=plan["server"],
             )
+            if check_append and recognition["candidates"]:
+                screenshot = ensure_skill_view("append", screenshot)
+                accepted = []
+                for candidate in recognition["candidates"]:
+                    context.checkpoint("recognize_append_skills", progress=progress)
+                    result = assist_recognizer.check_append_skills(
+                        screenshot, candidate, append_levels, server=plan["server"],
+                    )
+                    context.emit(
+                        "recognition", "Assist append skill recognition completed.",
+                        data={"role": "assist_append_skills", "anchor": candidate["anchor"], **result},
+                    )
+                    if result["matched"]:
+                        accepted.append((candidate, result))
+                screenshot = ensure_skill_view("main", screenshot)
+                restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
+                candidates = []
+                for candidate in restored["candidates"]:
+                    previous = next((result for original, result in accepted if
+                        original.get("template_path") == candidate.get("template_path")
+                        and all(abs(before - after) <= 6 for before, after in zip(
+                            original["anchor"], candidate["anchor"], strict=True,
+                        ))
+                    ), None)
+                    if previous is not None:
+                        candidates.append({**candidate, "checks": {
+                            **candidate.get("checks", {}),
+                            "append_skill_levels": previous["levels"],
+                            "append_skill_confidences": previous.get("confidences", []),
+                        }})
+                recognition = {**restored, "candidate_count": len(candidates), "candidates": candidates}
             attempts += 1
             context.emit(
                 "recognition",
