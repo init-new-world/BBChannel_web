@@ -855,6 +855,40 @@ class ScriptDataService:
                     )
             if "cards" in card and not isinstance(card["cards"], list):
                 errors.append(self._issue("invalid_strategy_cards", f"{card_field}.cards", "Strategy cards must be a list."))
+            card_type = card.get("type")
+            valid_type = isinstance(card_type, int) and not isinstance(card_type, bool) and card_type in {0, 1, 2}
+            if "type" in card and not valid_type:
+                errors.append(self._issue(
+                    "invalid_strategy_card_type", f"{card_field}.type",
+                    "Strategy card type must be 0 (NP), 1 (preferred face card), or 2 (any face card).",
+                ))
+            preferences = card.get("cards")
+            if valid_type and card_type in {0, 1} and isinstance(preferences, list):
+                valid_preferences = bool(preferences) and all(
+                    (isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 3)
+                    if card_type == 0 else (
+                        isinstance(value, str) and re.fullmatch(r"(?:[1-3][ABQ](?:S[0-9]+)?|S[0-9]+)", value)
+                    )
+                    for value in preferences
+                )
+                if not valid_preferences:
+                    errors.append(self._issue(
+                        "invalid_strategy_card_preferences", f"{card_field}.cards",
+                        "NP preferences must contain positions 1 through 3; face preferences must contain card or tag codes.",
+                    ))
+            stars = card.get("criticalStar")
+            if "criticalStar" in card and (
+                isinstance(stars, bool) or not isinstance(stars, (int, float)) or not 0 <= stars <= 10
+            ):
+                errors.append(self._issue(
+                    "invalid_strategy_critical_star", f"{card_field}.criticalStar",
+                    "Critical star threshold must be a number between 0 and 10.",
+                ))
+            if "more_or_less" in card and not isinstance(card["more_or_less"], bool):
+                errors.append(self._issue(
+                    "invalid_strategy_star_comparison", f"{card_field}.more_or_less",
+                    "Critical star comparison must be a boolean.",
+                ))
 
         breakpoint = payload.get("breakpoint")
         if (

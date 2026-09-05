@@ -31,6 +31,58 @@ def test_strategy_validation_rejects_non_boolean_breakpoints(tmp_path: Path):
     assert any(error["code"] == "invalid_strategy_breakpoint" for error in detail["validation"]["errors"])
 
 
+@pytest.mark.parametrize(("field", "value", "code"), [
+    ("type", True, "invalid_strategy_card_type"),
+    ("type", 3, "invalid_strategy_card_type"),
+    ("type", "1", "invalid_strategy_card_type"),
+    ("criticalStar", True, "invalid_strategy_critical_star"),
+    ("criticalStar", -1, "invalid_strategy_critical_star"),
+    ("criticalStar", 11, "invalid_strategy_critical_star"),
+    ("criticalStar", float("nan"), "invalid_strategy_critical_star"),
+    ("criticalStar", "5", "invalid_strategy_critical_star"),
+    ("more_or_less", 1, "invalid_strategy_star_comparison"),
+    ("more_or_less", "false", "invalid_strategy_star_comparison"),
+])
+def test_strategy_card_validation_rejects_invalid_values(tmp_path, field, value, code):
+    strategy = _strategy_payload()
+    strategy["card2"][field] = value
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(tmp_path / "strategy" / "invalid.json", [{"tag": "Invalid", "strategy": strategy}])
+    _write_json(tmp_path / "settings" / "invalid.json", {
+        "server": "CH", "round1_turns": 1, "round1_turn0_strategy": [strategy],
+    })
+    service = ScriptDataService(tmp_path)
+    for validation in (service.get_strategy("invalid")["validation"],
+                       service.get_setting_plan("invalid")["validation"]):
+        assert validation["ok"] is False
+        assert any(error["code"] == code for error in validation["errors"])
+    with pytest.raises(AppError) as error:
+        service.save_strategy("invalid-copy", [{"tag": "Invalid", "strategy": strategy}])
+    assert error.value.code == ErrorCode.DATA_FILE_INVALID
+
+
+@pytest.mark.parametrize(("card_type", "preferences"), [
+    (0, []), (0, [True]), (0, ["1"]), (0, [4]),
+    (1, []), (1, [1]), (1, ["4B"]), (1, ["1X"]), (1, ["S-1"]), (1, ["1BS"]),
+])
+def test_strategy_card_validation_rejects_invalid_preferences(tmp_path, card_type, preferences):
+    strategy = _strategy_payload()
+    strategy["card1"].update({"type": card_type, "cards": preferences})
+    service = ScriptDataService(tmp_path)
+    with pytest.raises(AppError) as error:
+        service.save_strategy("invalid", [{"tag": "Invalid", "strategy": strategy}])
+    errors = error.value.details["validation"]["errors"]
+    assert any(issue["code"] == "invalid_strategy_card_preferences" for issue in errors)
+
+
+def test_strategy_card_validation_accepts_composite_codes_and_fractional_threshold(tmp_path):
+    strategy = _strategy_payload()
+    strategy["card1"]["cards"] = [1, 2, 3]
+    strategy["card2"].update({"cards": ["1B", "S0", "3QS12"], "criticalStar": 4.5})
+    detail = ScriptDataService(tmp_path).save_strategy("valid", [{"tag": "Valid", "strategy": strategy}])
+    assert detail["validation"]["ok"] is True
+
+
 def test_lists_settings_and_strategies_by_stem(tmp_path: Path):
     _write_json(tmp_path / "settings" / "beta.json", {})
     _write_json(tmp_path / "settings" / "alpha.json", {})
