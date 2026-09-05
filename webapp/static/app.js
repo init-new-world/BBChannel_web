@@ -74,6 +74,7 @@ const els = {
   presetStrategyEntry: document.querySelector("#preset-strategy-entry"),
   presetStrategyBreakpoints: [...document.querySelectorAll("[data-strategy-breakpoint]")],
   presetStrategyColorFirst: document.querySelector("#preset-strategy-color-first"),
+  presetStrategyCards: [...document.querySelectorAll("[data-strategy-card]")],
   presetError: document.querySelector("#preset-error"),
   closePreset: document.querySelector("#close-preset"),
   cancelPreset: document.querySelector("#cancel-preset"),
@@ -288,7 +289,13 @@ function bindEvents() {
   els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
   els.presetForm.addEventListener("submit", savePreset);
-  els.presetJson.addEventListener("input", renderPresetFields);
+  els.presetJson.addEventListener("input", () => {
+    if (state.presetEditor) {
+      state.presetEditor.strategyDrafts = {};
+    }
+    renderPresetFields();
+    setPresetError("");
+  });
   els.presetSkillInputs.forEach((input) => input.addEventListener("change", updatePresetSkills));
   els.presetStrategyEntry.addEventListener("change", () => {
     if (state.presetEditor?.kind === "strategies") {
@@ -299,6 +306,7 @@ function bindEvents() {
   [...els.presetStrategyBreakpoints, els.presetStrategyColorFirst].forEach((input) => {
     input.addEventListener("change", updatePresetStrategyRule);
   });
+  els.presetStrategyCards.forEach((row) => row.addEventListener("change", updatePresetStrategyCard));
   els.closePreset.addEventListener("click", closePresetEditor);
   els.cancelPreset.addEventListener("click", closePresetEditor);
   els.snapshotButton.addEventListener("click", captureScreenshot);
@@ -1609,6 +1617,92 @@ function renderPresetStrategyRules() {
     strategy.colorFirst !== undefined && typeof strategy.colorFirst !== "boolean"
   );
   els.presetStrategyColorFirst.checked = validStrategy && strategy.colorFirst !== false;
+  els.presetStrategyCards.forEach((row) => {
+    const spec = validStrategy ? strategy[row.dataset.strategyCard] : null;
+    const validSpec = spec && typeof spec === "object" && !Array.isArray(spec);
+    row.querySelectorAll("[data-card-field]").forEach((input) => {
+      input.setCustomValidity("");
+      const field = input.dataset.cardField;
+      const draft = editor.strategyDrafts?.[`${selectedIndex}.${row.dataset.strategyCard}.${field}`];
+      const value = validSpec ? spec[field] : undefined;
+      input.disabled = !validSpec || (!draft && ((field === "cards" && spec.type === 2)
+        || (["criticalStar", "more_or_less"].includes(field) && spec.type === 0)));
+      if (field === "type") {
+        input.value = [0, 1, 2].includes(value) ? String(value) : "";
+      } else if (field === "cards") {
+        input.value = Array.isArray(value) && value.every((part) => ["string", "number"].includes(typeof part))
+          ? value.join(", ") : "";
+        input.title = spec?.type === 0 ? "Ordered servant positions: 1, 2, 3" : "Ordered card or tag codes: 1B, S0, 1BS0";
+      } else if (field === "more_or_less") {
+        input.value = typeof value === "boolean" ? String(value) : "";
+      } else {
+        input.value = typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+      }
+      if (draft) {
+        input.value = draft.value;
+        input.setCustomValidity(draft.error);
+      }
+    });
+  });
+}
+
+function updatePresetStrategyCard(event) {
+  const input = event.target;
+  const field = input.dataset.cardField;
+  const row = input.closest("[data-strategy-card]");
+  const editor = state.presetEditor;
+  if (!field || !row || editor?.kind !== "strategies" || els.presetStrategyRules.disabled || input.disabled) {
+    return;
+  }
+  input.setCustomValidity("");
+  // Keep rejected edits separate from the last valid JSON until corrected.
+  const draftKey = `${editor.strategyIndex}.${row.dataset.strategyCard}.${field}`;
+  const drafts = editor.strategyDrafts ||= {};
+  try {
+    const entries = JSON.parse(els.presetJson.value);
+    const spec = entries[editor.strategyIndex].strategy[row.dataset.strategyCard];
+    if (field === "type") {
+      const type = Number(input.value);
+      if (![0, 1, 2].includes(type)) {
+        return;
+      }
+      spec.type = type;
+      if (type === 0 && !validStrategyPreferences(spec.cards, type)) {
+        spec.cards = [1];
+      } else if (type === 1 && !validStrategyPreferences(spec.cards, type)) {
+        spec.cards = ["1B", "2B", "3B", "1A", "2A", "3A", "1Q", "2Q", "3Q"];
+      }
+    } else if (field === "cards") {
+      const tokens = input.value.trim().split(/[\s,]+/).filter(Boolean);
+      const preferences = spec.type === 0 ? tokens.map((value) => /^[1-3]$/.test(value) ? Number(value) : value) : tokens;
+      if (spec.type !== 2 && !validStrategyPreferences(preferences, spec.type)) {
+        throw new Error(spec.type === 0 ? "NP positions must be 1, 2, or 3." : "Card preferences contain an invalid card or tag code.");
+      }
+      spec.cards = preferences;
+    } else if (field === "criticalStar") {
+      if (!input.checkValidity() || input.value === "") {
+        throw new Error("Critical star threshold must be between 0 and 10.");
+      }
+      spec.criticalStar = Number(input.value);
+    } else if (field === "more_or_less") {
+      spec.more_or_less = input.value === "true";
+    }
+    delete drafts[draftKey];
+    els.presetJson.value = JSON.stringify(entries, null, 2);
+    renderPresetStrategyRules();
+    setPresetError(Object.values(drafts)[0]?.error || "");
+  } catch (error) {
+    drafts[draftKey] = { value: input.value, error: error.message };
+    input.setCustomValidity(error.message);
+    setPresetError(error.message);
+  }
+}
+
+function validStrategyPreferences(preferences, type) {
+  return Array.isArray(preferences) && preferences.length > 0 && preferences.every((value) => (
+    type === 0 ? Number.isInteger(value) && value >= 1 && value <= 3
+      : typeof value === "string" && /^(?:[1-3][ABQ](?:S[0-9]+)?|S[0-9]+)$/.test(value)
+  ));
 }
 
 function updatePresetStrategyRule(event) {
@@ -1626,7 +1720,7 @@ function updatePresetStrategyRule(event) {
     }
     els.presetJson.value = JSON.stringify(entries, null, 2);
     renderPresetStrategyRules();
-    setPresetError("");
+    setPresetError(Object.values(editor.strategyDrafts || {})[0]?.error || "");
   } catch (error) {
     setPresetError(`Invalid JSON: ${error.message}`);
   }
@@ -1685,6 +1779,14 @@ async function savePreset(event) {
   event.preventDefault();
   const editor = state.presetEditor;
   if (!editor) {
+    return;
+  }
+  const invalidDraft = editor.kind === "strategies" && Object.entries(editor.strategyDrafts || {})[0];
+  if (invalidDraft) {
+    editor.strategyIndex = Number(invalidDraft[0].split(".")[0]);
+    renderPresetStrategyRules();
+    setPresetError(invalidDraft[1].error);
+    els.presetForm.reportValidity();
     return;
   }
   const name = els.presetName.value.trim();

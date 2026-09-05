@@ -817,6 +817,42 @@ select:disabled {
   flex: 0 0 16px;
 }
 
+.strategy-card-row {
+  display: grid;
+  grid-template-columns: 50px 120px minmax(0, 1fr) 190px;
+  align-items: end;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.strategy-card-row > strong {
+  align-self: center;
+  font-size: 12px;
+}
+
+.strategy-card-row > *,
+.strategy-star-condition > * {
+  min-width: 0;
+}
+
+.strategy-star-condition {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 750px) {
+  .strategy-card-row {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+
+  .strategy-card-row > strong,
+  .strategy-star-condition {
+    grid-column: 1 / -1;
+  }
+}
+
 .preset-skill-groups {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 5fr);

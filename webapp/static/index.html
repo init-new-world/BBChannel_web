@@ -398,6 +398,33 @@
               <label class="toggle-row"><input data-strategy-breakpoint="1" type="checkbox"><span>Break after card 2</span></label>
               <label class="toggle-row"><input id="preset-strategy-color-first" type="checkbox"><span>Card preference first</span></label>
             </div>
+            <div class="strategy-card-row" data-strategy-card="card1">
+              <strong>Card 1</strong>
+              <label class="field-stack"><span>Type</span><select class="field" data-card-field="type"><option value="" disabled>Invalid</option><option value="0">NP</option><option value="1">Preferred</option><option value="2">Any Face</option></select></label>
+              <label class="field-stack"><span>Preference Order</span><input class="field" data-card-field="cards" type="text" autocomplete="off" spellcheck="false"></label>
+              <div class="strategy-star-condition">
+                <label class="field-stack"><span>Stars</span><select class="field" data-card-field="more_or_less"><option value="" disabled>Invalid</option><option value="true">At Least</option><option value="false">At Most</option></select></label>
+                <label class="field-stack"><span>Threshold</span><input class="field" data-card-field="criticalStar" type="number" min="0" max="10" step="any" required></label>
+              </div>
+            </div>
+            <div class="strategy-card-row" data-strategy-card="card2">
+              <strong>Card 2</strong>
+              <label class="field-stack"><span>Type</span><select class="field" data-card-field="type"><option value="" disabled>Invalid</option><option value="0">NP</option><option value="1">Preferred</option><option value="2">Any Face</option></select></label>
+              <label class="field-stack"><span>Preference Order</span><input class="field" data-card-field="cards" type="text" autocomplete="off" spellcheck="false"></label>
+              <div class="strategy-star-condition">
+                <label class="field-stack"><span>Stars</span><select class="field" data-card-field="more_or_less"><option value="" disabled>Invalid</option><option value="true">At Least</option><option value="false">At Most</option></select></label>
+                <label class="field-stack"><span>Threshold</span><input class="field" data-card-field="criticalStar" type="number" min="0" max="10" step="any" required></label>
+              </div>
+            </div>
+            <div class="strategy-card-row" data-strategy-card="card3">
+              <strong>Card 3</strong>
+              <label class="field-stack"><span>Type</span><select class="field" data-card-field="type"><option value="" disabled>Invalid</option><option value="0">NP</option><option value="1">Preferred</option><option value="2">Any Face</option></select></label>
+              <label class="field-stack"><span>Preference Order</span><input class="field" data-card-field="cards" type="text" autocomplete="off" spellcheck="false"></label>
+              <div class="strategy-star-condition">
+                <label class="field-stack"><span>Stars</span><select class="field" data-card-field="more_or_less"><option value="" disabled>Invalid</option><option value="true">At Least</option><option value="false">At Most</option></select></label>
+                <label class="field-stack"><span>Threshold</span><input class="field" data-card-field="criticalStar" type="number" min="0" max="10" step="any" required></label>
+              </div>
+            </div>
           </div>
         </fieldset>
         <label class="field-stack preset-json-field">

@@ -343,6 +343,121 @@ def test_strategy_rule_controls_disable_for_invalid_or_empty_json(tag_console):
     page.close()
 
 
+@pytest.mark.parametrize(("width", "height"), [(1440, 1000), (390, 600)])
+def test_strategy_card_controls_round_trip_and_reject_invalid_input(tag_console, width, height):
+    browser, url, directory = tag_console
+    page = browser.new_page(viewport={"width": width, "height": height})
+    page.set_default_timeout(10000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    rule = {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 1, "cards": ["1B"], "criticalStar": 0, "more_or_less": True, "keep": 123},
+        "card3": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, False], "colorFirst": True,
+    }
+    entries = [{"tag": "Cards", "strategy": rule}, {"tag": "Untouched", "strategy": rule}]
+    assert page.request.put(f"{url}/api/strategies/cards", data={"entries": entries}).ok
+    page.goto(url)
+    page.locator("#strategy-select").select_option("cards")
+    page.locator("#edit-strategy").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    original_json = page.locator("#preset-json").input_value()
+    first = page.locator('[data-strategy-card="card1"]')
+    second = page.locator('[data-strategy-card="card2"]')
+    third = page.locator('[data-strategy-card="card3"]')
+    playwright.expect(first.locator('[data-card-field="type"]')).to_have_value("0")
+    playwright.expect(third.locator('[data-card-field="cards"]')).to_be_disabled()
+    assert page.locator("#preset-json").input_value() == original_json
+    first.locator('[data-card-field="cards"]').fill("3, 2")
+    first.locator('[data-card-field="cards"]').press("Tab")
+    second.locator('[data-card-field="cards"]').fill("3QS12, S0, 1A")
+    second.locator('[data-card-field="cards"]').press("Tab")
+    second.locator('[data-card-field="criticalStar"]').fill("4.5")
+    second.locator('[data-card-field="criticalStar"]').press("Tab")
+    second.locator('[data-card-field="more_or_less"]').select_option("false")
+    valid_json = page.locator("#preset-json").input_value()
+    second.locator('[data-card-field="cards"]').fill("4X")
+    second.locator('[data-card-field="cards"]').press("Tab")
+    assert page.locator("#preset-json").input_value() == valid_json
+    assert second.locator('[data-card-field="cards"]').evaluate("element => !element.checkValidity()")
+    second.locator('[data-card-field="cards"]').fill("3QS12, S0, 1A")
+    second.locator('[data-card-field="cards"]').press("Tab")
+    updated = json.loads(page.locator("#preset-json").input_value())
+    assert updated[1] == entries[1]
+    assert updated[0]["strategy"]["card1"]["cards"] == [3, 2]
+    assert updated[0]["strategy"]["card2"] == {
+        "type": 1, "cards": ["3QS12", "S0", "1A"], "criticalStar": 4.5, "more_or_less": False, "keep": 123,
+    }
+    third.locator('[data-card-field="type"]').select_option("0")
+    playwright.expect(third.locator('[data-card-field="cards"]')).to_have_value("1")
+    third.locator('[data-card-field="type"]').select_option("1")
+    assert json.loads(page.locator("#preset-json").input_value())[0]["strategy"]["card3"]["cards"]
+    third.scroll_into_view_if_needed()
+    assert page.locator("#preset-dialog").evaluate("element => element.scrollWidth <= element.clientWidth")
+    page.screenshot(path=str(directory / f"strategy-cards-{width}.png"))
+    final_entries = json.loads(page.locator("#preset-json").input_value())
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    assert page.request.get(f"{url}/api/strategies/cards").json()["entries"] == final_entries
+    page.locator("#edit-setting").click()
+    playwright.expect(first).not_to_be_visible()
+    assert errors == []
+    page.close()
+
+
+@pytest.mark.parametrize(("field", "invalid"), [("cards", "4X"), ("criticalStar", "11")])
+def test_strategy_invalid_drafts_survive_other_edits_and_block_save(tag_console, field, invalid):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.set_default_timeout(10000)
+    spec = {"type": 1, "cards": ["1B"], "criticalStar": 0, "more_or_less": True}
+    strategy = {**{f"card{i}": spec for i in (1, 2, 3)}, "breakpoint": [False, False], "colorFirst": True}
+    entries = [{"tag": name, "strategy": strategy} for name in ("First", "Second")]
+    assert page.request.put(f"{url}/api/strategies/drafts", data={"entries": entries}).ok
+    page.goto(url)
+    page.locator("#strategy-select").select_option("drafts")
+    page.locator("#edit-strategy").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    input_field = page.locator(f'[data-strategy-card="card2"] [data-card-field="{field}"]')
+    input_field.fill(invalid)
+    input_field.press("Tab")
+    page.locator("#preset-strategy-color-first").uncheck()
+    playwright.expect(input_field).to_have_value(invalid)
+    assert input_field.evaluate("element => !element.checkValidity()")
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    page.locator("#preset-strategy-entry").select_option("1")
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    playwright.expect(page.locator("#preset-strategy-entry")).to_have_value("0")
+    playwright.expect(input_field).to_have_value(invalid)
+    assert page.request.get(f"{url}/api/strategies/drafts").json()["entries"] == entries
+    page.locator("#preset-json").fill(json.dumps(entries))
+    assert input_field.evaluate("element => element.checkValidity()")
+    page.close()
+
+
+def test_strategy_card_renderer_tolerates_nonprimitive_preference_elements(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(url)
+    page.locator("#new-strategy").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    spec = {"type": 2, "cards": [{"toString": None}], "criticalStar": 0, "more_or_less": True}
+    entries = [{"tag": "Malformed", "strategy": {
+        **{f"card{i}": spec for i in (1, 2, 3)}, "breakpoint": [False, False], "colorFirst": True,
+    }}]
+    source = json.dumps(entries)
+    page.locator("#preset-json").fill(source)
+    playwright.expect(page.locator('[data-strategy-card="card3"] [data-card-field="type"]')).to_have_value("2")
+    assert page.locator("#preset-json").input_value() == source
+    assert errors == []
+    page.close()
+
+
 @pytest.mark.parametrize("failure", ["image", "request"])
 def test_tag_capture_failure_clears_old_image_and_can_be_retried(tag_console, failure):
     browser, url, _directory = tag_console
