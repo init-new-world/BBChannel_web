@@ -870,6 +870,15 @@ async function captureAssistTagScreen() {
     return;
   }
   state.assistTagBusy = true;
+  state.assistTagCandidates = [];
+  state.assistTagScreenshotBase64 = "";
+  state.assistTagImage = null;
+  state.assistTagCropBounds = null;
+  state.assistTagDragStart = null;
+  els.assistTagCandidate.replaceChildren();
+  els.assistTagCanvasEmpty.hidden = false;
+  updateAssistTagCropStatus();
+  drawAssistTagCanvas();
   els.assistTagMakerStatus.textContent = "Capturing...";
   updateControls();
   try {
@@ -881,9 +890,10 @@ async function captureAssistTagScreen() {
         threshold: 0.85,
       }),
     });
+    const image = await loadAssistTagCanvasImage(payload.screenshot_base64 || "");
     state.assistTagCandidates = payload.candidates || [];
     state.assistTagScreenshotBase64 = payload.screenshot_base64 || "";
-    state.assistTagCropBounds = null;
+    state.assistTagImage = image;
     els.assistTagCandidate.replaceChildren(
       ...state.assistTagCandidates.map((candidate, index) => {
         const option = document.createElement("option");
@@ -892,7 +902,10 @@ async function captureAssistTagScreen() {
         return option;
       }),
     );
-    await loadAssistTagCanvasImage(state.assistTagScreenshotBase64);
+    els.assistTagCanvas.width = image.naturalWidth;
+    els.assistTagCanvas.height = image.naturalHeight;
+    els.assistTagCanvasEmpty.hidden = true;
+    drawAssistTagCanvas();
     updateAssistTagCropStatus();
     els.assistTagMakerStatus.textContent = `${state.assistTagCandidates.length} supports matched`;
   } catch (error) {
@@ -908,12 +921,7 @@ function loadAssistTagCanvasImage(base64Value) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.addEventListener("load", () => {
-      state.assistTagImage = image;
-      els.assistTagCanvas.width = image.naturalWidth;
-      els.assistTagCanvas.height = image.naturalHeight;
-      els.assistTagCanvasEmpty.hidden = true;
-      drawAssistTagCanvas();
-      resolve();
+      resolve(image);
     }, { once: true });
     image.addEventListener("error", () => reject(new Error("Captured screenshot could not be displayed.")), {
       once: true,

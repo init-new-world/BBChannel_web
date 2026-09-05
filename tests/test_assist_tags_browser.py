@@ -267,3 +267,39 @@ def test_skill_controls_handle_invalid_json_and_cntw_limits(tag_console):
     page.locator("#new-strategy").click()
     playwright.expect(page.locator("#preset-assist-skills")).not_to_be_visible()
     page.close()
+
+
+@pytest.mark.parametrize("failure", ["image", "request"])
+def test_tag_capture_failure_clears_old_image_and_can_be_retried(tag_console, failure):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.set_default_timeout(10000)
+    page.goto(url)
+    page.locator("#open-assist-tags").click()
+    page.locator("#capture-assist-tag-screen").click()
+    playwright.expect(page.locator("#assist-tag-maker-status")).to_have_text("1 supports matched")
+    payload = page.request.post(f"{url}/api/assist-tags/candidates", data={"setting_name": "demo"}).json()
+
+    def fail_capture(route):
+        if failure == "request":
+            route.fulfill(status=500, json={"error": {"message": "Capture failed"}})
+        else:
+            route.fulfill(status=200, json={**payload, "screenshot_base64": "bm90IGFuIGltYWdl"})
+
+    page.route("**/api/assist-tags/candidates", fail_capture)
+    page.locator("#capture-assist-tag-screen").click()
+    playwright.expect(page.locator("#assist-tag-maker-status")).to_contain_text(
+        "Capture failed" if failure == "request" else "could not be displayed"
+    )
+    playwright.expect(page.locator("#assist-tag-canvas-empty")).to_be_visible()
+    playwright.expect(page.locator("#assist-tag-candidate")).to_be_disabled()
+    playwright.expect(page.locator("#save-assist-tag")).to_be_disabled()
+    assert page.locator("#assist-tag-canvas").evaluate(
+        "e => Array.from(e.getContext('2d').getImageData(0, 0, e.width, e.height).data).every(value => value === 0)"
+    )
+    page.unroute("**/api/assist-tags/candidates", fail_capture)
+    page.locator("#capture-assist-tag-screen").click()
+    playwright.expect(page.locator("#assist-tag-maker-status")).to_have_text("1 supports matched")
+    playwright.expect(page.locator("#assist-tag-canvas-empty")).to_be_hidden()
+    playwright.expect(page.locator("#assist-tag-candidate")).to_be_enabled()
+    page.close()
