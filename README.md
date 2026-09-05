@@ -92,3 +92,5 @@ The script editor's numeric controls stay synchronized with its JSON editor. App
 Recognition resources are expected under `assets/`, and data files under `data/`. Populate them from the BBchannel package when setting up a fresh checkout. Scripts live in `data/settings/` and strategies in `data/strategy/`.
 
 Custom assist tags live in `assets/assist/assist_tags/`. Their PNG filenames encode the source dimensions, crop offsets, and confidence threshold. A tag referenced by a script cannot be deleted until it is unbound; missing or inconsistent tag images fail script validation.
+
+Custom command-card tags in `specialKeys` use their filename's source dimensions and card-local crop bounds during recognition. The search region keeps the original client's animation tolerance and stays inside each card. Strategy preferences such as `S0` refer to the tag's index in `specialKeys`. Invalid metadata or missing/inconsistent images fail script validation.
