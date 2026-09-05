@@ -87,6 +87,12 @@ Execution is rejected when a script fails validation or contains unsupported com
 
 The script editor's numeric controls stay synchronized with its JSON editor. Append filtering verifies the skill display, checks each requested slot, restores the main view, and rechecks the candidate before selection. The full-run NP color/Olga filter is a per-run option and does not change the saved script.
 
+### Card Recovery
+
+Command-card strategies exclude face cards with recognized action-blocking status text. If a selection containing Noble Phantasms leaves the command-card back button visible, the runner checks the selected NP cards for sealing or immobilization. Confirmed unavailable NPs are excluded when the runner returns to battle and reopens card selection. This applies to direct selection, strategies, no-chain selection, and extra turns; unavailable positions are tracked only for that turn and allow at most three recovery cycles.
+
+The runner does not infer NP availability from an unrecognized gauge. It also does not retry when the back button has disappeared or when no selected NP has a recognized blocking status. Returning to battle must be confirmed before another attack tap is sent.
+
 ## Resources
 
 Recognition resources are expected under `assets/`, and data files under `data/`. Populate them from the BBchannel package when setting up a fresh checkout. Scripts live in `data/settings/` and strategies in `data/strategy/`.

@@ -26,7 +26,7 @@ from webapp.automation.strategy import (
 )
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
-from webapp.services.cards import CommandCardRecognizer
+from webapp.services.cards import CommandCardRecognizer, recognize_card_blocks
 from webapp.services.devices import DeviceService
 from webapp.services.recognition import RecognitionService
 from webapp.services.script_data import ScriptDataService
@@ -205,6 +205,7 @@ def _match_optional_battle_template(
     recognition: RecognitionService,
     screenshot: bytes,
     template_path: str,
+    *, roi: tuple[int, int, int, int] | None = None,
 ):
     try:
         return recognition.match_template(
@@ -212,6 +213,7 @@ def _match_optional_battle_template(
             template_path,
             threshold=0.85,
             scales=(1.0, 0.75, 2 / 3, 0.5),
+            roi=roi,
         )
     except AppError as exc:
         if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
@@ -823,56 +825,13 @@ def create_battle_execute_plan_handler(
                 f"round_{round_number}.turn_{turn['turn']}.command_phase",
                 progress=(turn_number - 0.5) / max(len(turns), 1),
             )
-            _wait_for_battle_ready(
-                context,
-                device_service,
-                recognition,
-                attack_template,
-                threshold,
-                timeout_seconds,
-                poll_interval,
-                reconnect_timing=tap_interval,
+            tap_count += _execute_command_phase(
+                context, device_service, recognition, card_recognizer,
+                program["server"], _frontline_servants(servant_positions),
+                turn["command_phase"]["steps"], threshold, timeout_seconds,
+                poll_interval, tap_interval, special_keys=special_keys,
+                card_wait_seconds=card_wait_seconds,
             )
-            command_steps = turn["command_phase"]["steps"]
-            tap_count += _execute_steps(
-                context,
-                device_service,
-                command_steps[:1],
-                tap_interval,
-            )
-            command_screenshot = _wait_for_command_cards(
-                context,
-                device_service,
-                recognition,
-                card_templates,
-                threshold,
-                timeout_seconds,
-                poll_interval,
-                reconnect_timing=tap_interval,
-                settle_seconds=card_wait_seconds,
-            )
-            for step in command_steps[1:]:
-                if step.get("type") == "tap":
-                    tap_count += _execute_steps(
-                        context,
-                        device_service,
-                        [step],
-                        tap_interval,
-                    )
-                    continue
-                if step.get("type") == "strategy":
-                    tap_count += _execute_strategy_step(
-                        context,
-                        device_service,
-                        card_recognizer,
-                        command_screenshot,
-                        program["server"],
-                        _frontline_servants(servant_positions),
-                        step,
-                        threshold,
-                        tap_interval,
-                        special_keys=special_keys,
-                    )
             action_count += sum(
                 1 for action in turn["actions"] if action["source"].get("type") == "np"
             )
@@ -1048,56 +1007,109 @@ def _execute_extra_turn(
                 },
             )
 
-    _wait_for_battle_ready(
-        context,
-        device_service,
-        recognition,
-        attack_template,
-        threshold,
-        timeout_seconds,
-        poll_interval,
-        reconnect_timing=tap_interval,
+    tap_count += _execute_command_phase(
+        context, device_service, recognition, card_recognizer, server,
+        _frontline_servants(servant_positions), turn["command_phase"]["steps"],
+        threshold, timeout_seconds, poll_interval, tap_interval,
+        special_keys=special_keys, card_wait_seconds=card_wait_seconds,
     )
-    command_steps = turn["command_phase"]["steps"]
-    tap_count += _execute_steps(
-        context,
-        device_service,
-        command_steps[:1],
-        tap_interval,
-    )
-    command_screenshot = _wait_for_command_cards(
-        context,
-        device_service,
-        recognition,
-        card_templates,
-        threshold,
-        timeout_seconds,
-        poll_interval,
-        reconnect_timing=tap_interval,
-        settle_seconds=card_wait_seconds,
-    )
-    for step in command_steps[1:]:
-        if step.get("type") == "tap":
-            tap_count += _execute_steps(
-                context,
-                device_service,
-                [step],
-                tap_interval,
-            )
-        elif step.get("type") == "strategy":
-            tap_count += _execute_strategy_step(
-                context,
-                device_service,
-                card_recognizer,
-                command_screenshot,
-                server,
-                _frontline_servants(servant_positions),
-                step,
-                threshold,
-                tap_interval,
-                special_keys=special_keys,
-            )
     return tap_count
+
+
+def _execute_command_phase(
+    context: RunContext, device_service: DeviceService, recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None, server: str,
+    servants: list[dict[str, Any]], command_steps: list[dict[str, Any]],
+    threshold: float, timeout_seconds: float, poll_interval: float,
+    tap_interval: float | _TapTiming, *,
+    special_keys: list[dict[str, Any]] | None = None, card_wait_seconds: float = 0.0,
+) -> int:
+    unavailable_nps: set[int] = set()
+    tap_count = 0
+    card_templates = [f"battle/{server}/{color}.png" for color in ("Arts", "Buster", "Quick")]
+    for attempt in range(4):
+        _wait_for_battle_ready(
+            context, device_service, recognition, f"battle/{server}/attack.png",
+            threshold, timeout_seconds, poll_interval, reconnect_timing=tap_interval,
+        )
+        tap_count += _execute_steps(context, device_service, command_steps[:1], tap_interval)
+        screenshot = _wait_for_command_cards(
+            context, device_service, recognition, card_templates,
+            threshold, timeout_seconds, poll_interval, reconnect_timing=tap_interval,
+            settle_seconds=card_wait_seconds,
+        )
+        tap_steps = []
+        for step in command_steps[1:]:
+            if step.get("type") == "strategy":
+                tap_steps.extend(_strategy_tap_steps(
+                    context, card_recognizer, screenshot, server, servants, step,
+                    threshold, special_keys=special_keys, unavailable_nps=sorted(unavailable_nps),
+                ))
+            elif step.get("type") == "tap":
+                tap_steps.append(step)
+        if unavailable_nps and not any(step.get("type") == "strategy" for step in command_steps):
+            blocks = recognize_card_blocks(recognition, screenshot, server, threshold=threshold)
+            unavailable_nps.update(blocks["nps"])
+            tap_steps = _replace_blocked_direct_cards(tap_steps, unavailable_nps, set(blocks["faces"]))
+        tap_count += _execute_steps(context, device_service, tap_steps, tap_interval)
+        selected_nps = {int(step["role"][3:]) for step in tap_steps if step.get("role", "").startswith("np_")}
+        if not selected_nps:
+            return tap_count
+        blocked = _failed_np_selection(
+            context, device_service, recognition, server, selected_nps,
+            threshold, 2.0, poll_interval,
+        )
+        newly_blocked = blocked - unavailable_nps
+        if not newly_blocked:
+            return tap_count
+        unavailable_nps.update(newly_blocked)
+        context.emit(
+            "np_selection_recovery", "Unavailable Noble Phantasms will be replaced.",
+            data={"attempt": attempt + 1, "unavailable_nps": sorted(unavailable_nps)},
+        )
+        tap_count += _execute_steps(context, device_service, [{
+            "type": "tap", "role": "np_recovery_back",
+            "x": COMMAND_CARD_BACK_POINT[0], "y": COMMAND_CARD_BACK_POINT[1],
+        }], tap_interval)
+    raise StrategySelectionError("Noble Phantasm selection recovery exhausted all three positions.")
+
+
+def _replace_blocked_direct_cards(
+    tap_steps: list[dict[str, Any]], unavailable_nps: set[int], blocked_faces: set[int],
+) -> list[dict[str, Any]]:
+    result = [
+        step for step in tap_steps
+        if not (step.get("role", "").startswith("np_") and int(step["role"][3:]) in unavailable_nps)
+        and not (step.get("role", "").startswith("face_card_") and int(step["role"][10:]) in blocked_faces)
+    ]
+    selected_slots = {int(step["role"][10:]) for step in result if step.get("role", "").startswith("face_card_")}
+    for slot, (x, y) in enumerate(FACE_CARD_POINTS, start=1):
+        if len(result) >= 3:
+            break
+        if slot not in selected_slots and slot not in blocked_faces:
+            result.append({"type": "tap", "role": f"face_card_{slot}", "x": x, "y": y})
+    if len(result) != 3:
+        raise StrategySelectionError("Not enough available command cards to replace blocked Noble Phantasms.")
+    return result
+
+
+def _failed_np_selection(
+    context: RunContext, device_service: DeviceService, recognition: RecognitionService,
+    server: str, selected_nps: set[int], threshold: float,
+    wait_seconds: float, poll_interval: float,
+) -> set[int]:
+    started = monotonic()
+    while True:
+        screenshot = device_service.snapshot()
+        back = _match_optional_battle_template(
+            recognition, screenshot, f"battle/{server}/back.png", roi=(1100, 610, 180, 110),
+        )
+        if back is None or not back.matched:
+            return set()
+        if monotonic() - started >= wait_seconds:
+            blocks = recognize_card_blocks(recognition, screenshot, server, threshold=threshold)
+            return set(blocks["nps"]) if selected_nps.intersection(blocks["nps"]) else set()
+        context.sleep(max(poll_interval, 0.01))
 
 
 def _servant_positions(servants: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
@@ -1166,6 +1178,19 @@ def _execute_strategy_step(
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
 ) -> int:
+    return _execute_steps(context, device_service, _strategy_tap_steps(
+        context, card_recognizer, screenshot, server, servants, step, threshold,
+        special_keys=special_keys,
+    ), tap_interval)
+
+
+def _strategy_tap_steps(
+    context: RunContext, card_recognizer: CommandCardRecognizer | None,
+    screenshot: bytes, server: str, servants: list[dict[str, Any]],
+    step: dict[str, Any], threshold: float, *,
+    special_keys: list[dict[str, Any]] | None = None,
+    unavailable_nps: list[int] | None = None,
+) -> list[dict[str, Any]]:
     if card_recognizer is None:
         raise ValueError("Command card recognition is not configured.")
     recognized = _recognize_command_cards(
@@ -1191,15 +1216,20 @@ def _execute_strategy_step(
             raise StrategySelectionError(
                 "No-chain selection requires exactly one Noble Phantasm."
             )
-        selected = select_command_cards_without_chain(
-            recognized["cards"],
-            preselected_np=preselected_nps[0],
-        )
+        if preselected_nps[0] in (unavailable_nps or []):
+            selected = select_command_cards(
+                [{f"card{index}": {"type": 2} for index in (1, 2, 3)}], recognized["cards"],
+            )
+        else:
+            selected = select_command_cards_without_chain(
+                recognized["cards"], preselected_np=preselected_nps[0],
+            )
     else:
         selected = select_command_cards(
             step["strategies"],
             recognized["cards"],
             preselected_nps=step.get("preselected_nps", []),
+            unavailable_nps=unavailable_nps,
         )
     context.emit(
         "strategy_selection",
@@ -1220,7 +1250,7 @@ def _execute_strategy_step(
             tap_steps.append(
                 {"type": "tap", "role": f"face_card_{slot}", "x": x, "y": y}
             )
-    return _execute_steps(context, device_service, tap_steps, tap_interval)
+    return tap_steps
 
 
 def _evaluate_card_condition(
