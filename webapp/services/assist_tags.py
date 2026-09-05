@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from threading import RLock
@@ -64,8 +65,8 @@ def parse_assist_tag_filename(name: str) -> AssistTagMetadata:
     match = ASSIST_TAG_NAME_RE.fullmatch(metadata_stem)
     if match is None:
         raise ValueError("has an invalid filename.")
-    values = {key: int(value) for key, value in match.groupdict().items()}
-    threshold = float(f"0.{values['CON']}0")
+    values = {key: int(value) for key, value in match.groupdict().items() if key != "CON"}
+    threshold = float(f"0.{match.group('CON')}")
     if (
         values["W"] <= 0
         or values["H"] <= 0
@@ -94,6 +95,10 @@ class AssistTagService:
 
     def inventory(self) -> list[dict[str, object]]:
         with self._lock:
+            try:
+                self._check_path(self._directory)
+            except AppError:
+                return []
             if not self._directory.exists():
                 return []
             entries = []
@@ -202,8 +207,8 @@ class AssistTagService:
                 },
             )
         with self._lock:
-            self._directory.mkdir(parents=True, exist_ok=True)
             path = self._path(name)
+            self._directory.mkdir(parents=True, exist_ok=True)
             if path.exists() and not overwrite:
                 raise AppError(
                     ErrorCode.DATA_FILE_CONFLICT,
@@ -215,6 +220,7 @@ class AssistTagService:
             return self._describe(path)
 
     def _describe(self, path: Path) -> dict[str, object]:
+        self._check_path(path)
         metadata = _metadata(path.name)
         try:
             with Image.open(path) as image:
@@ -237,7 +243,19 @@ class AssistTagService:
 
     def _path(self, name: str) -> Path:
         _metadata(name)
-        return self._directory / name
+        path = self._directory / name
+        self._check_path(path)
+        return path
+
+    def _check_path(self, path: Path) -> None:
+        if any(candidate.is_symlink() for candidate in (
+            path, self._directory, self._directory.parent,
+        )):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Assist tag paths must not contain symbolic links.",
+                {"name": path.name},
+            )
 
 
 def _metadata(name: str) -> AssistTagMetadata:
@@ -321,8 +339,14 @@ def _confidence_code(value: float) -> str:
             "Assist tag threshold must be greater than 0 and less than 1.",
             {"threshold": value},
         )
-    text = f"{float(value):.2f}".rstrip("0")
-    return text.split(".", 1)[1]
+    code = format(Decimal(str(value)), "f").split(".", 1)[1].rstrip("0")
+    if len(code) > 16:
+        raise AppError(
+            ErrorCode.DATA_FILE_INVALID,
+            "Assist tag threshold precision must not exceed 16 decimal places.",
+            {"threshold": value},
+        )
+    return code
 
 
 def _save_png_atomic(image: Image.Image, path: Path) -> None:

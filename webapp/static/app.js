@@ -851,7 +851,7 @@ function renderSelectedAssistTag() {
   els.assistTagMetadata.textContent = [
     `${sourceWidth}x${sourceHeight} | ${tag.image_size[0]}x${tag.image_size[1]}`,
     `offset ${left},${top} -> ${right},${bottom}`,
-    `threshold ${Number(tag.threshold).toFixed(2)}`,
+    `threshold ${Number(tag.threshold)}`,
   ].join("\n");
   els.bindAssistTag.textContent = isAssistTagBound(tag)
     ? "Unbind from Script"

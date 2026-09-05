@@ -120,11 +120,14 @@ def test_tag_maker_creates_and_binds_a_crop_at_each_viewport(tag_console, width,
     page.mouse.move(*end, steps=4)
     page.mouse.up()
     playwright.expect(page.locator("#assist-tag-crop-status")).to_have_text("250,120 -> 350,160")
+    page.locator("#assist-tag-threshold").fill("0.805")
     page.locator("#save-assist-tag").click()
     playwright.expect(page.locator("#assist-tag-maker-status")).to_have_text("Saved Custom")
     tag = page.request.get(f"{url}/api/assist-tags").json()["tags"][0]
     assert tag["image_size"] == [100, 40]
     assert tag["offsets"] == [150, 25, 250, 65]
+    assert tag["threshold"] == 0.805
+    playwright.expect(page.locator("#assist-tag-metadata")).to_contain_text("threshold 0.805")
     page.locator("#bind-assist-tag").click()
     playwright.expect(page.locator("#assist-tag-library-status")).to_have_text("Bound to script")
     detail = page.request.get(f"{url}/api/settings/demo").json()

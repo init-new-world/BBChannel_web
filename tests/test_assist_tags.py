@@ -5,7 +5,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from webapp.core.errors import AppError, ErrorCode
-from webapp.services.assist_tags import AssistTagService
+from webapp.services.assist_tags import AssistTagService, parse_assist_tag_filename
 from webapp.services.resources import ResourceService
 
 
@@ -94,3 +94,62 @@ def test_import_assist_tag_rejects_path_names(tmp_path: Path):
         )
 
     assert exc_info.value.code == ErrorCode.DATA_FILE_INVALID
+
+
+@pytest.mark.parametrize("threshold,code", [
+    (0.01, "01"), (0.05, "05"), (0.8, "8"), (0.805, "805"),
+    (0.999, "999"), (0.001, "001"), (1e-8, "00000001"),
+])
+def test_assist_tag_threshold_round_trips_without_rounding(tmp_path: Path, threshold, code):
+    service = AssistTagService(ResourceService(tmp_path / "assets", tmp_path / "data"))
+
+    result = service.build(
+        label="Precise", screenshot=_png_bytes(Image.new("RGB", (20, 20), "red")),
+        anchor=[0, 0], bounds=[0, 0, 10, 10], threshold=threshold,
+    )
+
+    assert result["name"].endswith(f"CON{code}.png")
+    assert result["threshold"] == threshold
+    assert parse_assist_tag_filename(result["name"]).threshold == threshold
+
+
+def test_assist_tag_rejects_unrepresentable_threshold_before_writing(tmp_path: Path):
+    service = AssistTagService(ResourceService(tmp_path / "assets", tmp_path / "data"))
+    with pytest.raises(AppError) as exc_info:
+        service.build(
+            label="Tiny", screenshot=_png_bytes(Image.new("RGB", (20, 20), "red")),
+            anchor=[0, 0], bounds=[0, 0, 10, 10], threshold=1e-100,
+        )
+    assert exc_info.value.code == ErrorCode.DATA_FILE_INVALID
+    assert "precision" in exc_info.value.message.lower()
+    assert service.inventory() == []
+
+
+@pytest.mark.parametrize("link_directory", [False, True])
+def test_assist_tags_reject_symlinks_without_touching_the_target(tmp_path: Path, link_directory):
+    assets = tmp_path / "assets"
+    directory = assets / "assist" / "assist_tags"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    filename = "[Outside]W1280H720DXL0DXR20DYT0DYB20CON8.png"
+    original = _png_bytes(Image.new("RGB", (20, 20), "blue"))
+    target = outside / filename
+    target.write_bytes(original)
+    if link_directory:
+        directory.parent.mkdir(parents=True)
+        directory.symlink_to(outside, target_is_directory=True)
+    else:
+        directory.mkdir(parents=True)
+        (directory / filename).symlink_to(target)
+    service = AssistTagService(ResourceService(assets, tmp_path / "data"))
+
+    assert service.inventory() == []
+    for operation in (
+        lambda: service.read_image(filename),
+        lambda: service.delete(filename),
+        lambda: service.import_image(filename, original, overwrite=True),
+    ):
+        with pytest.raises(AppError) as exc_info:
+            operation()
+        assert exc_info.value.code == ErrorCode.DATA_FILE_INVALID
+        assert target.read_bytes() == original
