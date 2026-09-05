@@ -1,3 +1,5 @@
+from itertools import permutations, product
+
 import pytest
 
 from webapp.automation.strategy import (
@@ -142,3 +144,93 @@ def test_strategy_rejects_unknown_star_requirement():
 
     with pytest.raises(StrategySelectionError, match="critical star"):
         select_command_cards([strategy], [_card(1, "1B", None)])
+
+
+def test_strategy_backtracks_when_first_preference_is_needed_later():
+    cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q")]
+    strategy = {"card1": _spec(1, ["1B", "2A"]), "card2": _spec(1, ["1B"]), "card3": _spec(2, [])}
+    selected = select_command_cards([strategy], cards)
+    assert [card["slot"] for card in selected] == [2, 1, 3]
+
+
+@pytest.mark.parametrize("breakpoints,expected", [
+    ([False, False], [1, 2, 3]), ([True, False], [1, 4, 3]),
+    ([False, True], [1, 2, 5]), ([True, True], [1, 4, 3]),
+])
+def test_strategy_enforces_adjacent_face_card_breakpoints(breakpoints, expected):
+    cards = [_card(slot, code) for slot, code in enumerate(("1B", "1A", "1Q", "2A", "2Q"), 1)]
+    strategy = {
+        "card1": _spec(1, ["1B"]), "card2": _spec(1, ["1A", "2A"]),
+        "card3": _spec(1, ["1Q", "2Q"]), "breakpoint": breakpoints,
+    }
+    assert [card["slot"] for card in select_command_cards([strategy], cards)] == expected
+
+
+def test_strategy_skips_impossible_breakpoint_strategy():
+    cards = [_card(1, "1B"), _card(2, "1A"), _card(3, "1Q")]
+    strategy = {f"card{index}": _spec(2, []) for index in range(1, 4)}
+    strategy["breakpoint"] = [True, True]
+    with pytest.raises(StrategySelectionError, match="no matching"):
+        select_command_cards([strategy], cards)
+    fallback = {**strategy, "breakpoint": [False, False]}
+    assert [card["slot"] for card in select_command_cards([strategy, fallback], cards)] == [1, 2, 3]
+
+
+def test_strategy_breakpoints_do_not_apply_to_noble_phantasms():
+    cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "1Q")]
+    strategy = {
+        "card1": _spec(0, [1]), "card2": _spec(1, ["1B"]),
+        "card3": _spec(1, ["2A"]), "breakpoint": [True, True],
+    }
+    selected = select_command_cards([strategy], cards, preselected_nps=[1])
+    assert selected[0] == {"type": "np", "servant": 1}
+    assert [card["slot"] for card in selected[1:]] == [1, 2]
+
+
+def test_strategy_matches_combined_card_code_and_special_key():
+    cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "1B"), _card(4, "3Q")]
+    cards[1]["special_keys"] = ["S0"]
+    cards[2]["special_keys"] = ["S0"]
+    strategy = {"card1": _spec(1, ["1BS0"]), "card2": _spec(2, []), "card3": _spec(2, [])}
+    assert select_command_cards([strategy], cards)[0]["slot"] == 3
+
+
+@pytest.mark.parametrize("breakpoint", [[False, "false"], [True], True])
+def test_strategy_rejects_invalid_breakpoints(breakpoint):
+    strategy = {f"card{index}": _spec(2, []) for index in range(1, 4)}
+    strategy["breakpoint"] = breakpoint
+    with pytest.raises(StrategySelectionError, match="breakpoint"):
+        select_command_cards([strategy], [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q")])
+
+
+@pytest.mark.parametrize("preselected", [[1, 1], [1, 2, 3, 1]])
+def test_strategy_rejects_duplicate_preselected_nps(preselected):
+    strategy = {f"card{index}": _spec(2, []) for index in range(1, 4)}
+    with pytest.raises(StrategySelectionError, match="duplicate"):
+        select_command_cards([strategy], [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q")], preselected_nps=preselected)
+
+
+def test_strategy_backtracking_matches_exhaustive_face_card_oracle():
+    cards = [_card(slot, code) for slot, code in enumerate(("1B", "1A", "2B", "2A", "3Q"), 1)]
+    preferences = [["1B", "2B"], ["1A", "2A"], ["1B"], ["3Q"], [card["code"] for card in cards]]
+    for specs in product(preferences, repeat=3):
+        for breakpoints in product((False, True), repeat=2):
+            valid = [
+                candidate for candidate in permutations(cards, 3)
+                if all(card["code"] in preference for card, preference in zip(candidate, specs, strict=True))
+                and all(
+                    not enabled or candidate[index]["servant_position"] != candidate[index + 1]["servant_position"]
+                    for index, enabled in enumerate(breakpoints)
+                )
+            ]
+            strategy = {f"card{index}": _spec(1, preference) for index, preference in enumerate(specs, 1)}
+            strategy["breakpoint"] = list(breakpoints)
+            if not valid:
+                with pytest.raises(StrategySelectionError, match="no matching"):
+                    select_command_cards([strategy], cards)
+                continue
+            expected = min(valid, key=lambda candidate: tuple(
+                (preference.index(card["code"]), card["slot"])
+                for card, preference in zip(candidate, specs, strict=True)
+            ))
+            assert [card["slot"] for card in select_command_cards([strategy], cards)] == [card["slot"] for card in expected]

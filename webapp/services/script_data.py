@@ -857,8 +857,11 @@ class ScriptDataService:
                 errors.append(self._issue("invalid_strategy_cards", f"{card_field}.cards", "Strategy cards must be a list."))
 
         breakpoint = payload.get("breakpoint")
-        if not isinstance(breakpoint, list) or len(breakpoint) != 2:
-            errors.append(self._issue("invalid_strategy_breakpoint", f"{field}.breakpoint", "Strategy breakpoint must contain two values."))
+        if (
+            not isinstance(breakpoint, list) or len(breakpoint) != 2
+            or any(not isinstance(value, bool) for value in breakpoint)
+        ):
+            errors.append(self._issue("invalid_strategy_breakpoint", f"{field}.breakpoint", "Strategy breakpoint must contain two boolean values."))
         if "colorFirst" in payload and not isinstance(payload["colorFirst"], bool):
             errors.append(self._issue("invalid_strategy_color_first", f"{field}.colorFirst", "Strategy colorFirst must be a boolean."))
         return errors

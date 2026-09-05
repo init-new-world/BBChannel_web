@@ -77,70 +77,68 @@ def _select_strategy(
     preselected_nps: list[int],
 ) -> list[dict[str, Any]]:
     cards = [card for card in recognized_cards if card.get("code") and card.get("available") is not False]
+    breakpoints = strategy.get("breakpoint", [False, False])
+    if (
+        not isinstance(breakpoints, list) or len(breakpoints) != 2
+        or any(not isinstance(value, bool) for value in breakpoints)
+    ):
+        raise StrategySelectionError("Strategy breakpoint must contain two boolean values.")
     selected = [
         {"type": "np", "servant": servant}
         for servant in preselected_nps
         if isinstance(servant, int) and not isinstance(servant, bool) and 1 <= servant <= 3
     ]
     selected_nps = {selection["servant"] for selection in selected}
-    selected_slots: set[int] = set()
-    selected_servants = set(selected_nps)
+    if len(selected_nps) != len(selected):
+        raise StrategySelectionError("Preselected Noble Phantasms must not contain duplicates.")
     color_first = bool(strategy.get("colorFirst", True))
 
-    for card_name in ("card1", "card2", "card3"):
-        if len(selected) >= 3:
-            break
-        spec = strategy.get(card_name)
+    def choose(
+        spec_index: int, chosen: list[dict[str, Any]], slots: set[int],
+        nps: set[int], servants: set[int],
+    ) -> list[dict[str, Any]] | None:
+        if len(chosen) == 3:
+            return chosen
+        card_name = f"card{spec_index + 1}"
+        spec = strategy.get(card_name) if spec_index < 3 else {
+            "type": 2, "criticalStar": 0, "more_or_less": True,
+        }
         if not isinstance(spec, dict):
             raise StrategySelectionError(f"{card_name} is missing.")
         card_type = spec.get("type")
         if card_type == 0:
-            servant = _select_np(spec, selected_nps)
-            if servant is not None:
-                selected.append({"type": "np", "servant": servant})
-                selected_nps.add(servant)
-                selected_servants.add(servant)
-            continue
+            servant = _select_np(spec, nps)
+            if servant is None:
+                return choose(spec_index + 1, chosen, slots, nps, servants)
+            return choose(
+                spec_index + 1, [*chosen, {"type": "np", "servant": servant}],
+                slots, nps | {servant}, servants | {servant},
+            )
         if card_type == 1:
-            card = _select_preferred_face(
-                spec,
-                cards,
-                selected_slots,
-                color_first=color_first,
-            )
+            candidates = _preferred_faces(spec, cards, slots, color_first=color_first)
         elif card_type == 2:
-            card = _select_fallback_face(
-                spec,
-                cards,
-                selected_slots,
-                selected_servants,
-            )
+            candidates = _fallback_faces(spec, cards, slots, servants)
         else:
             raise StrategySelectionError(f"{card_name} has unsupported type {card_type}.")
-        if card is None:
-            raise StrategySelectionError(f"{card_name} has no matching command card.")
-        selected.append(_face_selection(card))
-        selected_slots.add(int(card["slot"]))
-        selected_servants.add(int(card["servant_position"]))
+        for card in candidates:
+            position = int(card["servant_position"])
+            if (
+                chosen and breakpoints[len(chosen) - 1] and chosen[-1]["type"] == "face"
+                and chosen[-1]["code"][0] == str(position)
+            ):
+                continue
+            result = choose(
+                spec_index + 1, [*chosen, _face_selection(card)],
+                slots | {int(card["slot"])}, nps, servants | {position},
+            )
+            if result is not None:
+                return result
+        return None
 
-    while len(selected) < 3:
-        card = _select_fallback_face(
-            {"criticalStar": 0, "more_or_less": True},
-            cards,
-            selected_slots,
-            selected_servants,
-        )
-        if card is None:
-            break
-        selected.append(_face_selection(card))
-        selected_slots.add(int(card["slot"]))
-        selected_servants.add(int(card["servant_position"]))
-
-    if len(selected) != 3:
-        raise StrategySelectionError(
-            f"Strategy selected {len(selected)} cards instead of 3."
-        )
-    return selected
+    result = choose(0, selected, set(), selected_nps, set(selected_nps))
+    if result is None:
+        raise StrategySelectionError("Strategy has no matching command card combination.")
+    return result
 
 
 def _select_np(spec: dict[str, Any], selected_nps: set[int]) -> int | None:
@@ -155,54 +153,59 @@ def _select_np(spec: dict[str, Any], selected_nps: set[int]) -> int | None:
     raise StrategySelectionError("NP strategy has no valid servant position.")
 
 
-def _select_preferred_face(
+def _preferred_faces(
     spec: dict[str, Any],
     cards: list[dict[str, Any]],
     selected_slots: set[int],
     *,
     color_first: bool,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     preferences = spec.get("cards")
     if not isinstance(preferences, list):
         raise StrategySelectionError("Face card preferences must be a list.")
     eligible = _eligible_cards(spec, cards, selected_slots)
     ranked = []
+    ranked_slots: set[int] = set()
     for preference_index, preference in enumerate(preferences):
         for card in eligible:
             special_keys = card.get("special_keys")
             if card.get("code") == preference or (
-                isinstance(special_keys, list) and preference in special_keys
+                isinstance(special_keys, list) and (
+                    preference in special_keys
+                    or any(preference == f"{card['code']}{key}" for key in special_keys)
+                )
             ):
-                ranked.append((preference_index, card))
-    if not ranked:
-        return None
+                slot = int(card["slot"])
+                if slot not in ranked_slots:
+                    ranked.append((preference_index, card))
+                    ranked_slots.add(slot)
     if color_first:
-        return min(ranked, key=lambda item: (item[0], int(item[1]["slot"])))[1]
+        ranked.sort(key=lambda item: (item[0], int(item[1]["slot"])))
+        return [card for _preference_index, card in ranked]
     reverse_stars = bool(spec.get("more_or_less", True))
-    return sorted(
-        ranked,
+    ranked.sort(
         key=lambda item: (
             -(item[1].get("stars") or 0) if reverse_stars else (item[1].get("stars") or 0),
             item[0],
             int(item[1]["slot"]),
         ),
-    )[0][1]
+    )
+    return [card for _preference_index, card in ranked]
 
 
-def _select_fallback_face(
+def _fallback_faces(
     spec: dict[str, Any],
     cards: list[dict[str, Any]],
     selected_slots: set[int],
     selected_servants: set[int],
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
     eligible = _eligible_cards(spec, cards, selected_slots)
-    return min(
+    return sorted(
         eligible,
         key=lambda card: (
             int(card["servant_position"]) in selected_servants,
             int(card["slot"]),
         ),
-        default=None,
     )
 
 

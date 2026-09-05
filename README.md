@@ -94,3 +94,5 @@ Recognition resources are expected under `assets/`, and data files under `data/`
 Custom assist tags live in `assets/assist/assist_tags/`. Their PNG filenames encode the source dimensions, crop offsets, and confidence threshold. A tag referenced by a script cannot be deleted until it is unbound; missing or inconsistent tag images fail script validation.
 
 Custom command-card tags in `specialKeys` use their filename's source dimensions and card-local crop bounds during recognition. The search region keeps the original client's animation tolerance and stays inside each card. Strategy preferences such as `S0` refer to the tag's index in `specialKeys`. Invalid metadata or missing/inconsistent images fail script validation.
+
+Strategy preferences accept ordinary card codes (`1B`), tag-only codes (`S0`), and combined codes (`1BS0`). Selection tries alternative matching cards when an earlier preference prevents a complete three-card assignment. The two `breakpoint` booleans require different servants across the first/second and second/third face-card boundaries respectively; a boundary involving a Noble Phantasm is exempt.

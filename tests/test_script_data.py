@@ -22,6 +22,15 @@ def _strategy_payload() -> dict:
     }
 
 
+def test_strategy_validation_rejects_non_boolean_breakpoints(tmp_path: Path):
+    strategy = _strategy_payload()
+    strategy["breakpoint"] = [False, "false"]
+    _write_json(tmp_path / "strategy" / "invalid.json", [{"tag": "Invalid", "strategy": strategy}])
+    detail = ScriptDataService(tmp_path).get_strategy("invalid")
+    assert detail["validation"]["ok"] is False
+    assert any(error["code"] == "invalid_strategy_breakpoint" for error in detail["validation"]["errors"])
+
+
 def test_lists_settings_and_strategies_by_stem(tmp_path: Path):
     _write_json(tmp_path / "settings" / "beta.json", {})
     _write_json(tmp_path / "settings" / "alpha.json", {})
