@@ -1,6 +1,6 @@
 # BBchannel Web PoC
 
-This project is a Web proof of concept for the BBchannel automation stack. It starts with the device and recognition foundation: device capability checks, ADB connection, screenshots, manual taps/swipes, template matching, and event logs.
+This project is a local Web interface for the BBchannel automation stack. It includes device control, visual recognition, script editing, battle execution, and several event workflows. The port remains experimental: automated fixture tests do not replace verification on the target emulator, game server, and screen layout.
 
 ## Setup
 
@@ -17,6 +17,8 @@ python -m webapp
 ```
 
 Open `http://127.0.0.1:8000` in a browser.
+
+The default server binds only to loopback. Keep it local: device-control and automation endpoints are not intended for unauthenticated public access. Job state is stored in `runtime/bbchannel.db`; set `BBCHANNEL_RUNTIME_DB` to use another SQLite database.
 
 ## ADB Discovery
 
@@ -48,6 +50,13 @@ If optional runtime dependencies are missing, dependency-specific tests skip ins
 python -m webapp
 ```
 
+Browser regression tests are optional and use isolated temporary data plus a simulated device. Install Playwright and point the test runner at a local Chromium or Google Chrome executable:
+
+```bash
+python -m pip install playwright
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py
+```
+
 Manual smoke steps:
 
 1. Open `http://127.0.0.1:8000`.
@@ -55,11 +64,31 @@ Manual smoke steps:
 3. Confirm capabilities load for ADB and MuMu.
 4. Connect an online ADB device or emulator.
 5. Capture a screenshot, select a template, run match, send a tap, send a swipe, and check the event log.
+6. Import or edit a script and inspect its validation and compiled-program status before executing it.
+7. Check assist recognition and the intended starting screen, then run a single battle with supervision before enabling repeated runs.
 
 ## Scope
 
-The PoC does not implement full battle automation. It is intended to validate the browser-to-local-device control path before porting BBchannel's higher-level scripts.
+Implemented workflows include:
+
+- Device discovery and connection, normalized screenshots, manual taps/swipes, template matching, and diagnostic jobs.
+- Script and strategy editing, JSON import/export, validation, compiled-program inspection, and dry runs.
+- Battle entry, support selection, team checks, skills, command-card strategies, result handling, repeated runs, and bounded crash or frozen-screen recovery.
+- Assist filters for servant/CE identity, limit break, friendship, NP and servant level, main and append skill levels, custom tags, NP color, and Olga form.
+- CE template creation and inventory management, plus a visual custom-tag crop/import/binding tool.
+- Lottery, Valentine exchange, excavation, and supported EXP-material workflows, with job history, progress events, pause/resume, and cancellation.
+- Material drop queries from the bundled data and a local notebook.
+
+Execution is rejected when a script fails validation or contains unsupported compiled actions. Recognition-dependent behavior still requires suitable assets and a compatible device layout; this project does not claim complete parity with every original-client function or every live game screen.
+
+### Assist Skills
+
+`skillsLevel` stores three main skills followed by up to five append skills. Each entry is an integer from `0` to `10`; `0` means no requirement and positive values are minimum levels. The current CNTW layout supports three append slots. Nonzero requirements for its fourth or fifth append slot are rejected rather than ignored.
+
+The script editor's numeric controls stay synchronized with its JSON editor. Append filtering verifies the skill display, checks each requested slot, restores the main view, and rechecks the candidate before selection. The full-run NP color/Olga filter is a per-run option and does not change the saved script.
 
 ## Resources
 
-Recognition resources are expected under `assets/`. Data files are expected under `data/`. The first implementation imports these from the parent BBchannel package directory.
+Recognition resources are expected under `assets/`, and data files under `data/`. Populate them from the BBchannel package when setting up a fresh checkout. Scripts live in `data/settings/` and strategies in `data/strategy/`.
+
+Custom assist tags live in `assets/assist/assist_tags/`. Their PNG filenames encode the source dimensions, crop offsets, and confidence threshold. A tag referenced by a script cannot be deleted until it is unbound; missing or inconsistent tag images fail script validation.
