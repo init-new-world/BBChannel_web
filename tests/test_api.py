@@ -646,6 +646,49 @@ def test_setting_program_reports_invalid_assist_tags_without_server_error(tmp_pa
     assert program["execution"]["battle"]["ready"] is False
 
 
+@pytest.mark.parametrize("image_state,code", [
+    ("missing", "missing_special_key"), ("wrong_size", "invalid_special_key_image"),
+    ("invalid", "invalid_special_keys"),
+])
+def test_setting_program_rejects_invalid_special_keys(tmp_path: Path, image_state, code):
+    from PIL import Image
+
+    client = _client(tmp_path)
+    name = "[Key]W1280H720DXL0DXR20DYT0DYB20CON01.png"
+    if image_state == "wrong_size":
+        directory = tmp_path / "assets" / "special_keys"
+        directory.mkdir()
+        Image.new("RGB", (19, 20), "blue").save(directory / name)
+    if image_state == "invalid":
+        name = "broken.png"
+    _write_json(tmp_path / "data" / "servant_info_CH.json", {})
+    _write_json(tmp_path / "data" / "settings" / "invalid-key.json", {
+        "server": "CH", "specialKeys": [name], "round1_turns": 1,
+    })
+    response = client.get("/api/settings/invalid-key/program")
+    assert response.status_code == 200
+    program = response.json()
+    assert not program["validation"]["ok"]
+    assert code in {error["code"] for error in program["validation"]["errors"]}
+    assert not program["execution"]["battle"]["ready"]
+
+
+def test_setting_accepts_valid_special_key_image(tmp_path: Path):
+    from PIL import Image
+
+    client = _client(tmp_path)
+    name = "[Key]W1280H720DXL-10DXR10DYT-20DYB20CON01.png"
+    directory = tmp_path / "assets" / "special_keys"
+    directory.mkdir()
+    Image.new("RGB", (20, 40), "blue").save(directory / name)
+    _write_json(tmp_path / "data" / "servant_info_CH.json", {})
+    response = client.put("/api/settings/key", json={"config": {"server": "CH", "specialKeys": [name]}})
+    assert response.status_code == 200
+    plan = client.get("/api/settings/key/plan").json()
+    assert plan["validation"]["ok"]
+    assert plan["special_keys"][0]["threshold"] == 0.01
+
+
 def test_setting_rejects_tag_image_with_wrong_dimensions(tmp_path: Path):
     from PIL import Image
 

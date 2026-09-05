@@ -111,6 +111,11 @@ class ScriptDataService:
     def get_setting_plan(self, name: str) -> dict[str, Any]:
         detail = self.get_setting(name)
         config = detail["config"]
+        try:
+            special_keys = self._plan_special_keys(config)
+        except ValueError:
+            # Keep invalid scripts inspectable; validation prevents execution.
+            special_keys = []
         rounds = self._build_rounds(config)
         action_count = sum(
             len(turn["actions"])
@@ -124,7 +129,7 @@ class ScriptDataService:
             "servants": self._plan_servants(config),
             "assist": self._plan_assist(config),
             "run": self._plan_run(config),
-            "special_keys": self._plan_special_keys(config),
+            "special_keys": special_keys,
             "master": self._plan_master(config),
             "rounds": rounds,
             "summary": {
@@ -411,6 +416,28 @@ class ScriptDataService:
                             f"Assist tag dimensions do not match filename metadata: {tag['template_name']}",
                         ))
 
+        try:
+            special_keys = self._plan_special_keys(config)
+        except ValueError as exc:
+            errors.append(self._issue("invalid_special_keys", "specialKeys", str(exc)))
+        else:
+            if self._resources is not None:
+                for index, key in enumerate(special_keys):
+                    field = f"specialKeys[{index}]"
+                    try:
+                        image = self._resources.template_metadata(key["template_path"])
+                    except AppError as exc:
+                        code = "missing_special_key" if exc.code == ErrorCode.TEMPLATE_NOT_FOUND else "invalid_special_key_image"
+                        errors.append(self._issue(code, field, exc.message))
+                        continue
+                    if (image["width"], image["height"]) != (
+                        key["right"] - key["left"], key["bottom"] - key["top"],
+                    ):
+                        errors.append(self._issue(
+                            "invalid_special_key_image", field,
+                            f"Special key dimensions do not match filename metadata: {key['template_name']}",
+                        ))
+
         return {"ok": not errors, "errors": errors, "warnings": warnings}
 
     def _setting_summary(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -666,10 +693,12 @@ class ScriptDataService:
             match = SPECIAL_KEY_NAME_RE.fullmatch(stem)
             if match is None:
                 raise ValueError(f"specialKeys[{index}] has an invalid filename.")
-            values = {name: int(value) for name, value in match.groupdict().items()}
-            threshold = float(f"0.{values['CON']}")
+            values = {name: int(value) for name, value in match.groupdict().items() if name != "CON"}
+            threshold = float(f"0.{match.group('CON')}")
             if not 0 <= threshold <= 1:
                 raise ValueError(f"specialKeys[{index}] has an invalid threshold.")
+            if values["W"] <= 0 or values["H"] <= 0 or values["DXL"] >= values["DXR"] or values["DYT"] >= values["DYB"]:
+                raise ValueError(f"specialKeys[{index}] has invalid metadata.")
             assets_marker = "/assets/"
             if assets_marker in normalized_path:
                 template_path = normalized_path.split(assets_marker, 1)[1]

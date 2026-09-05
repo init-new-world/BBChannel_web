@@ -330,6 +330,30 @@ def test_cntw_assist_append_layout_rejects_unavailable_slots(tmp_path: Path):
     assert service.get_setting_plan("demo")["assist"]["append_skill_levels"] == [4, 5, 6]
 
 
+@pytest.mark.parametrize("confidence,expected", [("01", 0.01), ("005", 0.005), ("805", 0.805), ("85", 0.85)])
+def test_special_key_threshold_preserves_leading_zeroes(confidence, expected):
+    keys = ScriptDataService._plan_special_keys({"specialKeys": [
+        f"[Quick]W1280H720DXL-10DXR10DYT-20DYB20CON{confidence}.png",
+    ]})
+    assert keys[0]["threshold"] == expected
+
+
+@pytest.mark.parametrize("keys", [
+    "broken.png", [None], [[]], ["broken.png"],
+    ["W0H720DXL0DXR20DYT0DYB20CON8.png"],
+    ["W1280H-720DXL0DXR20DYT0DYB20CON8.png"],
+    ["W1280H720DXL20DXR0DYT0DYB20CON8.png"],
+    ["W1280H720DXL0DXR20DYT20DYB20CON8.png"],
+])
+def test_invalid_special_keys_are_reported_instead_of_crashing_plan(tmp_path: Path, keys):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CH", "specialKeys": keys})
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+    assert not plan["validation"]["ok"]
+    assert plan["validation"]["errors"][0]["field"] == "specialKeys"
+    assert plan["special_keys"] == []
+
+
 def test_get_setting_plan_flattens_grand_assist_equip_groups(tmp_path: Path):
     _write_json(tmp_path / "servant_info_CH.json", {})
     _write_json(
