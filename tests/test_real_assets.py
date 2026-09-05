@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageChops
@@ -128,3 +129,64 @@ def test_real_expball_templates_classify_a_storage_grid_slot():
     assert report["slots"][0]["star"] == 4
     assert report["slots"][0]["confidence"] >= 0.99
     assert all(slot["star"] is None for slot in report["slots"][1:])
+
+
+@pytest.mark.parametrize("server", ["CH", "JP", "CNTW"])
+@pytest.mark.parametrize("status", [None, "freeze", "bjfy"])
+def test_real_card_status_templates_distinguish_text_from_portrait_art(server, status):
+    cv = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    from webapp.services.cards import CARD_STATUS_ROIS, CommandCardRecognizer
+    from webapp.services.recognition import RecognitionService
+
+    resources = ResourceService(PROJECT_ROOT / "assets", PROJECT_ROOT / "data")
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    with Image.open(resources.resolve_template("commands_JP/100300/card_servant_1.png")) as source:
+        portrait = source.convert("RGBA")
+
+    def paste_scaled(path, position):
+        with Image.open(resources.resolve_template(path)) as source:
+            template = source.convert("RGBA")
+        scaled = Image.fromarray(cv.resize(
+            np.asarray(template), (round(template.width * 2 / 3), round(template.height * 2 / 3)),
+            interpolation=cv.INTER_AREA,
+        ))
+        screenshot.paste(scaled, position, scaled)
+
+    for slot, color in enumerate(("Buster", "Arts", "Quick", "Arts", "Buster")):
+        screenshot.paste(portrait, (slot * 256, 400), portrait)
+        paste_scaled(f"battle/{server}/{color}.png", (slot * 256 + 20, 610))
+    if status:
+        x, y, _width, _height = CARD_STATUS_ROIS[2]
+        paste_scaled(f"battle/{server}/{status}.png", (x + 4, y + 4))
+    servants = [{"active": True, "sn": "100300"}] if server == "JP" else []
+    result = CommandCardRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot), server, servants, threshold=0.8,
+    )
+    reason = {"freeze": "immobilized", "bjfy": "sealed"}.get(status)
+    assert [card["blocked_reason"] for card in result["cards"]] == [None, None, reason, None, None]
+    if server == "JP":
+        assert result["complete"] is True
+        assert result["recognized_count"] == (4 if status else 5)
+        assert [card["code"] for card in result["cards"]] == ["1B", "1A", None if status else "1Q", "1A", "1B"]
+        if status is None:
+            from webapp.automation.battle import _execute_strategy_step, _matches_hakuno_needs
+
+            assert _matches_hakuno_needs(result["cards"], [["1B"]]) is True
+            strategy = {"card1": {"type": 0, "cards": [1]}, "card2": {"type": 2}, "card3": {"type": 2}}
+            for avoid_chain in (False, True):
+                taps = []
+
+                def tap(x, y):
+                    taps.append((x, y))
+                    return SimpleNamespace(to_dict=lambda: {"ok": True})
+
+                count = _execute_strategy_step(
+                    SimpleNamespace(emit=lambda *_args, **_kwargs: None, sleep=lambda _seconds: None),
+                    SimpleNamespace(tap=tap), SimpleNamespace(recognize=lambda *_args, **_kwargs: result),
+                    b"classified-frame", "JP", servants,
+                    {"strategies": [strategy], "avoid_chain": avoid_chain, "preselected_nps": [1]},
+                    0.8, 0,
+                )
+                assert count == 3
+                assert taps == [(500, 110), (150, 500), (375, 500)]

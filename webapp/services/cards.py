@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from io import BytesIO
 from typing import Any
-
-from PIL import Image, ImageStat
 
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
@@ -80,11 +77,13 @@ class CommandCardRecognizer:
         candidates: list[dict[str, object]] = []
         candidate_meta: list[tuple[str, int, Any]] = []
         for slot_index, roi in enumerate(CARD_SLOT_ROIS):
+            # Near-opaque text PNGs need centered correlation to reject portrait colors.
             for reason, filename in CARD_BLOCK_TEMPLATES.items():
                 candidates.append({
                     "template_path": f"battle/{normalized_server}/{filename}",
                     "threshold": max(0.85, threshold), "roi": CARD_STATUS_ROIS[slot_index],
                     "scales": CARD_TEMPLATE_SCALES,
+                    "centered_mask": True,
                 })
                 candidate_meta.append(("blocked", slot_index, reason))
             for color, filename in COLOR_TEMPLATES.items():
@@ -165,17 +164,12 @@ class CommandCardRecognizer:
             kind, slot_index, value = meta
             grouped[slot_index][kind].append((value, match))
 
-        with Image.open(BytesIO(screenshot)) as source:
-            status_image = source.convert("RGB")
         cards = []
         for slot_index, groups in enumerate(grouped):
             color_value, color_match = _best_match(groups["color"])
             servant_value, servant_match = _best_match(groups["servant"])
             star_value, star_match = _best_match(groups["star"])
-            blocked_reason, blocked_match = _best_match([
-                (reason, match) for reason, match in groups["blocked"]
-                if match.matched and _has_status_contrast(status_image, match)
-            ])
+            blocked_reason, blocked_match = _best_match(groups["blocked"])
             special_matches = [
                 (value, match)
                 for value, match in groups["special"]
@@ -273,11 +267,3 @@ def _special_key_search_region(
     if template_width > x1 - x0 or template_height > y1 - y0:
         return None
     return (x0, y0, x1 - x0, y1 - y0), (scene_scale / source_scale,)
-
-
-def _has_status_contrast(image: Image.Image, match: Any) -> bool:
-    # Masked text correlation can score a featureless background surprisingly high.
-    left, top = match.top_left
-    width, height = match.size
-    region = image.crop((left, top, left + width, top + height))
-    return max(ImageStat.Stat(region).stddev) >= 8

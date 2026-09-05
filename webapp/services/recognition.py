@@ -78,6 +78,7 @@ class RecognitionService:
                     roi=candidate.get("roi"),
                     scales=candidate.get("scales"),
                     mask_path=mask_path,
+                    centered_mask=bool(candidate.get("centered_mask", False)),
                     template_data=template_cache[cache_key],
                 )
             )
@@ -207,6 +208,7 @@ class RecognitionService:
         scales: object = None,
         mask_path: str | None = None,
         template_size: object = None,
+        centered_mask: bool = False,
         template_data: tuple[Any, Any, bool] | None = None,
     ) -> MatchResult:
         cv, numpy = self._require_opencv()
@@ -249,7 +251,7 @@ class RecognitionService:
                 search_image,
                 scaled_template,
                 scaled_mask,
-                explicit_mask,
+                explicit_mask or centered_mask,
             )
             _, confidence, _, max_location = cv.minMaxLoc(matches)
             candidate = (

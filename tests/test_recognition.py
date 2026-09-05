@@ -164,6 +164,25 @@ def test_match_template_uses_alpha_channel_as_mask(tmp_path: Path):
     assert result.top_left == [45, 22]
 
 
+def test_batch_centered_alpha_matching_rejects_color_only_similarity(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = Image.new("RGBA", (20, 20), (190, 170, 150, 250))
+    ImageDraw.Draw(template).rectangle((3, 5, 8, 15), fill=(120, 110, 100, 250))
+    template.save(resources.assets_dir / "text.png")
+    screenshot = Image.new("RGB", (60, 50), (150, 140, 120))
+    default, centered = RecognitionService(resources).match_templates(
+        _png_bytes(screenshot), [
+            {"template_path": "text.png", "threshold": 0.85},
+            {"template_path": "text.png", "threshold": 0.85, "centered_mask": True},
+        ],
+    )
+    assert default.matched is True
+    assert centered.matched is False
+
+
 def test_match_template_uses_explicit_mask_path(tmp_path: Path):
     pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService
