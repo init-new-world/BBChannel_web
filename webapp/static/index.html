@@ -282,6 +282,9 @@
               <button id="archive-equip-template" class="ghost-button" type="button">Archive</button>
             </div>
             <div class="panel-divider"></div>
+            <div class="section-label">Assist Tags</div>
+            <button id="open-assist-tags" class="ghost-button wide" type="button">Open Tag Maker</button>
+            <div class="panel-divider"></div>
             <div class="section-label">Material Drops</div>
             <button id="open-material-drops" class="ghost-button wide" type="button">Open Drop Query</button>
             <button id="open-notebook" class="ghost-button wide" type="button">Open Notebook</button>
@@ -424,6 +427,69 @@
           <button id="save-notebook" class="primary-button" type="submit">Save</button>
         </div>
       </form>
+    </dialog>
+    <dialog id="assist-tag-dialog" class="assist-tag-dialog">
+      <div class="assist-tag-form">
+        <div class="preset-dialog-header assist-tag-header">
+          <div>
+            <div class="section-label">Assist Tags</div>
+            <h2>Tag Maker</h2>
+          </div>
+          <button id="close-assist-tags" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="assist-tag-workspace">
+          <section class="assist-tag-capture">
+            <div class="assist-tag-toolbar">
+              <button id="capture-assist-tag-screen" class="primary-button" type="button">Capture &amp; Match</button>
+              <label class="field-stack">
+                <span>Support</span>
+                <select id="assist-tag-candidate" class="field" aria-label="Matched support"></select>
+              </label>
+            </div>
+            <div class="assist-tag-canvas-frame">
+              <canvas id="assist-tag-canvas" width="1280" height="720" aria-label="Assist tag crop canvas"></canvas>
+              <div id="assist-tag-canvas-empty" class="assist-tag-canvas-empty">No capture</div>
+            </div>
+            <div class="assist-tag-fields">
+              <label class="field-stack">
+                <span>Label</span>
+                <input id="assist-tag-label" class="field" type="text" maxlength="64" autocomplete="off" value="Custom">
+              </label>
+              <label class="field-stack">
+                <span>Threshold</span>
+                <input id="assist-tag-threshold" class="field" type="number" min="0.01" max="0.99" step="0.01" value="0.80">
+              </label>
+              <div class="field-stack">
+                <span>Crop</span>
+                <div id="assist-tag-crop-status" class="assist-tag-value">Not selected</div>
+              </div>
+            </div>
+            <div class="assist-tag-save-row">
+              <span id="assist-tag-maker-status" class="assist-tag-status" aria-live="polite">Idle</span>
+              <button id="save-assist-tag" class="primary-button" type="button">Save Tag</button>
+            </div>
+          </section>
+          <section class="assist-tag-library">
+            <div class="section-label">Tag Library</div>
+            <select id="assist-tag-list" class="field" aria-label="Assist tag"></select>
+            <div class="assist-tag-preview-frame">
+              <img id="assist-tag-preview" alt="Selected assist tag" hidden>
+              <span id="assist-tag-preview-empty">No tags</span>
+            </div>
+            <div id="assist-tag-metadata" class="assist-tag-metadata">No tag selected</div>
+            <label class="field-stack file-field">
+              <span>Import PNG</span>
+              <input id="assist-tag-file" class="field" type="file" accept="image/png,.png">
+            </label>
+            <button id="import-assist-tag" class="ghost-button wide" type="button">Import Tag</button>
+            <div class="assist-tag-library-actions">
+              <button id="bind-assist-tag" class="ghost-button" type="button">Bind to Script</button>
+              <button id="delete-assist-tag" class="danger-button" type="button">Delete</button>
+            </div>
+            <div id="assist-tag-library-status" class="assist-tag-status" aria-live="polite">Ready</div>
+          </section>
+        </div>
+      </div>
     </dialog>
     <script src="/app.js" type="module"></script>
   </body>

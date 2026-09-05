@@ -95,6 +95,20 @@ def test_operator_console_references_api_controls():
     assert 'id="equip-test-status"' in index
     assert 'id="activate-equip-template"' in index
     assert 'id="archive-equip-template"' in index
+    assert 'id="open-assist-tags"' in index
+    assert 'id="assist-tag-dialog"' in index
+    assert 'id="capture-assist-tag-screen"' in index
+    assert 'id="assist-tag-candidate"' in index
+    assert 'id="assist-tag-canvas"' in index
+    assert 'id="assist-tag-label"' in index
+    assert 'id="assist-tag-threshold"' in index
+    assert 'id="save-assist-tag"' in index
+    assert 'id="assist-tag-list"' in index
+    assert 'id="assist-tag-preview"' in index
+    assert 'id="assist-tag-file"' in index
+    assert 'id="import-assist-tag"' in index
+    assert 'id="bind-assist-tag"' in index
+    assert 'id="delete-assist-tag"' in index
     assert 'id="open-material-drops"' in index
     assert 'id="material-dialog"' in index
     assert 'id="material-server"' in index
@@ -161,6 +175,13 @@ def test_operator_console_references_api_controls():
     assert "testEquipTemplate" in script
     assert "/test`" in script
     assert "screenshot_base64: state.screenshotBase64 || null" in script
+    assert 'api("/api/assist-tags")' in script
+    assert 'api("/api/assist-tags/candidates"' in script
+    assert 'api("/api/assist-tags"' in script
+    assert '/api/assist-tags/${encodeURIComponent(tag.name)}' in script
+    assert 'config.assistTags = assistTags' in script
+    assert 'drawAssistTagCanvas' in script
+    assert 'pointerdown' in script
     assert '["CH", "CNTW"].includes(state.selectedSettingPlan?.server)' in script
     assert '["CH", "CNTW", "JP"].includes(state.selectedSettingPlan?.server)' in script
     assert "!supportsExpball" in script

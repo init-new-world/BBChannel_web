@@ -12,6 +12,13 @@ const state = {
   equipFullCandidate: null,
   equipNonFullCandidate: null,
   equipTemplateBusy: false,
+  assistTags: [],
+  assistTagBusy: false,
+  assistTagCandidates: [],
+  assistTagScreenshotBase64: "",
+  assistTagImage: null,
+  assistTagCropBounds: null,
+  assistTagDragStart: null,
   materialCatalog: null,
   materialQuerySequence: 0,
   notebookSavedContent: "",
@@ -151,6 +158,27 @@ const els = {
   equipTestStatus: document.querySelector("#equip-test-status"),
   activateEquipTemplate: document.querySelector("#activate-equip-template"),
   archiveEquipTemplate: document.querySelector("#archive-equip-template"),
+  openAssistTags: document.querySelector("#open-assist-tags"),
+  assistTagDialog: document.querySelector("#assist-tag-dialog"),
+  closeAssistTags: document.querySelector("#close-assist-tags"),
+  captureAssistTagScreen: document.querySelector("#capture-assist-tag-screen"),
+  assistTagCandidate: document.querySelector("#assist-tag-candidate"),
+  assistTagCanvas: document.querySelector("#assist-tag-canvas"),
+  assistTagCanvasEmpty: document.querySelector("#assist-tag-canvas-empty"),
+  assistTagLabel: document.querySelector("#assist-tag-label"),
+  assistTagThreshold: document.querySelector("#assist-tag-threshold"),
+  assistTagCropStatus: document.querySelector("#assist-tag-crop-status"),
+  assistTagMakerStatus: document.querySelector("#assist-tag-maker-status"),
+  saveAssistTag: document.querySelector("#save-assist-tag"),
+  assistTagList: document.querySelector("#assist-tag-list"),
+  assistTagPreview: document.querySelector("#assist-tag-preview"),
+  assistTagPreviewEmpty: document.querySelector("#assist-tag-preview-empty"),
+  assistTagMetadata: document.querySelector("#assist-tag-metadata"),
+  assistTagFile: document.querySelector("#assist-tag-file"),
+  importAssistTag: document.querySelector("#import-assist-tag"),
+  bindAssistTag: document.querySelector("#bind-assist-tag"),
+  deleteAssistTag: document.querySelector("#delete-assist-tag"),
+  assistTagLibraryStatus: document.querySelector("#assist-tag-library-status"),
   openMaterialDrops: document.querySelector("#open-material-drops"),
   materialDialog: document.querySelector("#material-dialog"),
   materialForm: document.querySelector("#material-form"),
@@ -219,6 +247,7 @@ async function init() {
     loadStrategies(),
     loadTemplates(),
     loadEquipTemplates(),
+    loadAssistTags(),
     loadEvents(),
     loadJobs(),
   ]);
@@ -304,6 +333,35 @@ function bindEvents() {
   els.testEquipTemplate.addEventListener("click", testEquipTemplate);
   els.activateEquipTemplate.addEventListener("click", () => moveEquipTemplate("activate"));
   els.archiveEquipTemplate.addEventListener("click", () => moveEquipTemplate("archive"));
+  els.openAssistTags.addEventListener("click", openAssistTagMaker);
+  els.closeAssistTags.addEventListener("click", () => els.assistTagDialog.close());
+  els.assistTagDialog.addEventListener("cancel", () => {
+    state.assistTagDragStart = null;
+  });
+  els.captureAssistTagScreen.addEventListener("click", captureAssistTagScreen);
+  els.assistTagCandidate.addEventListener("change", () => {
+    state.assistTagCropBounds = null;
+    updateAssistTagCropStatus();
+    drawAssistTagCanvas();
+    updateControls();
+  });
+  els.assistTagCanvas.addEventListener("pointerdown", beginAssistTagCrop);
+  els.assistTagCanvas.addEventListener("pointermove", moveAssistTagCrop);
+  els.assistTagCanvas.addEventListener("pointerup", finishAssistTagCrop);
+  els.assistTagCanvas.addEventListener("pointercancel", finishAssistTagCrop);
+  els.assistTagLabel.addEventListener("input", updateControls);
+  els.assistTagThreshold.addEventListener("input", updateControls);
+  els.saveAssistTag.addEventListener("click", saveAssistTag);
+  els.assistTagList.addEventListener("change", renderSelectedAssistTag);
+  els.assistTagPreview.addEventListener("error", () => {
+    els.assistTagPreview.hidden = true;
+    els.assistTagPreviewEmpty.hidden = false;
+    els.assistTagPreviewEmpty.textContent = "Preview unavailable";
+  });
+  els.assistTagFile.addEventListener("change", updateControls);
+  els.importAssistTag.addEventListener("click", importAssistTag);
+  els.bindAssistTag.addEventListener("click", toggleAssistTagBinding);
+  els.deleteAssistTag.addEventListener("click", deleteAssistTag);
   els.openMaterialDrops.addEventListener("click", openMaterialDrops);
   els.closeMaterialDialog.addEventListener("click", () => els.materialDialog.close());
   els.materialForm.addEventListener("submit", queryMaterialDrops);
@@ -717,6 +775,410 @@ function requestEquipTemplateMove(template, action, overwrite) {
     method: "POST",
     body: JSON.stringify({ overwrite }),
   });
+}
+
+async function openAssistTagMaker() {
+  try {
+    await loadAssistTags();
+    els.assistTagDialog.showModal();
+    drawAssistTagCanvas();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function loadAssistTags(preferredName = "") {
+  const selectedName = preferredName || els.assistTagList.value;
+  try {
+    const payload = await api("/api/assist-tags");
+    state.assistTags = payload.tags || [];
+    els.assistTagList.replaceChildren(
+      ...state.assistTags.map((tag) => {
+        const option = document.createElement("option");
+        option.value = tag.name;
+        option.textContent = assistTagDisplayName(tag.name);
+        return option;
+      }),
+    );
+    if (state.assistTags.some((tag) => tag.name === selectedName)) {
+      els.assistTagList.value = selectedName;
+    }
+    renderSelectedAssistTag();
+  } catch (error) {
+    state.assistTags = [];
+    els.assistTagList.replaceChildren();
+    renderSelectedAssistTag();
+    throw error;
+  }
+}
+
+function selectedAssistTag() {
+  return state.assistTags.find((tag) => tag.name === els.assistTagList.value) || null;
+}
+
+function assistTagDisplayName(name) {
+  const marker = name.lastIndexOf("]W");
+  return marker > 0 ? name.slice(1, marker) : name;
+}
+
+function assistTagConfigName(path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
+}
+
+function isAssistTagBound(tag) {
+  const configured = state.selectedSettingPlan?.assist?.tags || [];
+  return configured.some((entry) => entry.template_name === tag?.name);
+}
+
+function renderSelectedAssistTag() {
+  const tag = selectedAssistTag();
+  if (!tag) {
+    els.assistTagPreview.hidden = true;
+    els.assistTagPreview.removeAttribute("src");
+    els.assistTagPreviewEmpty.hidden = false;
+    els.assistTagPreviewEmpty.textContent = "No tags";
+    els.assistTagMetadata.textContent = "No tag selected";
+    els.bindAssistTag.textContent = "Bind to Script";
+    updateControls();
+    return;
+  }
+  els.assistTagPreviewEmpty.hidden = true;
+  els.assistTagPreview.hidden = false;
+  els.assistTagPreview.src = `/api/assist-tags/${encodeURIComponent(tag.name)}/image?v=${Date.now()}`;
+  const [sourceWidth, sourceHeight] = tag.source_size;
+  const [left, top, right, bottom] = tag.offsets;
+  els.assistTagMetadata.textContent = [
+    `${sourceWidth}x${sourceHeight} | ${tag.image_size[0]}x${tag.image_size[1]}`,
+    `offset ${left},${top} -> ${right},${bottom}`,
+    `threshold ${Number(tag.threshold).toFixed(2)}`,
+  ].join("\n");
+  els.bindAssistTag.textContent = isAssistTagBound(tag)
+    ? "Unbind from Script"
+    : "Bind to Script";
+  updateControls();
+}
+
+async function captureAssistTagScreen() {
+  const settingName = els.settingSelect.value;
+  if (!settingName || state.assistTagBusy) {
+    return;
+  }
+  state.assistTagBusy = true;
+  els.assistTagMakerStatus.textContent = "Capturing...";
+  updateControls();
+  try {
+    const payload = await api("/api/assist-tags/candidates", {
+      method: "POST",
+      body: JSON.stringify({
+        setting_name: settingName,
+        screenshot_base64: state.connected ? null : state.screenshotBase64 || null,
+        threshold: 0.85,
+      }),
+    });
+    state.assistTagCandidates = payload.candidates || [];
+    state.assistTagScreenshotBase64 = payload.screenshot_base64 || "";
+    state.assistTagCropBounds = null;
+    els.assistTagCandidate.replaceChildren(
+      ...state.assistTagCandidates.map((candidate, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = `Match ${index + 1} | ${(candidate.confidence * 100).toFixed(1)}%`;
+        return option;
+      }),
+    );
+    await loadAssistTagCanvasImage(state.assistTagScreenshotBase64);
+    updateAssistTagCropStatus();
+    els.assistTagMakerStatus.textContent = `${state.assistTagCandidates.length} supports matched`;
+  } catch (error) {
+    els.assistTagMakerStatus.textContent = "Capture failed";
+    showError(error);
+  } finally {
+    state.assistTagBusy = false;
+    updateControls();
+  }
+}
+
+function loadAssistTagCanvasImage(base64Value) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => {
+      state.assistTagImage = image;
+      els.assistTagCanvas.width = image.naturalWidth;
+      els.assistTagCanvas.height = image.naturalHeight;
+      els.assistTagCanvasEmpty.hidden = true;
+      drawAssistTagCanvas();
+      resolve();
+    }, { once: true });
+    image.addEventListener("error", () => reject(new Error("Captured screenshot could not be displayed.")), {
+      once: true,
+    });
+    image.src = `data:image/png;base64,${base64Value}`;
+  });
+}
+
+function selectedAssistTagCandidate() {
+  const index = Number.parseInt(els.assistTagCandidate.value, 10);
+  return Number.isInteger(index) ? state.assistTagCandidates[index] || null : null;
+}
+
+function assistTagCanvasPoint(event) {
+  const bounds = els.assistTagCanvas.getBoundingClientRect();
+  const x = Math.round((event.clientX - bounds.left) * els.assistTagCanvas.width / bounds.width);
+  const y = Math.round((event.clientY - bounds.top) * els.assistTagCanvas.height / bounds.height);
+  return [
+    Math.min(Math.max(x, 0), els.assistTagCanvas.width),
+    Math.min(Math.max(y, 0), els.assistTagCanvas.height),
+  ];
+}
+
+function beginAssistTagCrop(event) {
+  if (!state.assistTagImage || !selectedAssistTagCandidate() || state.assistTagBusy) {
+    return;
+  }
+  event.preventDefault();
+  const point = assistTagCanvasPoint(event);
+  state.assistTagDragStart = point;
+  state.assistTagCropBounds = [point[0], point[1], point[0], point[1]];
+  els.assistTagCanvas.setPointerCapture(event.pointerId);
+  updateAssistTagCropStatus();
+  updateControls();
+  drawAssistTagCanvas();
+}
+
+function moveAssistTagCrop(event) {
+  if (!state.assistTagDragStart) {
+    return;
+  }
+  event.preventDefault();
+  const point = assistTagCanvasPoint(event);
+  const [startX, startY] = state.assistTagDragStart;
+  state.assistTagCropBounds = [
+    Math.min(startX, point[0]),
+    Math.min(startY, point[1]),
+    Math.max(startX, point[0]),
+    Math.max(startY, point[1]),
+  ];
+  updateAssistTagCropStatus();
+  drawAssistTagCanvas();
+}
+
+function finishAssistTagCrop(event) {
+  if (!state.assistTagDragStart) {
+    return;
+  }
+  if (event.type === "pointercancel") {
+    state.assistTagCropBounds = null;
+  } else {
+    moveAssistTagCrop(event);
+  }
+  state.assistTagDragStart = null;
+  if (els.assistTagCanvas.hasPointerCapture(event.pointerId)) {
+    els.assistTagCanvas.releasePointerCapture(event.pointerId);
+  }
+  const crop = state.assistTagCropBounds;
+  if (crop && (crop[2] - crop[0] < 4 || crop[3] - crop[1] < 4)) {
+    state.assistTagCropBounds = null;
+  }
+  updateAssistTagCropStatus();
+  drawAssistTagCanvas();
+  updateControls();
+}
+
+function updateAssistTagCropStatus() {
+  const crop = state.assistTagCropBounds;
+  els.assistTagCropStatus.textContent = crop
+    ? `${crop[0]},${crop[1]} -> ${crop[2]},${crop[3]}`
+    : "Not selected";
+}
+
+function drawAssistTagCanvas() {
+  const canvas = els.assistTagCanvas;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  if (!state.assistTagImage) {
+    return;
+  }
+  context.drawImage(state.assistTagImage, 0, 0, canvas.width, canvas.height);
+  const selectedIndex = Number.parseInt(els.assistTagCandidate.value, 10);
+  state.assistTagCandidates.forEach((candidate, index) => {
+    const [x, y, width, height] = candidate.bounds;
+    const selected = index === selectedIndex;
+    context.lineWidth = selected ? 5 : 3;
+    context.strokeStyle = selected ? "#36d399" : "#f6c344";
+    context.strokeRect(x, y, width, height);
+    context.font = "700 22px sans-serif";
+    context.textBaseline = "top";
+    const label = String(index + 1);
+    const labelWidth = context.measureText(label).width + 14;
+    context.fillStyle = selected ? "#147a54" : "#755600";
+    context.fillRect(x, Math.max(y - 30, 0), labelWidth, 28);
+    context.fillStyle = "#ffffff";
+    context.fillText(label, x + 7, Math.max(y - 28, 2));
+  });
+  const candidate = selectedAssistTagCandidate();
+  if (candidate) {
+    const [anchorX, anchorY] = candidate.anchor;
+    context.strokeStyle = "#36d399";
+    context.lineWidth = 3;
+    context.beginPath();
+    context.moveTo(anchorX - 12, anchorY);
+    context.lineTo(anchorX + 12, anchorY);
+    context.moveTo(anchorX, anchorY - 12);
+    context.lineTo(anchorX, anchorY + 12);
+    context.stroke();
+  }
+  if (state.assistTagCropBounds) {
+    const [left, top, right, bottom] = state.assistTagCropBounds;
+    context.fillStyle = "rgba(36, 104, 213, 0.18)";
+    context.fillRect(left, top, right - left, bottom - top);
+    context.strokeStyle = "#5aa7ff";
+    context.lineWidth = 4;
+    context.strokeRect(left, top, right - left, bottom - top);
+  }
+}
+
+async function saveAssistTag() {
+  const candidate = selectedAssistTagCandidate();
+  const crop = state.assistTagCropBounds;
+  const label = els.assistTagLabel.value.trim();
+  const threshold = readNumber(els.assistTagThreshold);
+  if (!candidate || !crop || !label || state.assistTagBusy) {
+    return;
+  }
+  state.assistTagBusy = true;
+  els.assistTagMakerStatus.textContent = "Saving...";
+  updateControls();
+  const request = {
+    screenshot_base64: state.assistTagScreenshotBase64,
+    anchor: candidate.anchor,
+    bounds: crop,
+    label,
+    threshold,
+    overwrite: false,
+  };
+  try {
+    let tag;
+    try {
+      tag = await api("/api/assist-tags", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    } catch (error) {
+      const conflict = error?.payload?.error?.code === "data_file_conflict";
+      if (!conflict || !window.confirm("Replace the existing assist tag?")) {
+        throw error;
+      }
+      tag = await api("/api/assist-tags", {
+        method: "POST",
+        body: JSON.stringify({ ...request, overwrite: true }),
+      });
+    }
+    await Promise.all([loadAssistTags(tag.name), loadTemplates()]);
+    els.assistTagMakerStatus.textContent = `Saved ${assistTagDisplayName(tag.name)}`;
+  } catch (error) {
+    els.assistTagMakerStatus.textContent = "Save failed";
+    showError(error);
+  } finally {
+    state.assistTagBusy = false;
+    updateControls();
+  }
+}
+
+async function importAssistTag() {
+  const file = els.assistTagFile.files[0];
+  if (!file || state.assistTagBusy) {
+    return;
+  }
+  state.assistTagBusy = true;
+  els.assistTagLibraryStatus.textContent = "Importing...";
+  updateControls();
+  try {
+    const request = {
+      name: file.name,
+      image_base64: await blobToDataUrl(file),
+      overwrite: false,
+    };
+    let tag;
+    try {
+      tag = await api("/api/assist-tags/import", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    } catch (error) {
+      const conflict = error?.payload?.error?.code === "data_file_conflict";
+      if (!conflict || !window.confirm(`Replace ${file.name}?`)) {
+        throw error;
+      }
+      tag = await api("/api/assist-tags/import", {
+        method: "POST",
+        body: JSON.stringify({ ...request, overwrite: true }),
+      });
+    }
+    els.assistTagFile.value = "";
+    await Promise.all([loadAssistTags(tag.name), loadTemplates()]);
+    els.assistTagLibraryStatus.textContent = `Imported ${assistTagDisplayName(tag.name)}`;
+  } catch (error) {
+    els.assistTagLibraryStatus.textContent = "Import failed";
+    showError(error);
+  } finally {
+    state.assistTagBusy = false;
+    updateControls();
+  }
+}
+
+async function toggleAssistTagBinding() {
+  const tag = selectedAssistTag();
+  const settingName = els.settingSelect.value;
+  if (!tag || !settingName || state.assistTagBusy) {
+    return;
+  }
+  state.assistTagBusy = true;
+  updateControls();
+  try {
+    const detail = await api(`/api/settings/${encodeURIComponent(settingName)}`);
+    const config = detail.config;
+    const current = Array.isArray(config.assistTags) ? config.assistTags : [];
+    const bound = current.some((path) => assistTagConfigName(path) === tag.name);
+    const assistTags = current.filter((path) => assistTagConfigName(path) !== tag.name);
+    if (!bound) {
+      assistTags.push(tag.template_path);
+    }
+    config.assistTags = assistTags;
+    await api(`/api/settings/${encodeURIComponent(settingName)}`, {
+      method: "PUT",
+      body: JSON.stringify({ config, overwrite: true }),
+    });
+    await loadSettings(settingName);
+    renderSelectedAssistTag();
+    els.assistTagLibraryStatus.textContent = bound ? "Unbound from script" : "Bound to script";
+  } catch (error) {
+    els.assistTagLibraryStatus.textContent = "Script update failed";
+    showError(error);
+  } finally {
+    state.assistTagBusy = false;
+    updateControls();
+  }
+}
+
+async function deleteAssistTag() {
+  const tag = selectedAssistTag();
+  if (!tag || state.assistTagBusy || !window.confirm(`Delete ${assistTagDisplayName(tag.name)}?`)) {
+    return;
+  }
+  state.assistTagBusy = true;
+  updateControls();
+  try {
+    await api(`/api/assist-tags/${encodeURIComponent(tag.name)}`, { method: "DELETE" });
+    await Promise.all([loadAssistTags(), loadTemplates()]);
+    els.assistTagLibraryStatus.textContent = "Tag deleted";
+  } catch (error) {
+    els.assistTagLibraryStatus.textContent = "Delete failed";
+    showError(error);
+  } finally {
+    state.assistTagBusy = false;
+    updateControls();
+  }
 }
 
 async function openMaterialDrops() {
@@ -2095,6 +2557,12 @@ function updateControls() {
   const hasLotteryStars = selectedLotteryStars().length > 0;
   const equipTemplate = selectedEquipTemplate();
   const equipCandidate = selectedEquipCandidate();
+  const assistTag = selectedAssistTag();
+  const assistTagCandidate = selectedAssistTagCandidate();
+  const assistTagThreshold = Number(els.assistTagThreshold.value);
+  const validAssistTagThreshold = Number.isFinite(assistTagThreshold)
+    && assistTagThreshold > 0
+    && assistTagThreshold < 1;
   const hasEquipImage = Boolean(
     els.equipFullImage.files[0]
       || els.equipNonFullImage.files[0]
@@ -2200,6 +2668,29 @@ function updateControls() {
   els.archiveEquipTemplate.disabled = state.equipTemplateBusy
     || !equipTemplate
     || equipTemplate.location === "archive";
+  els.captureAssistTagScreen.disabled = state.assistTagBusy
+    || !els.settingSelect.value
+    || (!state.connected && !state.screenshotBase64);
+  els.assistTagCandidate.disabled = state.assistTagBusy
+    || !state.assistTagCandidates.length;
+  els.assistTagLabel.disabled = state.assistTagBusy;
+  els.assistTagThreshold.disabled = state.assistTagBusy;
+  els.saveAssistTag.disabled = state.assistTagBusy
+    || Boolean(state.assistTagDragStart)
+    || !assistTagCandidate
+    || !state.assistTagCropBounds
+    || !els.assistTagLabel.value.trim()
+    || !validAssistTagThreshold;
+  els.assistTagList.disabled = state.assistTagBusy || !state.assistTags.length;
+  els.assistTagFile.disabled = state.assistTagBusy;
+  els.importAssistTag.disabled = state.assistTagBusy || !els.assistTagFile.files[0];
+  els.bindAssistTag.disabled = state.assistTagBusy
+    || !assistTag
+    || !els.settingSelect.value;
+  els.bindAssistTag.textContent = isAssistTagBound(assistTag)
+    ? "Unbind from Script"
+    : "Bind to Script";
+  els.deleteAssistTag.disabled = state.assistTagBusy || !assistTag;
 }
 
 function mergeDevice(device) {
