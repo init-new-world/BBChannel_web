@@ -1700,9 +1700,17 @@ def test_execute_battle_job_runs_skill_and_command_phase(
     ]
 
 
+def test_hakuno_needs_exclude_unavailable_cards():
+    cards = [{"code": "1A", "available": False}, {"code": "2B", "available": True}]
+    assert not _matches_hakuno_needs(cards, [["1A", "2B"]])
+    assert _matches_hakuno_needs(cards, [["2B"]])
+
+
+@pytest.mark.parametrize("blocked", [False, True])
 def test_execute_battle_job_recognizes_and_selects_strategy_cards(
     tmp_path: Path,
     monkeypatch,
+    blocked,
 ):
     assets = tmp_path / "assets"
     data = tmp_path / "data"
@@ -1731,6 +1739,9 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(
         3: pattern(48, 48, (70, 40, 150), 15),
     }
     _write_image(assets / "battle" / "CH" / "attack.png", attack)
+    blocker = pattern(20, 30, (20, 220, 240), 6)
+    _write_image(assets / "battle" / "CH" / "freeze.png", blocker)
+    _write_image(assets / "battle" / "CH" / "bjfy.png", pattern(22, 28, (210, 40, 150), 9))
     for name, image in colors.items():
         _write_image(assets / "battle" / "CH" / f"{name}.png", image)
     for position, image in portraits.items():
@@ -1765,12 +1776,14 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(
         3,
         axis=2,
     )
+    if blocked:
+        command_frame[479:509, 1212:1232] = blocker[:, :, :3]
 
     expectations = [
         (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
         (command_frame, {"type": "tap", "x": 500, "y": 110}),
         (command_frame, {"type": "tap", "x": 650, "y": 500}),
-        (command_frame, {"type": "tap", "x": 1175, "y": 500}),
+        (command_frame, {"type": "tap", "x": 150 if blocked else 1175, "y": 500}),
         (command_frame, None),
     ]
     frames = []
@@ -1794,7 +1807,7 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(
     strategy = {
         "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
         "card2": {"type": 1, "cards": ["1A"], "criticalStar": 5, "more_or_less": True},
-        "card3": {"type": 1, "cards": ["2B"], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 1, "cards": ["2B", "1B"], "criticalStar": 0, "more_or_less": True},
         "breakpoint": [False, False],
         "colorFirst": True,
     }
@@ -1858,5 +1871,5 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(
         "attack",
         "np_1",
         "face_card_3",
-        "face_card_5",
+        "face_card_1" if blocked else "face_card_5",
     ]

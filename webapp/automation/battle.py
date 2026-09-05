@@ -260,6 +260,7 @@ def _matches_hakuno_needs(
         card["code"]
         for card in cards
         if isinstance(card.get("code"), str)
+        and card.get("available") is not False
     )
     return any(
         all(available[code] >= count for code, count in Counter(need).items())

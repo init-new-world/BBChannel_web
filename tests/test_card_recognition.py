@@ -23,7 +23,8 @@ def _png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
+@pytest.mark.parametrize("blocked,obscured", [(None, False), ("freeze", False), ("bjfy", False), ("freeze", True)])
+def test_command_card_recognizer_classifies_five_slots(tmp_path: Path, blocked, obscured):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"
     data = tmp_path / "data"
@@ -36,6 +37,12 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
         "Quick": _pattern((34, 20), (40, 190, 80), 12),
     }
     for name, template in colors.items():
+        template.save(assets / "battle" / "CH" / f"{name}.png")
+    blockers = {
+        "freeze": _pattern((20, 30), (220, 200, 30), 4),
+        "bjfy": _pattern((22, 28), (150, 40, 210), 11),
+    }
+    for name, template in blockers.items():
         template.save(assets / "battle" / "CH" / f"{name}.png")
 
     star_directory = assets / "battle" / "public" / "starNum"
@@ -72,14 +79,17 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
     star_rois = ((73, 353), (329, 353), (584, 353), (841, 353), (1101, 353))
     for slot, ((position, color), stars) in enumerate(zip(expected, expected_stars, strict=True)):
         x = slot * 256
-        screenshot.paste(colors[color_names[color]], (x + 20, 420), colors[color_names[color]])
-        portrait = servant_templates[position]
-        screenshot.paste(portrait, (x + 100, 500), portrait)
+        if not (obscured and slot == 1):
+            screenshot.paste(colors[color_names[color]], (x + 20, 420), colors[color_names[color]])
+            portrait = servant_templates[position]
+            screenshot.paste(portrait, (x + 100, 500), portrait)
         if stars:
             template_number = 0 if stars == 10 else stars
             screenshot.paste(star_templates[template_number].convert("RGB"), star_rois[slot])
         if slot == 1:
             screenshot.paste(special_template, (x + 180, 620), special_template)
+            if blocked:
+                screenshot.paste(blockers[blocked], (441, 479), blockers[blocked])
 
     resources = ResourceService(assets, data)
     result = CommandCardRecognizer(
@@ -104,8 +114,11 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
     )
 
     assert result["complete"] is True
-    assert result["recognized_count"] == 5
-    assert [card["code"] for card in result["cards"]] == ["1B", "2A", "3Q", "1A", "2B"]
+    assert result["recognized_count"] == (4 if blocked else 5)
+    assert [card["code"] for card in result["cards"]] == ["1B", None if blocked else "2A", "3Q", "1A", "2B"]
+    assert [card["available"] for card in result["cards"]] == [True, not bool(blocked), True, True, True]
+    assert result["available_count"] == (4 if blocked else 5)
+    assert result["cards"][1]["blocked_reason"] == ({"freeze": "immobilized", "bjfy": "sealed"}.get(blocked))
     assert [card["slot"] for card in result["cards"]] == [1, 2, 3, 4, 5]
     assert [card["stars"] for card in result["cards"]] == expected_stars
     assert [card["special_keys"] for card in result["cards"]] == [
@@ -121,5 +134,5 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path):
         for card in result["cards"]
         if card["stars"]
     )
-    assert all(card["color_confidence"] >= 0.99 for card in result["cards"])
-    assert all(card["servant_confidence"] >= 0.99 for card in result["cards"])
+    assert all(card["color_confidence"] >= 0.99 for card in result["cards"] if card["code"])
+    assert all(card["servant_confidence"] >= 0.99 for card in result["cards"] if card["code"])

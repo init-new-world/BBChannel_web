@@ -26,6 +26,24 @@ def _spec(card_type: int, cards: list, stars: int = 0, more: bool = True) -> dic
     }
 
 
+def test_strategy_and_no_chain_skip_unavailable_face_cards():
+    cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q"), _card(4, "1A"), _card(5, "2B")]
+    cards[0]["available"] = False
+    strategy = {"card1": _spec(0, [1]), "card2": _spec(1, ["1B", "2A"]), "card3": _spec(2, [])}
+    selected = select_command_cards([strategy], cards)
+    assert [entry["slot"] for entry in selected if entry["type"] == "face"] == [2, 3]
+    selected = select_command_cards_without_chain(cards, preselected_np=1)
+    assert [entry["slot"] for entry in selected if entry["type"] == "face"] == [2, 3]
+
+
+def test_strategy_rejects_unavailable_special_key_candidates():
+    cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q")]
+    cards[0].update({"available": False, "special_keys": ["S0"]})
+    strategy = {"card1": _spec(1, ["S0"]), "card2": _spec(2, []), "card3": _spec(2, [])}
+    with pytest.raises(StrategySelectionError, match="no matching"):
+        select_command_cards([strategy], cards)
+
+
 def test_strategy_selects_np_and_preferred_face_cards_without_duplicates():
     strategy = {
         "card1": _spec(0, [1]),

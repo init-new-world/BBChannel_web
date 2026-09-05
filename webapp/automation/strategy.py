@@ -24,6 +24,7 @@ def select_command_cards_without_chain(
             and isinstance(card.get("servant_position"), int)
             and card.get("color") in {"A", "B", "Q"}
             and isinstance(card.get("code"), str)
+            and card.get("available") is not False
         ),
         key=lambda card: int(card["slot"]),
     )
@@ -75,7 +76,7 @@ def _select_strategy(
     recognized_cards: list[dict[str, Any]],
     preselected_nps: list[int],
 ) -> list[dict[str, Any]]:
-    cards = [card for card in recognized_cards if card.get("code")]
+    cards = [card for card in recognized_cards if card.get("code") and card.get("available") is not False]
     selected = [
         {"type": "np", "servant": servant}
         for servant in preselected_nps

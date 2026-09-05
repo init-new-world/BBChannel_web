@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
+
+from PIL import Image, ImageStat
 
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
 
 CARD_SLOT_ROIS = tuple((slot * 256, 340, 256, 330) for slot in range(5))
+CARD_STATUS_ROIS = tuple(
+    (round((left + 210) / 1.5), 473, 53, 60)
+    for left in (60, 444, 826, 1212, 1601)
+)
+CARD_BLOCK_TEMPLATES = {"immobilized": "freeze.png", "sealed": "bjfy.png"}
 STAR_SLOT_ROIS = (
     (73, 353, 47, 50),
     (329, 353, 47, 50),
@@ -71,6 +79,13 @@ class CommandCardRecognizer:
         candidates: list[dict[str, object]] = []
         candidate_meta: list[tuple[str, int, Any]] = []
         for slot_index, roi in enumerate(CARD_SLOT_ROIS):
+            for reason, filename in CARD_BLOCK_TEMPLATES.items():
+                candidates.append({
+                    "template_path": f"battle/{normalized_server}/{filename}",
+                    "threshold": max(0.85, threshold), "roi": CARD_STATUS_ROIS[slot_index],
+                    "scales": CARD_TEMPLATE_SCALES,
+                })
+                candidate_meta.append(("blocked", slot_index, reason))
             for color, filename in COLOR_TEMPLATES.items():
                 candidates.append(
                     {
@@ -138,27 +153,36 @@ class CommandCardRecognizer:
 
         matches = self._recognition.match_templates(screenshot, candidates)
         grouped: list[dict[str, list[tuple[Any, Any]]]] = [
-            {"color": [], "servant": [], "star": [], "special": []}
+            {"color": [], "servant": [], "star": [], "special": [], "blocked": []}
             for _ in CARD_SLOT_ROIS
         ]
         for meta, match in zip(candidate_meta, matches, strict=True):
             kind, slot_index, value = meta
             grouped[slot_index][kind].append((value, match))
 
+        with Image.open(BytesIO(screenshot)) as source:
+            status_image = source.convert("RGB")
         cards = []
         for slot_index, groups in enumerate(grouped):
             color_value, color_match = _best_match(groups["color"])
             servant_value, servant_match = _best_match(groups["servant"])
             star_value, star_match = _best_match(groups["star"])
+            blocked_reason, blocked_match = _best_match([
+                (reason, match) for reason, match in groups["blocked"]
+                if match.matched and _has_status_contrast(status_image, match)
+            ])
             special_matches = [
                 (value, match)
                 for value, match in groups["special"]
                 if match.matched
             ]
-            recognized = color_match is not None and servant_match is not None
+            recognized = color_match is not None and servant_match is not None and blocked_match is None
             cards.append(
                 {
                     "slot": slot_index + 1,
+                    "available": recognized,
+                    "blocked_reason": blocked_reason if blocked_match is not None else None,
+                    "blocked_confidence": blocked_match.confidence if blocked_match is not None else None,
                     "code": (
                         f"{servant_value['position']}{color_value}" if recognized else None
                     ),
@@ -197,11 +221,13 @@ class CommandCardRecognizer:
             )
 
         recognized_count = sum(card["code"] is not None for card in cards)
+        blocked_count = sum(card["blocked_reason"] is not None for card in cards)
         return {
             "server": normalized_server,
             "cards": cards,
             "recognized_count": recognized_count,
-            "complete": recognized_count == len(CARD_SLOT_ROIS),
+            "available_count": sum(card["available"] for card in cards),
+            "complete": recognized_count + blocked_count == len(CARD_SLOT_ROIS),
         }
 
 
@@ -210,3 +236,11 @@ def _best_match(candidates: list[tuple[Any, Any]]) -> tuple[Any, Any | None]:
     if not matched:
         return None, None
     return max(matched, key=lambda item: item[1].confidence)
+
+
+def _has_status_contrast(image: Image.Image, match: Any) -> bool:
+    # Masked text correlation can score a featureless background surprisingly high.
+    left, top = match.top_left
+    width, height = match.size
+    region = image.crop((left, top, left + width, top + height))
+    return max(ImageStat.Stat(region).stddev) >= 8
