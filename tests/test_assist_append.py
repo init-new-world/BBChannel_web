@@ -81,7 +81,8 @@ def test_append_check_rejects_main_view_and_clipped_support_row(append_recognize
 @pytest.mark.parametrize("initial_view", ["main", "append"])
 @pytest.mark.parametrize("matching", [True, False])
 @pytest.mark.parametrize("row_shift", [0, 25])
-def test_assist_handler_filters_append_levels_and_restores_main_view(initial_view, matching, row_shift):
+@pytest.mark.parametrize("substitute", [False, True])
+def test_assist_handler_filters_append_levels_and_restores_main_view(initial_view, matching, row_shift, substitute):
     state = {"view": initial_view}
     taps = []
     checked = []
@@ -90,7 +91,7 @@ def test_assist_handler_filters_append_levels_and_restores_main_view(initial_vie
 
     class Device:
         def snapshot(self):
-            return state["view"].encode()
+            return ("main-restored" if state["view"] == "main" and checked else state["view"]).encode()
 
         def tap(self, x, y):
             taps.append((x, y))
@@ -109,11 +110,16 @@ def test_assist_handler_filters_append_levels_and_restores_main_view(initial_vie
         match_no_assist = match_reconnect
 
         def match_skill_view(self, screenshot, server):
-            return {"view": screenshot.decode()}
+            return {"view": screenshot.decode().split("-")[0]}
+
+        def candidate_identity(self, screenshot, candidate):
+            if substitute and screenshot == b"main-restored" and candidate["anchor"][1] == 450:
+                return "replacement-player"
+            return f"player-{candidate['anchor'][1]}"
 
         def recognize(self, screenshot, assist, *, server):
             nonlocal recognition_count
-            assert screenshot == b"main"
+            assert screenshot in (b"main", b"main-restored")
             recognition_count += 1
             found = candidates if recognition_count == 1 else [
                 {**candidate, "anchor": [100, candidate["anchor"][1] + row_shift]}
@@ -135,7 +141,7 @@ def test_assist_handler_filters_append_levels_and_restores_main_view(initial_vie
     context = SimpleNamespace(checkpoint=lambda *_a, **_k: None, emit=lambda *_a, **_k: None, sleep=lambda _s: None)
     handler = create_assist_handler(script_data, Device(), Recognizer())
     payload = {"setting_name": "demo", "max_scrolls": 0, "max_refreshes": 0}
-    if matching and not row_shift:
+    if matching and not row_shift and not substitute:
         result = handler(context, payload)
         assert result["selected"]["anchor"] == [100, 450]
         assert result["selected"]["checks"]["append_skill_levels"] == [None, 10, None, None, None]
@@ -146,6 +152,42 @@ def test_assist_handler_filters_append_levels_and_restores_main_view(initial_vie
         assert state["view"] == "main"
         assert all(point == (847, 130) for point in taps)
     assert checked == [[100, 200], [100, 450]]
+
+
+def test_append_filter_refreshes_a_positively_recognized_empty_list():
+    refresh_checks = []
+    script_data = SimpleNamespace(get_setting_plan=lambda _name: {
+        "server": "CH", "run": {}, "assist": {"all_not_skip": True, "append_skill_levels": [0, 10, 0]},
+    })
+    device = SimpleNamespace(snapshot=lambda: b"empty", tap=lambda *_args: pytest.fail("unexpected tap"))
+    def check_refresh(*_args):
+        refresh_checks.append(True)
+        return SimpleNamespace(matched=False)
+    recognizer = SimpleNamespace(
+        match_reconnect=lambda *_args: SimpleNamespace(matched=False),
+        match_no_assist=lambda *_args: SimpleNamespace(matched=True),
+        match_skill_view=lambda *_args: pytest.fail("empty list has no skill view"),
+        recognize=lambda *_args, **_kwargs: pytest.fail("empty list has no candidates"),
+        match_refresh_button=check_refresh,
+    )
+    context = SimpleNamespace(checkpoint=lambda *_a, **_k: None, emit=lambda *_a, **_k: None, sleep=lambda _s: None)
+    with pytest.raises(RuntimeError, match="refresh button"):
+        create_assist_handler(script_data, device, recognizer)(context, {"setting_name": "demo", "max_refreshes": 1})
+    assert refresh_checks == [True]
+
+
+def test_support_identity_excludes_skill_digits_but_includes_player_name(append_recognizer):
+    recognizer, _templates = append_recognizer
+    main = Image.new("RGB", (1280, 720), (20, 25, 35))
+    ImageDraw.Draw(main).text((1080, 150), "Player B", fill="white")
+    append = main.copy()
+    ImageDraw.Draw(append).rectangle((820, 240, 1020, 300), fill="cyan")
+    changed_player = append.copy()
+    ImageDraw.Draw(changed_player).rectangle((1080, 150, 1160, 170), fill="red")
+    candidate = {"anchor": [100, 200]}
+    original = recognizer.candidate_identity(_png(main), candidate)
+    assert recognizer.candidate_identity(_png(append), candidate) == original
+    assert recognizer.candidate_identity(_png(changed_player), candidate) != original
 
 
 @pytest.mark.parametrize("view", [None, "append"])

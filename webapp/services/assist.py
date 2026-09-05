@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+from io import BytesIO
 from typing import Any
+
+from PIL import Image
 
 from webapp.core.errors import AppError
 from webapp.services.recognition import RecognitionService
@@ -880,6 +884,26 @@ class AssistRecognizer:
         matched = [match for match in matches if match.matched]
         best = max(matched, key=lambda match: match.confidence) if matched else None
         return best if best is not None and best.template_path == paths[special_filter] else None
+
+    @staticmethod
+    def candidate_identity(screenshot: bytes, candidate: dict[str, Any]) -> str:
+        with Image.open(BytesIO(screenshot)) as source:
+            image = source.convert("RGB")
+        scale = min(image.width / 1280, image.height / 720)
+        anchor_y = candidate["anchor"][1]
+        top = max(0, round(anchor_y - 100 * scale))
+        middle = min(image.height, round(anchor_y + 20 * scale))
+        bottom = min(image.height, round(anchor_y + 110 * scale))
+        # Exclude the changing skill panel, retaining player/name and row evidence.
+        regions = (
+            (0, top, image.width, middle),
+            (0, middle, round(760 * scale), bottom),
+            (round(1080 * scale), middle, image.width, bottom),
+        )
+        digest = hashlib.sha256(str(image.size).encode("ascii"))
+        for region in regions:
+            digest.update(image.crop(region).tobytes())
+        return digest.hexdigest()
 
     def match_skill_view(
         self, screenshot: bytes, server: str, *, anchor: list[int] | None = None,

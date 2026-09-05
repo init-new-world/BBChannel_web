@@ -324,18 +324,32 @@ def create_assist_handler(
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
             screenshot = snapshot_without_reconnect()
-            if check_append:
-                screenshot = ensure_skill_view("main", screenshot)
-            recognition = assist_recognizer.recognize(
-                screenshot,
-                plan["assist"],
-                server=plan["server"],
-            )
+            empty_match = _optional_assist_match(
+                assist_recognizer, "match_no_assist", screenshot, plan["server"],
+            ) if check_append else None
+            if empty_match is not None and empty_match.matched:
+                recognition = {"candidate_count": 0, "candidates": [], "servant_name": plan["assist"].get("servant_name")}
+            else:
+                if check_append:
+                    screenshot = ensure_skill_view("main", screenshot)
+                recognition = assist_recognizer.recognize(
+                    screenshot,
+                    plan["assist"],
+                    server=plan["server"],
+                )
             if check_append and recognition["candidates"]:
+                identities = [
+                    assist_recognizer.candidate_identity(screenshot, candidate)
+                    for candidate in recognition["candidates"]
+                ]
                 screenshot = ensure_skill_view("append", screenshot)
                 accepted = []
-                for candidate in recognition["candidates"]:
+                for candidate, identity in zip(recognition["candidates"], identities, strict=True):
                     context.checkpoint("recognize_append_skills", progress=progress)
+                    if assist_recognizer.candidate_identity(screenshot, candidate) != identity:
+                        context.emit("recognition", "Support row changed during skill display transition.",
+                                     data={"role": "assist_identity_changed", "anchor": candidate["anchor"]})
+                        continue
                     result = assist_recognizer.check_append_skills(
                         screenshot, candidate, append_levels, server=plan["server"],
                     )
@@ -344,13 +358,15 @@ def create_assist_handler(
                         data={"role": "assist_append_skills", "anchor": candidate["anchor"], **result},
                     )
                     if result["matched"]:
-                        accepted.append((candidate, result))
+                        accepted.append((candidate, result, identity))
                 screenshot = ensure_skill_view("main", screenshot)
                 restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
                 candidates = []
                 for candidate in restored["candidates"]:
-                    previous = next((result for original, result in accepted if
-                        original.get("template_path") == candidate.get("template_path")
+                    identity = assist_recognizer.candidate_identity(screenshot, candidate)
+                    previous = next((result for original, result, original_identity in accepted if
+                        identity == original_identity
+                        and original.get("template_path") == candidate.get("template_path")
                         and all(abs(before - after) <= 6 for before, after in zip(
                             original["anchor"], candidate["anchor"], strict=True,
                         ))
