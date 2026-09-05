@@ -164,3 +164,47 @@ def test_tag_maker_creates_and_binds_a_crop_at_each_viewport(tag_console, width,
     assert page.request.get(f"{url}/api/assist-tags").json()["tags"][0]["threshold"] == 0.805
     assert errors == []
     page.close()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_full_run_sends_assist_filter_and_enables_stuck_restart_limit(tag_console, width, height):
+    browser, url, directory = tag_console
+    page = browser.new_page(viewport={"width": width, "height": height})
+    page.set_default_timeout(10000)
+    config = page.request.get(f"{url}/api/settings/demo").json()["config"]
+    config.update({"round1_turns": 1, "stuckRestart": True, "gameCrushRestart": False})
+    assert page.request.put(f"{url}/api/settings/demo", data={
+        "config": config, "overwrite": True,
+    }).ok
+    page.goto(url)
+    playwright.expect(page.locator("#start-full-run")).to_be_enabled()
+    playwright.expect(page.locator("#full-run-restart-limit")).to_be_enabled()
+    requests = []
+
+    def capture_job(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        requests.append(route.request.post_data_json)
+        route.fulfill(status=409, json={"error": {"message": "Captured test job"}})
+
+    page.route("**/api/jobs", capture_job)
+    for special_filter in ("arts", "olga"):
+        page.locator("#full-run-assist-filter").select_option(special_filter)
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/api/jobs")):
+            page.locator("#start-full-run").click()
+        assert requests[-1]["payload"]["assist"] == {"special_filter": special_filter}
+    page.locator("#full-run-assist-filter").scroll_into_view_if_needed()
+    assert page.locator("#full-run-assist-filter").bounding_box()["width"] >= 220
+    page.screenshot(path=str(directory / f"run-filter-{width}.png"))
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    config["assistMode"] = "仅礼装"
+    assert page.request.put(f"{url}/api/settings/demo", data={
+        "config": config, "overwrite": True,
+    }).ok
+    page.locator("#refresh-settings").click()
+    playwright.expect(page.locator("#full-run-assist-filter")).to_be_disabled()
+    with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/api/jobs")):
+        page.locator("#start-full-run").click()
+    assert requests[-1]["payload"]["assist"] == {"special_filter": "any"}
+    page.close()

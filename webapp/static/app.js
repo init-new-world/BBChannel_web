@@ -119,6 +119,7 @@ const els = {
   fullRunMapSwipes: document.querySelector("#full-run-map-swipes"),
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
+  fullRunAssistFilter: document.querySelector("#full-run-assist-filter"),
   startFullRun: document.querySelector("#start-full-run"),
   restartGame: document.querySelector("#restart-game"),
   inspectChocolate: document.querySelector("#inspect-chocolate"),
@@ -1846,6 +1847,9 @@ async function startFullRun() {
     entry: {
       max_map_swipes: readNumber(els.fullRunMapSwipes),
     },
+    assist: {
+      special_filter: els.fullRunAssistFilter.disabled ? "any" : els.fullRunAssistFilter.value,
+    },
     prepare: {
       apple: els.fullRunApple.value,
       team_check_mode: els.fullRunTeamCheck.value,
@@ -2633,7 +2637,10 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsExpball
     || hasRunningJob;
-  els.fullRunRestartLimit.disabled = !state.selectedSettingPlan?.run?.game_crash_restart;
+  els.fullRunRestartLimit.disabled = !(state.selectedSettingPlan?.run?.game_crash_restart
+    || state.selectedSettingPlan?.run?.stuck_restart);
+  els.fullRunAssistFilter.disabled = !state.selectedSettingPlan
+    || ["不识别", "仅礼装", "冠位助战仅礼装"].includes(state.selectedSettingPlan.assist?.mode);
   els.fullRunMapSwipes.disabled = !["free_quest", "main_story"].includes(
     els.fullRunEntryMode.value,
   );

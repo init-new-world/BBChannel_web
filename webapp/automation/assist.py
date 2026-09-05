@@ -10,7 +10,7 @@ from webapp.automation.interaction import (
 )
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
-from webapp.services.assist import AssistRecognizer
+from webapp.services.assist import AssistRecognizer, validate_assist_special_filter
 from webapp.services.devices import DeviceService
 from webapp.services.script_data import ScriptDataService
 
@@ -53,6 +53,11 @@ def create_assist_handler(
         plan = script_data.get_setting_plan(setting_name.strip())
         if not plan.get("validation", {"ok": True})["ok"]:
             raise ValueError(f"Setting {setting_name.strip()} has validation errors.")
+        special_filter = validate_assist_special_filter(
+            payload.get("special_filter", "any"), plan["assist"].get("mode"),
+        )
+        if special_filter != "any":
+            plan["assist"] = {**plan["assist"], "special_filter": special_filter}
         tap_wait_seconds = payload.get("tap_wait_seconds", 0.5)
         if (
             isinstance(tap_wait_seconds, bool)

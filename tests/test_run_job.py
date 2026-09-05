@@ -72,6 +72,23 @@ def test_full_run_rejects_invalid_script_before_starting_a_stage():
     assert calls == []
 
 
+@pytest.mark.parametrize("special_filter,mode", [("unknown", "仅从者"), ("arts", "仅礼装")])
+def test_full_run_validates_assist_filter_before_any_stage(special_filter, mode):
+    class ScriptData:
+        def get_setting_plan(self, name):
+            return {"run": {}, "assist": {"mode": mode}}
+
+    calls = []
+
+    def stage(*args):
+        calls.append(args)
+
+    handler = create_full_run_handler(ScriptData(), stage, stage, stage, stage)
+    with pytest.raises(ValueError, match="special_filter"):
+        handler(_Context(), {"setting_name": "demo", "assist": {"special_filter": special_filter}})
+    assert calls == []
+
+
 def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Path):
     calls: list[tuple[str, dict]] = []
 

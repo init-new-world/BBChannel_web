@@ -249,6 +249,10 @@ select:disabled {
   font-size: 12px;
 }
 
+.input-row > select {
+  grid-column: 1 / -1;
+}
+
 .field-stack {
   display: grid;
   gap: 5px;

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from webapp.runtime import JobManager, RunContext
+from webapp.services.assist import validate_assist_special_filter
 from webapp.services.script_data import ScriptDataService
 
 
@@ -89,6 +90,10 @@ def create_full_run_handler(
                 "recovery",
             )
         }
+        validate_assist_special_filter(
+            stage_options["assist"].get("special_filter", "any"),
+            plan.get("assist", {}).get("mode"),
+        )
         drop_count = 0
         run_results: list[dict[str, Any]] = []
         stopped = False

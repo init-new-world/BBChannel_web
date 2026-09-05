@@ -120,6 +120,20 @@ def test_assist_handler_rejects_invalid_script_before_device_access(tmp_path: Pa
         handler(None, {"setting_name": "demo"})
 
 
+@pytest.mark.parametrize("special_filter,mode", [
+    ("invalid", "仅从者"), (None, "仅从者"), (True, "仅从者"),
+    ("arts", "仅礼装"), ("u_olga", "不识别"), ("olga", "冠位助战仅礼装"),
+])
+def test_assist_handler_rejects_invalid_special_filters_before_device_access(special_filter, mode):
+    class ScriptData:
+        def get_setting_plan(self, name):
+            return {"server": "CH", "assist": {"mode": mode}, "run": {}}
+
+    handler = create_assist_handler(ScriptData(), None, None)
+    with pytest.raises(ValueError, match="special_filter"):
+        handler(None, {"setting_name": "demo", "special_filter": special_filter})
+
+
 def test_assist_handler_recovers_ap_before_selecting_support():
     state = {"screen": "apple"}
     taps = []
@@ -215,7 +229,8 @@ def test_assist_handler_recovers_ap_before_selecting_support():
     assert result["selected"]["anchor"] == [70, 225]
 
 
-def test_assist_handler_uses_recognized_selection_point():
+@pytest.mark.parametrize("special_filter", ["any", "arts", "buster", "quick", "u_olga", "olga"])
+def test_assist_handler_uses_recognized_selection_point(special_filter):
     taps = []
 
     class Operation:
@@ -241,6 +256,7 @@ def test_assist_handler_uses_recognized_selection_point():
             return Match()
 
         def recognize(self, _screenshot, _assist, *, server):
+            assert _assist.get("special_filter", "any") == special_filter
             return {
                 "candidate_count": 1,
                 "servant_name": "Support",
@@ -274,7 +290,7 @@ def test_assist_handler_uses_recognized_selection_point():
 
     result = create_assist_handler(ScriptData(), Device(), Recognizer())(
         Context(),
-        {"setting_name": "demo", "tap_wait_seconds": 0},
+        {"setting_name": "demo", "tap_wait_seconds": 0, "special_filter": special_filter},
     )
 
     assert taps == [(900, 123)]

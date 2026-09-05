@@ -19,6 +19,16 @@ GRAND_BOND_TEMPLATES = {
     "初始": "UIimage/jb_normal.png",
     "NP50": "UIimage/jb_np.png",
 }
+ASSIST_SPECIAL_FILTERS = frozenset({"any", "arts", "buster", "quick", "u_olga", "olga"})
+ASSIST_NP_COLORS = {"arts": "A", "buster": "B", "quick": "Q"}
+
+
+def validate_assist_special_filter(value: Any, mode: Any) -> str:
+    if not isinstance(value, str) or value not in ASSIST_SPECIAL_FILTERS:
+        raise ValueError("special_filter must be any, arts, buster, quick, u_olga, or olga.")
+    if value != "any" and mode in {"不识别", "仅礼装", "冠位助战仅礼装"}:
+        raise ValueError("special_filter requires servant recognition.")
+    return value
 
 
 class AssistRecognizer:
@@ -39,6 +49,10 @@ class AssistRecognizer:
         threshold: float = 0.85,
     ) -> dict[str, Any]:
         mode = assist.get("mode") or "从者礼装"
+        special_filter = validate_assist_special_filter(assist.get("special_filter", "any"), mode)
+        special_image_size = (
+            self._recognition.image_size(screenshot) if special_filter != "any" else None
+        )
         if mode == "不识别":
             selection_x, selection_y = FIRST_ASSIST_SELECTION_POINT
             return {
@@ -114,12 +128,15 @@ class AssistRecognizer:
             else []
         )
         required_np_level = assist.get("np_level")
-        np_level_matches = (
-            self._np_level_matches(screenshot, server, threshold)
-            if not only_equip
+        check_np_level = (
+            not only_equip
             and isinstance(required_np_level, int)
             and not isinstance(required_np_level, bool)
             and required_np_level > 1
+        )
+        np_level_matches = (
+            self._np_level_matches(screenshot, server, threshold)
+            if check_np_level
             else []
         )
         required_servant_level = assist.get("servant_level")
@@ -247,7 +264,7 @@ class AssistRecognizer:
                         "friend_confidence": friend_match.confidence,
                     }
                 )
-            if np_level_matches:
+            if check_np_level:
                 np_level_match = self._candidate_np_level_match(
                     candidate["anchor"],
                     np_level_matches,
@@ -339,6 +356,23 @@ class AssistRecognizer:
                         ],
                     }
                 )
+            if special_filter != "any":
+                special_match = self._candidate_special_match(
+                    screenshot, candidate["anchor"], special_filter,
+                    server=server, grand_layout=grand_layout,
+                    image_size=special_image_size, threshold=threshold,
+                )
+                if special_match is None:
+                    continue
+                candidate["checks"].update({
+                    "special_filter": special_filter,
+                    "special_template": special_match.template_path,
+                    "special_confidence": special_match.confidence,
+                })
+                if special_filter in ASSIST_NP_COLORS:
+                    candidate["checks"]["np_color"] = ASSIST_NP_COLORS[special_filter]
+                else:
+                    candidate["checks"]["olga_state"] = int(special_filter == "olga")
             candidates.append(candidate)
 
         bond_equip_type = assist.get("bond_equip_type")
@@ -806,6 +840,46 @@ class AssistRecognizer:
                 )
             )
         return matches
+
+    def _candidate_special_match(
+        self,
+        screenshot: bytes,
+        anchor: list[int],
+        special_filter: str,
+        *,
+        server: str,
+        grand_layout: bool,
+        image_size: tuple[int, int],
+        threshold: float,
+    ):
+        scale = min(image_size[0] / 1920, image_size[1] / 1080)
+        width, height = 1920 * scale, 1080 * scale
+        is_color = special_filter in ASSIST_NP_COLORS
+        left_offset = 427 if grand_layout else 270
+        right_offset = left_offset + (60 if is_color else 665)
+        top_offset, bottom_offset = (20, 110) if is_color else (-30, 60)
+        # Legacy checks use the portrait center adjusted by 10/20 reference pixels.
+        left = round(anchor[0] + (left_offset + 10) * width / 1788)
+        right = round(anchor[0] + (right_offset + 10) * width / 1788)
+        top = round(anchor[1] + (top_offset + 20) * height / 1006)
+        bottom = round(anchor[1] + (bottom_offset + 20) * height / 1006)
+        if not (0 <= left < right <= image_size[0] and 0 <= top < bottom <= image_size[1]):
+            return None
+        paths = (
+            {name: f"battle/public/{name}.png" for name in ASSIST_NP_COLORS}
+            if is_color else {
+                "u_olga": f"battle/{server.upper()}/U-Olga.png",
+                "olga": f"battle/{server.upper()}/Olga.png",
+            }
+        )
+        matches = self._recognition.match_templates(screenshot, [
+            {"template_path": path, "threshold": threshold,
+             "roi": [left, top, right - left, bottom - top], "scales": [scale]}
+            for path in paths.values()
+        ])
+        matched = [match for match in matches if match.matched]
+        best = max(matched, key=lambda match: match.confidence) if matched else None
+        return best if best is not None and best.template_path == paths[special_filter] else None
 
     def _skill_level_matches(
         self,

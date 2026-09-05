@@ -36,6 +36,72 @@ def _match_result(
     )
 
 
+@pytest.mark.parametrize("mode", ["仅从者", "冠位助战"])
+@pytest.mark.parametrize("special_filter,expected", [
+    ("arts", "A"), ("buster", "B"), ("quick", "Q"),
+    ("u_olga", 0), ("olga", 1),
+])
+def test_assist_special_filter_uses_the_matching_support_row(tmp_path: Path, mode, special_filter, expected):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    (assets / "servantface").mkdir(parents=True)
+    (assets / "battle" / "public").mkdir(parents=True)
+    (assets / "battle" / "CH").mkdir()
+    portrait = Image.new("RGB", (60, 60), (50, 75, 100))
+    ImageDraw.Draw(portrait).ellipse((5, 7, 53, 51), fill=(200, 60, 160))
+    portrait.save(assets / "servantface" / "Support_1.png")
+    colors = {"arts": (20, 100, 240), "buster": (240, 50, 30), "quick": (20, 230, 50),
+              "u_olga": (180, 60, 210), "olga": (210, 150, 30)}
+    templates = {}
+    for index, (name, color) in enumerate(colors.items()):
+        template = Image.new("RGB", (30, 39), color)
+        draw = ImageDraw.Draw(template)
+        draw.rectangle((2, 2, 27, 36), outline="white", width=2)
+        draw.line((4 + index * 3, 30, 25, 5 + index * 4), fill="black", width=3)
+        path = f"battle/public/{name}.png" if index < 3 else f"battle/CH/{'U-Olga' if name == 'u_olga' else 'Olga'}.png"
+        template.save(assets / path)
+        templates[name] = template.resize((20, 26), Image.Resampling.LANCZOS)
+    screen = Image.new("RGB", (1280, 720), (20, 25, 35))
+    x = 423 if mode == "冠位助战" else 310
+    y_offset = 40 if special_filter in {"arts", "buster", "quick"} else 10
+    other = "quick" if special_filter in {"arts", "buster"} else "arts"
+    if special_filter in {"u_olga", "olga"}:
+        other = "olga" if special_filter == "u_olga" else "u_olga"
+    for y, name in ((200, other), (450, special_filter)):
+        screen.paste(portrait, (70, y - 30))
+        screen.paste(templates[name], (x, y + y_offset))
+    resources = ResourceService(assets, tmp_path / "data")
+
+    result = AssistRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screen), {"mode": mode, "servant_canonical_name": "Support",
+                             "special_filter": special_filter}, threshold=0.9,
+    )
+
+    assert result["candidate_count"] == 1
+    selected = result["candidates"][0]
+    assert selected["anchor"] == [100, 450]
+    assert selected["checks"]["special_filter"] == special_filter
+    assert selected["checks"]["np_color" if isinstance(expected, str) else "olga_state"] == expected
+
+
+def test_assist_recognizer_does_not_ignore_an_unrecognized_np_level(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    (assets / "servantface").mkdir(parents=True)
+    portrait = Image.new("RGB", (60, 60), (50, 75, 100))
+    ImageDraw.Draw(portrait).ellipse((5, 7, 53, 51), fill=(200, 60, 160))
+    portrait.save(assets / "servantface" / "Support_1.png")
+    screen = Image.new("RGB", (1280, 720), (20, 25, 35))
+    screen.paste(portrait, (70, 170))
+    resources = ResourceService(assets, tmp_path / "data")
+
+    result = AssistRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screen), {"mode": "仅从者", "servant_canonical_name": "Support", "np_level": 3},
+    )
+
+    assert result["candidate_count"] == 0
+
+
 def test_assist_recognizer_finds_all_matching_servant_faces(tmp_path: Path):
     pytest.importorskip("cv2")
     assets = tmp_path / "assets"
