@@ -28,6 +28,30 @@ def _spec(card_type: int, cards: list, stars: int = 0, more: bool = True) -> dic
     }
 
 
+@pytest.mark.parametrize("unavailable", [[1], [1, 2], [1, 2, 3]])
+def test_strategy_replaces_unavailable_nps_with_remaining_cards(unavailable):
+    cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q")]
+    strategy = {
+        "card1": _spec(0, [1, 2, 3]),
+        "card2": _spec(2, []), "card3": _spec(2, []),
+    }
+    selected = select_command_cards(
+        [strategy], cards, preselected_nps=[1], unavailable_nps=unavailable,
+    )
+    assert len(selected) == 3
+    selected_nps = [item["servant"] for item in selected if item["type"] == "np"]
+    assert selected_nps == ([next(value for value in (1, 2, 3) if value not in unavailable)]
+                            if len(unavailable) < 3 else [])
+    assert len({item["slot"] for item in selected if item["type"] == "face"}) == 3 - len(selected_nps)
+
+
+@pytest.mark.parametrize("unavailable", [[0], [4], [True], ["1"]])
+def test_strategy_rejects_invalid_unavailable_np_positions(unavailable):
+    strategy = {f"card{i}": _spec(2, []) for i in (1, 2, 3)}
+    with pytest.raises(StrategySelectionError, match="Unavailable Noble Phantasm"):
+        select_command_cards([strategy], [], unavailable_nps=unavailable)
+
+
 def test_strategy_and_no_chain_skip_unavailable_face_cards():
     cards = [_card(1, "1B"), _card(2, "2A"), _card(3, "3Q"), _card(4, "1A"), _card(5, "2B")]
     cards[0]["available"] = False

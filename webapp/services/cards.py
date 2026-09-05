@@ -12,6 +12,7 @@ CARD_STATUS_ROIS = tuple(
     (round((left + 210) / 1.5), 473, 53, 60)
     for left in CARD_ORIGIN_X
 )
+NP_STATUS_ROIS = tuple((round((693 + 347 * slot) / 1.5), 177, 53, 60) for slot in range(3))
 CARD_BLOCK_TEMPLATES = {"immobilized": "freeze.png", "sealed": "bjfy.png"}
 STAR_SLOT_ROIS = (
     (73, 353, 47, 50),
@@ -26,6 +27,37 @@ COLOR_TEMPLATES = {
     "A": "Arts.png",
     "Q": "Quick.png",
 }
+
+
+def recognize_card_blocks(
+    recognition: RecognitionService, screenshot: bytes, server: str,
+    *, threshold: float = 0.85,
+) -> dict[str, dict[int, str]]:
+    normalized_server = server.upper()
+    if normalized_server not in {"CH", "CNTW", "JP"}:
+        raise ValueError(f"Unsupported server: {server}")
+    if not 0 <= threshold <= 1:
+        raise ValueError("threshold must be between 0 and 1.")
+    candidates = []
+    metadata = []
+    for kind, rois in (("nps", NP_STATUS_ROIS), ("faces", CARD_STATUS_ROIS)):
+        for slot, roi in enumerate(rois, start=1):
+            for reason, filename in CARD_BLOCK_TEMPLATES.items():
+                candidates.append({
+                    "template_path": f"battle/{normalized_server}/{filename}",
+                    "threshold": max(0.85, threshold), "roi": roi,
+                    "scales": CARD_TEMPLATE_SCALES, "centered_mask": True,
+                })
+                metadata.append((kind, slot, reason))
+    result: dict[str, dict[int, str]] = {"nps": {}, "faces": {}}
+    confidences = {}
+    for (kind, slot, reason), match in zip(
+        metadata, recognition.match_templates(screenshot, candidates), strict=True,
+    ):
+        if match.matched and match.confidence > confidences.get((kind, slot), -1):
+            result[kind][slot] = reason
+            confidences[kind, slot] = match.confidence
+    return result
 
 
 class CommandCardRecognizer:

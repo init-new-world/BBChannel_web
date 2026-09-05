@@ -17,6 +17,34 @@ def _png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+@pytest.mark.parametrize("server", ["CH", "JP", "CNTW"])
+@pytest.mark.parametrize("status", [None, "freeze", "bjfy"])
+def test_np_status_templates_only_match_the_blocked_np(server, status):
+    cv = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    from webapp.services import cards
+    from webapp.services.recognition import RecognitionService
+
+    resources = ResourceService(PROJECT_ROOT / "assets", PROJECT_ROOT / "data")
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    with Image.open(resources.resolve_template("commands_JP/100300/card_servant_1.png")) as source:
+        portrait = source.convert("RGBA")
+    for slot in range(3):
+        screenshot.paste(portrait, (round((483 + 347 * slot) * 2 / 3), 60), portrait)
+    if status:
+        with Image.open(resources.resolve_template(f"battle/{server}/{status}.png")) as source:
+            template = source.convert("RGBA")
+        scaled = Image.fromarray(cv.resize(
+            np.asarray(template), (round(template.width * 2 / 3), round(template.height * 2 / 3)),
+            interpolation=cv.INTER_AREA,
+        ))
+        screenshot.paste(scaled, (697, 181), scaled)
+        screenshot.paste(scaled, (184, 477), scaled)
+    report = cards.recognize_card_blocks(RecognitionService(resources), _png_bytes(screenshot), server)
+    reason = {"freeze": "immobilized", "bjfy": "sealed"}.get(status)
+    assert report == {"nps": {2: reason} if status else {}, "faces": {1: reason} if status else {}}
+
+
 def test_real_lfs_template_indexes_matches_and_renders_debug_overlay():
     pytest.importorskip("cv2")
     from webapp.services.recognition import RecognitionService

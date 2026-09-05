@@ -55,9 +55,16 @@ def select_command_cards(
     recognized_cards: list[dict[str, Any]],
     *,
     preselected_nps: list[int] | None = None,
+    unavailable_nps: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     if not strategies:
         raise StrategySelectionError("No command card strategies are configured.")
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3
+        for value in unavailable_nps or []
+    ):
+        raise StrategySelectionError("Unavailable Noble Phantasm positions must be between 1 and 3.")
+    unavailable = set(unavailable_nps or [])
     errors = []
     for index, strategy in enumerate(strategies, start=1):
         try:
@@ -65,6 +72,7 @@ def select_command_cards(
                 strategy,
                 recognized_cards,
                 preselected_nps or [],
+                unavailable,
             )
         except StrategySelectionError as exc:
             errors.append(f"strategy {index}: {exc}")
@@ -75,6 +83,7 @@ def _select_strategy(
     strategy: dict[str, Any],
     recognized_cards: list[dict[str, Any]],
     preselected_nps: list[int],
+    unavailable_nps: set[int],
 ) -> list[dict[str, Any]]:
     cards = [card for card in recognized_cards if card.get("code") and card.get("available") is not False]
     breakpoints = strategy.get("breakpoint", [False, False])
@@ -91,6 +100,8 @@ def _select_strategy(
     selected_nps = {selection["servant"] for selection in selected}
     if len(selected_nps) != len(selected):
         raise StrategySelectionError("Preselected Noble Phantasms must not contain duplicates.")
+    selected = [item for item in selected if item["servant"] not in unavailable_nps]
+    selected_nps -= unavailable_nps
     color_first = bool(strategy.get("colorFirst", True))
 
     def choose(
@@ -107,7 +118,7 @@ def _select_strategy(
             raise StrategySelectionError(f"{card_name} is missing.")
         card_type = spec.get("type")
         if card_type == 0:
-            servant = _select_np(spec, nps)
+            servant = _select_np(spec, nps, unavailable_nps)
             if servant is None:
                 return choose(spec_index + 1, chosen, slots, nps, servants)
             return choose(
@@ -148,15 +159,23 @@ def _select_strategy(
     return result
 
 
-def _select_np(spec: dict[str, Any], selected_nps: set[int]) -> int | None:
+def _select_np(
+    spec: dict[str, Any], selected_nps: set[int], unavailable_nps: set[int],
+) -> int | None:
     candidates = spec.get("cards")
     if not isinstance(candidates, list):
         raise StrategySelectionError("NP card candidates must be a list.")
+    has_valid_candidate = False
     for servant in candidates:
         if isinstance(servant, int) and not isinstance(servant, bool) and 1 <= servant <= 3:
+            has_valid_candidate = True
+            if servant in unavailable_nps:
+                continue
             if servant in selected_nps:
                 return None
             return servant
+    if has_valid_candidate:
+        return None
     raise StrategySelectionError("NP strategy has no valid servant position.")
 
 
