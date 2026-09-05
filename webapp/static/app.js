@@ -70,6 +70,10 @@ const els = {
   presetJson: document.querySelector("#preset-json"),
   presetAssistSkills: document.querySelector("#preset-assist-skills"),
   presetSkillInputs: [...document.querySelectorAll("[data-assist-skill-index]")],
+  presetStrategyRules: document.querySelector("#preset-strategy-rules"),
+  presetStrategyEntry: document.querySelector("#preset-strategy-entry"),
+  presetStrategyBreakpoints: [...document.querySelectorAll("[data-strategy-breakpoint]")],
+  presetStrategyColorFirst: document.querySelector("#preset-strategy-color-first"),
   presetError: document.querySelector("#preset-error"),
   closePreset: document.querySelector("#close-preset"),
   cancelPreset: document.querySelector("#cancel-preset"),
@@ -284,8 +288,17 @@ function bindEvents() {
   els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
   els.presetForm.addEventListener("submit", savePreset);
-  els.presetJson.addEventListener("input", renderPresetSkills);
+  els.presetJson.addEventListener("input", renderPresetFields);
   els.presetSkillInputs.forEach((input) => input.addEventListener("change", updatePresetSkills));
+  els.presetStrategyEntry.addEventListener("change", () => {
+    if (state.presetEditor?.kind === "strategies") {
+      state.presetEditor.strategyIndex = Number(els.presetStrategyEntry.value);
+      renderPresetStrategyRules();
+    }
+  });
+  [...els.presetStrategyBreakpoints, els.presetStrategyColorFirst].forEach((input) => {
+    input.addEventListener("change", updatePresetStrategyRule);
+  });
   els.closePreset.addEventListener("click", closePresetEditor);
   els.cancelPreset.addEventListener("click", closePresetEditor);
   els.snapshotButton.addEventListener("click", captureScreenshot);
@@ -1478,12 +1491,13 @@ async function openPresetEditor(kind, editing) {
     state.presetEditor = {
       kind,
       originalName: editing ? selectedName : "",
+      strategyIndex: 0,
     };
     els.presetDialogTitle.textContent = `${editing ? "Edit" : "New"} ${isSetting ? "Script" : "Strategy"}`;
     els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
     els.presetJson.value = JSON.stringify(value, null, 2);
-    renderPresetSkills();
+    renderPresetFields();
     setPresetError("");
     els.presetName.focus();
   } catch (error) {
@@ -1506,7 +1520,7 @@ async function handleSettingImport() {
     els.presetDialogTitle.textContent = "Import Script";
     els.presetName.value = proposedName;
     els.presetJson.value = JSON.stringify(value, null, 2);
-    renderPresetSkills();
+    renderPresetFields();
     setPresetError("");
     els.presetDialog.showModal();
     els.presetName.focus();
@@ -1544,6 +1558,78 @@ function closePresetEditor() {
   els.presetDialog.close();
   state.presetEditor = null;
   setPresetError("");
+}
+
+function renderPresetFields() {
+  renderPresetSkills();
+  renderPresetStrategyRules();
+}
+
+function renderPresetStrategyRules() {
+  const editor = state.presetEditor;
+  const isStrategy = editor?.kind === "strategies";
+  els.presetStrategyRules.hidden = !isStrategy;
+  els.presetStrategyRules.disabled = true;
+  if (!isStrategy) {
+    return;
+  }
+  els.presetStrategyEntry.replaceChildren();
+  let entries;
+  try {
+    entries = JSON.parse(els.presetJson.value);
+  } catch (_error) {
+    return;
+  }
+  if (!Array.isArray(entries) || !entries.length) {
+    const option = document.createElement("option");
+    option.textContent = "No strategy entries";
+    els.presetStrategyEntry.append(option);
+    return;
+  }
+  const selectedIndex = Math.min(Math.max(editor.strategyIndex || 0, 0), entries.length - 1);
+  editor.strategyIndex = selectedIndex;
+  els.presetStrategyEntry.replaceChildren(...entries.map((entry, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = `${index + 1}. ${entry?.tag || "Untitled"}`;
+    return option;
+  }));
+  els.presetStrategyEntry.value = String(selectedIndex);
+  els.presetStrategyRules.disabled = false;
+  const strategy = entries[selectedIndex]?.strategy;
+  const validStrategy = strategy && typeof strategy === "object" && !Array.isArray(strategy);
+  const breakpoints = validStrategy ? strategy.breakpoint : null;
+  const validBreakpoints = Array.isArray(breakpoints) && breakpoints.length === 2
+    && breakpoints.every((value) => typeof value === "boolean");
+  els.presetStrategyBreakpoints.forEach((input, index) => {
+    input.disabled = !validBreakpoints;
+    input.checked = validBreakpoints && breakpoints[index];
+  });
+  els.presetStrategyColorFirst.disabled = !validStrategy || (
+    strategy.colorFirst !== undefined && typeof strategy.colorFirst !== "boolean"
+  );
+  els.presetStrategyColorFirst.checked = validStrategy && strategy.colorFirst !== false;
+}
+
+function updatePresetStrategyRule(event) {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "strategies" || els.presetStrategyRules.disabled || event.target.disabled) {
+    return;
+  }
+  try {
+    const entries = JSON.parse(els.presetJson.value);
+    const strategy = entries[editor.strategyIndex].strategy;
+    if (event.target === els.presetStrategyColorFirst) {
+      strategy.colorFirst = event.target.checked;
+    } else {
+      strategy.breakpoint[Number(event.target.dataset.strategyBreakpoint)] = event.target.checked;
+    }
+    els.presetJson.value = JSON.stringify(entries, null, 2);
+    renderPresetStrategyRules();
+    setPresetError("");
+  } catch (error) {
+    setPresetError(`Invalid JSON: ${error.message}`);
+  }
 }
 
 function renderPresetSkills() {

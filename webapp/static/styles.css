@@ -785,7 +785,8 @@ select:disabled {
   flex-shrink: 0;
 }
 
-.preset-assist-skills {
+.preset-assist-skills,
+.preset-strategy-rules {
   min-width: 0;
   margin: 0;
   padding: 10px 0 12px;
@@ -793,11 +794,27 @@ select:disabled {
   border-bottom: 1px solid var(--line);
 }
 
-.preset-assist-skills legend {
+.preset-assist-skills legend,
+.preset-strategy-rules legend {
   padding: 0;
   font-size: 12px;
   font-weight: 700;
   color: var(--muted);
+}
+
+.preset-strategy-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.preset-strategy-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.preset-strategy-toggles input {
+  flex: 0 0 16px;
 }
 
 .preset-skill-groups {

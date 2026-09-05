@@ -269,6 +269,80 @@ def test_skill_controls_handle_invalid_json_and_cntw_limits(tag_console):
     page.close()
 
 
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 600)])
+def test_strategy_rule_controls_sync_selected_entry_and_preserve_json(tag_console, width, height):
+    browser, url, directory = tag_console
+    page = browser.new_page(viewport={"width": width, "height": height})
+    page.set_default_timeout(10000)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    rule = {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 2, "cards": [], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, True], "colorFirst": True, "custom": {"keep": "first"},
+    }
+    entries = [{"tag": "First", "strategy": rule}, {
+        "tag": "Second", "strategy": {**rule, "breakpoint": [True, False], "custom": {"keep": "second"}},
+    }]
+    assert page.request.put(f"{url}/api/strategies/rules", data={"entries": entries}).ok
+    page.goto(url)
+    page.locator("#strategy-select").select_option("rules")
+    page.locator("#edit-strategy").click()
+    controls = page.locator("#preset-strategy-rules")
+    playwright.expect(controls).to_be_visible()
+    original_json = page.locator("#preset-json").input_value()
+    entry = page.locator("#preset-strategy-entry")
+    first = page.locator('[data-strategy-breakpoint="0"]')
+    second = page.locator('[data-strategy-breakpoint="1"]')
+    color_first = page.locator("#preset-strategy-color-first")
+    playwright.expect(first).not_to_be_checked()
+    playwright.expect(second).to_be_checked()
+    entry.select_option("1")
+    assert page.locator("#preset-json").input_value() == original_json
+    playwright.expect(first).to_be_checked()
+    playwright.expect(second).not_to_be_checked()
+    second.check()
+    color_first.uncheck()
+    updated = json.loads(page.locator("#preset-json").input_value())
+    assert updated[0] == entries[0]
+    assert updated[1]["strategy"] == {**entries[1]["strategy"], "breakpoint": [True, True], "colorFirst": False}
+    updated[1]["strategy"]["breakpoint"] = [False, True]
+    page.locator("#preset-json").fill(json.dumps(updated))
+    playwright.expect(first).not_to_be_checked()
+    controls.scroll_into_view_if_needed()
+    assert page.locator("#preset-dialog").evaluate("element => element.scrollWidth <= element.clientWidth")
+    assert entry.bounding_box()["width"] >= 220
+    page.screenshot(path=str(directory / f"strategy-rules-{width}.png"))
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    assert page.request.get(f"{url}/api/strategies/rules").json()["entries"] == updated
+    page.locator("#edit-setting").click()
+    playwright.expect(controls).not_to_be_visible()
+    assert errors == []
+    page.close()
+
+
+def test_strategy_rule_controls_disable_for_invalid_or_empty_json(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.set_default_timeout(10000)
+    page.goto(url)
+    page.locator("#new-strategy").click()
+    controls = page.locator("#preset-strategy-rules")
+    playwright.expect(controls).to_be_visible()
+    playwright.expect(page.locator("#preset-strategy-entry")).to_be_disabled()
+    playwright.expect(page.locator("#preset-strategy-color-first")).to_be_disabled()
+    page.locator("#preset-json").fill("{")
+    playwright.expect(page.locator("#preset-strategy-entry")).to_be_disabled()
+    playwright.expect(page.locator('[data-strategy-breakpoint="0"]')).to_be_disabled()
+    page.locator("#preset-json").fill(json.dumps([{"tag": "Broken", "strategy": None}]))
+    playwright.expect(page.locator("#preset-strategy-entry")).to_be_enabled()
+    playwright.expect(page.locator('[data-strategy-breakpoint="0"]')).to_be_disabled()
+    playwright.expect(page.locator("#preset-strategy-color-first")).to_be_disabled()
+    page.close()
+
+
 @pytest.mark.parametrize("failure", ["image", "request"])
 def test_tag_capture_failure_clears_old_image_and_can_be_retried(tag_console, failure):
     browser, url, _directory = tag_console

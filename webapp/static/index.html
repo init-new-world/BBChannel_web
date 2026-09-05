@@ -386,6 +386,20 @@
             </div>
           </div>
         </fieldset>
+        <fieldset id="preset-strategy-rules" class="preset-strategy-rules" hidden>
+          <legend>Strategy Rules</legend>
+          <div class="preset-strategy-fields">
+            <label class="field-stack">
+              <span>Entry</span>
+              <select id="preset-strategy-entry" class="field" aria-label="Strategy entry"></select>
+            </label>
+            <div class="preset-strategy-toggles">
+              <label class="toggle-row"><input data-strategy-breakpoint="0" type="checkbox"><span>Break after card 1</span></label>
+              <label class="toggle-row"><input data-strategy-breakpoint="1" type="checkbox"><span>Break after card 2</span></label>
+              <label class="toggle-row"><input id="preset-strategy-color-first" type="checkbox"><span>Card preference first</span></label>
+            </div>
+          </div>
+        </fieldset>
         <label class="field-stack preset-json-field">
           <span>JSON</span>
           <textarea id="preset-json" class="field preset-json" spellcheck="false" required></textarea>
