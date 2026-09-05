@@ -208,3 +208,62 @@ def test_full_run_sends_assist_filter_and_enables_stuck_restart_limit(tag_consol
         page.locator("#start-full-run").click()
     assert requests[-1]["payload"]["assist"] == {"special_filter": "any"}
     page.close()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 600)])
+def test_script_skill_controls_sync_with_json_and_preserve_other_fields(tag_console, width, height):
+    browser, url, directory = tag_console
+    page = browser.new_page(viewport={"width": width, "height": height})
+    page.set_default_timeout(10000)
+    config = page.request.get(f"{url}/api/settings/demo").json()["config"]
+    config.update({"skillsLevel": [1, 2, 3, 0, 8, 0, 7, 9], "custom": {"unchanged": True}})
+    assert page.request.put(f"{url}/api/settings/demo", data={"config": config, "overwrite": True}).ok
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    skills = page.locator("#preset-assist-skills")
+    playwright.expect(skills).to_be_visible()
+    fields = page.locator("[data-assist-skill-index]")
+    playwright.expect(fields.nth(4)).to_have_value("8")
+    fields.nth(4).fill("10")
+    fields.nth(4).press("Tab")
+    edited = json.loads(page.locator("#preset-json").input_value())
+    assert edited["skillsLevel"] == [1, 2, 3, 0, 10, 0, 7, 9]
+    assert edited["custom"] == {"unchanged": True}
+    edited["skillsLevel"] = [8, 8, 8, 5, 5, 5, 0, 0]
+    page.locator("#preset-json").fill(json.dumps(edited))
+    playwright.expect(fields.nth(0)).to_have_value("8")
+    playwright.expect(fields.nth(7)).to_have_value("0")
+    fields.nth(7).fill("2")
+    fields.nth(7).press("Tab")
+    page.locator("#preset-assist-skills").scroll_into_view_if_needed()
+    assert page.locator("#preset-dialog").evaluate("element => element.scrollWidth <= element.clientWidth")
+    page.screenshot(path=str(directory / f"skill-editor-{width}.png"))
+    with page.expect_response(lambda response: response.request.method == "PUT" and "/api/settings/demo" in response.url):
+        page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    saved = page.request.get(f"{url}/api/settings/demo").json()["config"]
+    assert saved["skillsLevel"] == [8, 8, 8, 5, 5, 5, 0, 2]
+    assert saved["custom"] == {"unchanged": True}
+    page.close()
+
+
+def test_skill_controls_handle_invalid_json_and_cntw_limits(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.set_default_timeout(10000)
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    fields = page.locator("[data-assist-skill-index]")
+    page.locator("#preset-json").fill("{")
+    playwright.expect(fields.first).to_be_disabled()
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-error")).to_contain_text("Invalid JSON")
+    page.locator("#preset-json").fill(json.dumps({"server": "CNTW", "skillsLevel": [0, 0, 0, 1, 2, 3, 0, 0]}))
+    playwright.expect(fields.nth(5)).to_have_value("3")
+    playwright.expect(fields.nth(5)).to_be_enabled()
+    playwright.expect(fields.nth(6)).to_be_disabled()
+    playwright.expect(fields.nth(7)).to_be_disabled()
+    page.locator("#cancel-preset").click()
+    page.locator("#new-strategy").click()
+    playwright.expect(page.locator("#preset-assist-skills")).not_to_be_visible()
+    page.close()

@@ -68,6 +68,8 @@ const els = {
   presetDialogTitle: document.querySelector("#preset-dialog-title"),
   presetName: document.querySelector("#preset-name"),
   presetJson: document.querySelector("#preset-json"),
+  presetAssistSkills: document.querySelector("#preset-assist-skills"),
+  presetSkillInputs: [...document.querySelectorAll("[data-assist-skill-index]")],
   presetError: document.querySelector("#preset-error"),
   closePreset: document.querySelector("#close-preset"),
   cancelPreset: document.querySelector("#cancel-preset"),
@@ -282,6 +284,8 @@ function bindEvents() {
   els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
   els.presetForm.addEventListener("submit", savePreset);
+  els.presetJson.addEventListener("input", renderPresetSkills);
+  els.presetSkillInputs.forEach((input) => input.addEventListener("change", updatePresetSkills));
   els.closePreset.addEventListener("click", closePresetEditor);
   els.cancelPreset.addEventListener("click", closePresetEditor);
   els.snapshotButton.addEventListener("click", captureScreenshot);
@@ -1471,6 +1475,7 @@ async function openPresetEditor(kind, editing) {
     els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
     els.presetJson.value = JSON.stringify(value, null, 2);
+    renderPresetSkills();
     setPresetError("");
     els.presetName.focus();
   } catch (error) {
@@ -1493,6 +1498,7 @@ async function handleSettingImport() {
     els.presetDialogTitle.textContent = "Import Script";
     els.presetName.value = proposedName;
     els.presetJson.value = JSON.stringify(value, null, 2);
+    renderPresetSkills();
     setPresetError("");
     els.presetDialog.showModal();
     els.presetName.focus();
@@ -1530,6 +1536,55 @@ function closePresetEditor() {
   els.presetDialog.close();
   state.presetEditor = null;
   setPresetError("");
+}
+
+function renderPresetSkills() {
+  const isSetting = state.presetEditor?.kind === "settings";
+  els.presetAssistSkills.hidden = !isSetting;
+  els.presetAssistSkills.disabled = true;
+  if (!isSetting) {
+    return;
+  }
+  let config;
+  try {
+    config = JSON.parse(els.presetJson.value);
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      return;
+    }
+  } catch (_error) {
+    return;
+  }
+  const levels = Array.isArray(config.skillsLevel) ? config.skillsLevel : [];
+  const isCntw = String(config.server).toUpperCase() === "CNTW";
+  els.presetAssistSkills.disabled = false;
+  els.presetSkillInputs.forEach((input, index) => {
+    const level = levels[index] ?? 0;
+    const unsupported = isCntw && index >= 6;
+    input.value = Number.isInteger(level) && level >= 0 && level <= 10 ? String(level) : "";
+    input.max = unsupported ? "0" : "10";
+    input.disabled = unsupported && level === 0;
+    input.title = unsupported ? "Not available on CNTW" : "Minimum level; 0 means any level";
+  });
+}
+
+function updatePresetSkills() {
+  if (state.presetEditor?.kind !== "settings" || els.presetAssistSkills.disabled) {
+    return;
+  }
+  const levels = els.presetSkillInputs.map((input) => input.valueAsNumber);
+  if (els.presetSkillInputs.some((input) => !input.validity.valid)) {
+    setPresetError("Skill levels must be integers from 0 to 10 within the server's supported slots.");
+    return;
+  }
+  try {
+    const config = JSON.parse(els.presetJson.value);
+    config.skillsLevel = levels;
+    els.presetJson.value = JSON.stringify(config, null, 2);
+    renderPresetSkills();
+    setPresetError("");
+  } catch (error) {
+    setPresetError(`Invalid JSON: ${error.message}`);
+  }
 }
 
 async function savePreset(event) {

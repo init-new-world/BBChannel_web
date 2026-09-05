@@ -369,6 +369,23 @@
           <span>Name</span>
           <input id="preset-name" class="field" type="text" autocomplete="off" required>
         </label>
+        <fieldset id="preset-assist-skills" class="preset-assist-skills" hidden>
+          <legend>Assist Skill Levels</legend>
+          <div class="preset-skill-groups">
+            <div class="preset-skill-group main-skill-group">
+              <label><span>Main 1</span><input class="field" data-assist-skill-index="0" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+              <label><span>Main 2</span><input class="field" data-assist-skill-index="1" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+              <label><span>Main 3</span><input class="field" data-assist-skill-index="2" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+            </div>
+            <div class="preset-skill-group append-skill-group">
+              <label><span>Append 1</span><input class="field" data-assist-skill-index="3" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+              <label><span>Append 2</span><input class="field" data-assist-skill-index="4" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+              <label><span>Append 3</span><input class="field" data-assist-skill-index="5" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+              <label><span>Append 4</span><input class="field" data-assist-skill-index="6" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+              <label><span>Append 5</span><input class="field" data-assist-skill-index="7" type="number" min="0" max="10" step="1" value="0" required title="Minimum level; 0 means any level"></label>
+            </div>
+          </div>
+        </fieldset>
         <label class="field-stack preset-json-field">
           <span>JSON</span>
           <textarea id="preset-json" class="field preset-json" spellcheck="false" required></textarea>

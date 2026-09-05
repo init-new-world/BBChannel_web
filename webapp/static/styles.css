@@ -774,10 +774,70 @@ select:disabled {
 
 .preset-form {
   height: 100%;
-  display: grid;
-  grid-template-rows: auto auto minmax(180px, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   padding: 16px;
+  overflow: auto;
+}
+
+.preset-form > * {
+  flex-shrink: 0;
+}
+
+.preset-assist-skills {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.preset-assist-skills legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.preset-skill-groups {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 5fr);
+  gap: 16px;
+}
+
+.preset-skill-group {
+  display: grid;
+  gap: 6px;
+}
+
+.main-skill-group {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.append-skill-group {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.preset-skill-group label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.preset-skill-group input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+}
+
+@media (max-width: 650px) {
+  .preset-skill-groups {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
 }
 
 .preset-dialog-header,
@@ -796,7 +856,8 @@ select:disabled {
 }
 
 .preset-json-field {
-  min-height: 0;
+  flex: 1 0 210px;
+  min-height: 210px;
   grid-template-rows: auto minmax(0, 1fr);
 }
 
