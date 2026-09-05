@@ -132,6 +132,12 @@ def test_tag_maker_creates_and_binds_a_crop_at_each_viewport(tag_console, width,
     playwright.expect(page.locator("#assist-tag-library-status")).to_have_text("Bound to script")
     detail = page.request.get(f"{url}/api/settings/demo").json()
     assert detail["config"]["assistTags"] == [tag["template_path"]]
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#delete-assist-tag").click()
+    playwright.expect(page.locator("#assist-tag-library-status")).to_contain_text(
+        "still referenced by scripts: demo"
+    )
+    assert len(page.request.get(f"{url}/api/assist-tags").json()["tags"]) == 1
     page.locator("#bind-assist-tag").click()
     playwright.expect(page.locator("#assist-tag-library-status")).to_have_text("Unbound from script")
     assert page.request.get(f"{url}/api/settings/demo").json()["config"]["assistTags"] == []
@@ -139,5 +145,22 @@ def test_tag_maker_creates_and_binds_a_crop_at_each_viewport(tag_console, width,
     page.screenshot(path=str(directory / f"tag-maker-{width}.png"))
     assert page.locator(".assist-tag-form").evaluate("e => e.scrollWidth <= e.clientWidth")
     assert canvas.evaluate("e => Array.from(e.getContext('2d').getImageData(250, 120, 100, 40).data).some(v => v > 100)")
+    preview = page.request.get(f"{url}/api/assist-tags/{tag['name']}/image").body()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#delete-assist-tag").click()
+    playwright.expect(page.locator("#assist-tag-library-status")).to_have_text("Tag deleted")
+    assert page.request.get(f"{url}/api/assist-tags").json()["tags"] == []
+    page.locator("#assist-tag-file").set_input_files({
+        "name": "invalid.png", "mimeType": "image/png", "buffer": preview,
+    })
+    page.locator("#import-assist-tag").click()
+    playwright.expect(page.locator("#assist-tag-library-status")).to_contain_text("Assist tag filename")
+    playwright.expect(page.locator("#import-assist-tag")).to_be_enabled()
+    page.locator("#assist-tag-file").set_input_files({
+        "name": tag["name"], "mimeType": "image/png", "buffer": preview,
+    })
+    page.locator("#import-assist-tag").click()
+    playwright.expect(page.locator("#assist-tag-library-status")).to_have_text("Imported Custom")
+    assert page.request.get(f"{url}/api/assist-tags").json()["tags"][0]["threshold"] == 0.805
     assert errors == []
     page.close()

@@ -51,6 +51,8 @@ def create_assist_handler(
         if not isinstance(setting_name, str) or not setting_name.strip():
             raise ValueError("setting_name must be a non-empty string.")
         plan = script_data.get_setting_plan(setting_name.strip())
+        if not plan.get("validation", {"ok": True})["ok"]:
+            raise ValueError(f"Setting {setting_name.strip()} has validation errors.")
         tap_wait_seconds = payload.get("tap_wait_seconds", 0.5)
         if (
             isinstance(tap_wait_seconds, bool)

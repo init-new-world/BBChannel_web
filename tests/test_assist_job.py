@@ -108,6 +108,18 @@ def test_assist_handler_rejects_invalid_configured_swipe_interval():
         handler(None, {"setting_name": "demo"})
 
 
+def test_assist_handler_rejects_invalid_script_before_device_access(tmp_path: Path):
+    (tmp_path / "settings").mkdir()
+    (tmp_path / "servant_info_CH.json").write_text("{}")
+    (tmp_path / "settings" / "demo.json").write_text(json.dumps({
+        "server": "CH", "assistTags": ["broken.png"],
+    }))
+    handler = create_assist_handler(ScriptDataService(tmp_path), None, None)
+
+    with pytest.raises(ValueError, match="validation"):
+        handler(None, {"setting_name": "demo"})
+
+
 def test_assist_handler_recovers_ap_before_selecting_support():
     state = {"screen": "apple"}
     taps = []

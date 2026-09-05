@@ -212,7 +212,7 @@ def create_app(
     lottery_recognizer = LotteryRecognizer(resources, recognition)
     material_drops = MaterialDropService(resources.data_dir)
     notebook = NotebookService(resources.data_dir)
-    script_data = ScriptDataService(resources.data_dir)
+    script_data = ScriptDataService(resources.data_dir, resources=resources)
     owns_job_manager = job_manager is None
     if job_manager is None:
         default_db_path = os.environ.get(
@@ -616,6 +616,13 @@ def create_app(
 
     @app.delete("/api/assist-tags/{name}")
     def delete_assist_tag(name: str) -> dict[str, object]:
+        references = script_data.find_assist_tag_references(name)
+        if references:
+            raise AppError(
+                ErrorCode.DATA_FILE_CONFLICT,
+                f"Assist tag is still referenced by scripts: {', '.join(references)}",
+                {"name": name, "settings": references},
+            )
         return assist_tags.delete(name)
 
     @app.get("/api/equip-templates")

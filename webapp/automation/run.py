@@ -57,7 +57,10 @@ def create_full_run_handler(
             raise ValueError("max_restarts must be between 0 and 20.")
 
         normalized_name = setting_name.strip()
-        run_options = script_data.get_setting_plan(normalized_name)["run"]
+        plan = script_data.get_setting_plan(normalized_name)
+        if not plan.get("validation", {"ok": True})["ok"]:
+            raise ValueError(f"Setting {normalized_name} has validation errors.")
+        run_options = plan["run"]
         interval_before_fight = _configured_interval(
             run_options.get("interval_before_fight", 0),
             "interval_before_fight",

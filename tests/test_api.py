@@ -595,6 +595,76 @@ def test_assist_tag_routes_build_preview_list_and_delete(tmp_path: Path):
     assert client.get("/api/assist-tags").json() == {"tags": []}
 
 
+def test_assist_tag_cannot_be_deleted_while_referenced_by_a_script(tmp_path: Path):
+    from io import BytesIO
+    from urllib.parse import quote
+    from PIL import Image
+
+    client = _client(tmp_path)
+    image = BytesIO()
+    Image.new("RGB", (20, 20), "blue").save(image, format="PNG")
+    name = "[Bound]W1280H720DXL0DXR20DYT0DYB20CON8.png"
+    client.app.state.assist_tags.import_image(name, image.getvalue())
+    _write_json(tmp_path / "data" / "servant_info_CH.json", {})
+    for script, path in (("first", f"assist/assist_tags/{name}"), ("legacy", f"D:\\old\\{name}")):
+        _write_json(tmp_path / "data" / "settings" / f"{script}.json", {
+            "server": "CH", "assistTags": [path],
+        })
+
+    response = client.delete(f"/api/assist-tags/{quote(name, safe='')}")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "data_file_conflict"
+    assert response.json()["error"]["details"]["settings"] == ["first", "legacy"]
+    assert len(client.get("/api/assist-tags").json()["tags"]) == 1
+    for script in ("first", "legacy"):
+        response = client.put(f"/api/settings/{script}", json={
+            "config": {"server": "CH", "assistTags": []}, "overwrite": True,
+        })
+        assert response.status_code == 200
+    assert client.delete(f"/api/assist-tags/{quote(name, safe='')}").status_code == 200
+
+
+@pytest.mark.parametrize("tag,code", [
+    ("broken.png", "invalid_assist_tags"),
+    ("[Missing]W1280H720DXL0DXR20DYT0DYB20CON8.png", "missing_assist_tag"),
+])
+def test_setting_program_reports_invalid_assist_tags_without_server_error(tmp_path: Path, tag, code):
+    client = _client(tmp_path)
+    _write_json(tmp_path / "data" / "servant_info_CH.json", {})
+    _write_json(tmp_path / "data" / "settings" / "invalid-tag.json", {
+        "server": "CH", "assistTags": [tag],
+        "round1_turns": 1, "round1_turn1_skill": "1",
+    })
+
+    response = client.get("/api/settings/invalid-tag/program")
+
+    assert response.status_code == 200
+    program = response.json()
+    assert program["validation"]["ok"] is False
+    assert code in {error["code"] for error in program["validation"]["errors"]}
+    assert program["execution"]["battle"]["ready"] is False
+
+
+def test_setting_rejects_tag_image_with_wrong_dimensions(tmp_path: Path):
+    from PIL import Image
+
+    client = _client(tmp_path)
+    name = "[Wrong]W1280H720DXL0DXR20DYT0DYB20CON8.png"
+    directory = tmp_path / "assets" / "assist" / "assist_tags"
+    directory.mkdir(parents=True)
+    Image.new("RGB", (19, 20), "blue").save(directory / name)
+    _write_json(tmp_path / "data" / "servant_info_CH.json", {})
+
+    response = client.put("/api/settings/wrong-size", json={
+        "config": {"server": "CH", "assistTags": [name]},
+    })
+
+    assert response.status_code == 400
+    errors = response.json()["error"]["details"]["validation"]["errors"]
+    assert errors[0]["code"] == "invalid_assist_tag_image"
+
+
 def test_equip_template_test_route_reports_precise_limit_break_match(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

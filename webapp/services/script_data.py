@@ -10,6 +10,7 @@ from typing import Any
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.services.assist_tags import parse_assist_tag_filename
+from webapp.services.resources import ResourceService
 
 
 VALID_SERVERS = {"CH", "CNTW", "JP"}
@@ -24,10 +25,11 @@ SPECIAL_KEY_NAME_RE = re.compile(
 
 
 class ScriptDataService:
-    def __init__(self, data_dir: Path | str) -> None:
+    def __init__(self, data_dir: Path | str, *, resources: ResourceService | None = None) -> None:
         self.data_dir = Path(data_dir).resolve()
         self.settings_dir = self.data_dir / "settings"
         self.strategy_dir = self.data_dir / "strategy"
+        self._resources = resources
 
     def list_settings(self) -> list[dict[str, str]]:
         return self._list_named_json(self.settings_dir, "settings")
@@ -83,6 +85,28 @@ class ScriptDataService:
 
     def delete_setting(self, name: str) -> dict[str, Any]:
         return self._delete_named_json(self.settings_dir, name, "settings")
+
+    def find_assist_tag_references(self, tag_name: str) -> list[str]:
+        references = []
+        for setting in self.list_settings():
+            try:
+                path = self._resolve_named_json(self.settings_dir, setting["name"], "settings")
+                config = self._load_json(path)
+            except AppError as exc:
+                raise AppError(
+                    ErrorCode.DATA_FILE_CONFLICT,
+                    f"Cannot verify tag references in unreadable script: {setting['name']}",
+                    {"settings": [setting["name"]]},
+                ) from exc
+            tags = config.get("assistTags") if isinstance(config, dict) else None
+            if isinstance(tags, str):
+                tags = [tags]
+            if isinstance(tags, list) and any(
+                isinstance(tag, str) and tag.strip().replace("\\", "/").rsplit("/", 1)[-1] == tag_name
+                for tag in tags
+            ):
+                references.append(setting["name"])
+        return references
 
     def get_setting_plan(self, name: str) -> dict[str, Any]:
         detail = self.get_setting(name)
@@ -339,7 +363,7 @@ class ScriptDataService:
                 )
 
         try:
-            self._plan_assist_tags(config.get("assistTags"))
+            tags = self._plan_assist_tags(config.get("assistTags"))
         except ValueError as exc:
             errors.append(
                 self._issue(
@@ -348,6 +372,27 @@ class ScriptDataService:
                     str(exc),
                 )
             )
+        else:
+            if self._resources is not None:
+                for index, tag in enumerate(tags):
+                    field = f"assistTags[{index}]"
+                    try:
+                        image = self._resources.template_metadata(tag["template_path"])
+                    except AppError as exc:
+                        code = (
+                            "missing_assist_tag"
+                            if exc.code == ErrorCode.TEMPLATE_NOT_FOUND
+                            else "invalid_assist_tag_image"
+                        )
+                        errors.append(self._issue(code, field, exc.message))
+                        continue
+                    if (image["width"], image["height"]) != (
+                        tag["right"] - tag["left"], tag["bottom"] - tag["top"],
+                    ):
+                        errors.append(self._issue(
+                            "invalid_assist_tag_image", field,
+                            f"Assist tag dimensions do not match filename metadata: {tag['template_name']}",
+                        ))
 
         return {"ok": not errors, "errors": errors, "warnings": warnings}
 
@@ -475,7 +520,11 @@ class ScriptDataService:
                 break
 
         equip_names = self._assist_equip_names(config.get("assistEquip"))
-        tags = self._plan_assist_tags(config.get("assistTags"))
+        try:
+            tags = self._plan_assist_tags(config.get("assistTags"))
+        except ValueError:
+            # Validation retains the error and execution rejects this plan.
+            tags = []
 
         skill_levels = config.get("skillsLevel")
         return {

@@ -54,6 +54,24 @@ class _Context:
         self.trace.append(("sleep", seconds))
 
 
+def test_full_run_rejects_invalid_script_before_starting_a_stage():
+    class InvalidScript:
+        def get_setting_plan(self, name):
+            return {"run": {}, "validation": {"ok": False, "errors": [
+                {"code": "missing_assist_tag", "message": "Missing tag"},
+            ]}}
+
+    calls = []
+
+    def stage(*args):
+        calls.append(args)
+
+    handler = create_full_run_handler(InvalidScript(), stage, stage, stage, stage)
+    with pytest.raises(ValueError, match="validation"):
+        handler(_Context(), {"setting_name": "demo"})
+    assert calls == []
+
+
 def test_full_run_executes_stages_in_order_and_repeats_until_limit(tmp_path: Path):
     calls: list[tuple[str, dict]] = []
 

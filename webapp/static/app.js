@@ -891,7 +891,7 @@ async function captureAssistTagScreen() {
     updateAssistTagCropStatus();
     els.assistTagMakerStatus.textContent = `${state.assistTagCandidates.length} supports matched`;
   } catch (error) {
-    els.assistTagMakerStatus.textContent = "Capture failed";
+    els.assistTagMakerStatus.textContent = error.message || "Capture failed";
     showError(error);
   } finally {
     state.assistTagBusy = false;
@@ -1074,10 +1074,10 @@ async function saveAssistTag() {
         body: JSON.stringify({ ...request, overwrite: true }),
       });
     }
-    await Promise.all([loadAssistTags(tag.name), loadTemplates()]);
+    await Promise.all([loadAssistTags(tag.name), loadTemplates(), loadSettings()]);
     els.assistTagMakerStatus.textContent = `Saved ${assistTagDisplayName(tag.name)}`;
   } catch (error) {
-    els.assistTagMakerStatus.textContent = "Save failed";
+    els.assistTagMakerStatus.textContent = error.message || "Save failed";
     showError(error);
   } finally {
     state.assistTagBusy = false;
@@ -1116,10 +1116,10 @@ async function importAssistTag() {
       });
     }
     els.assistTagFile.value = "";
-    await Promise.all([loadAssistTags(tag.name), loadTemplates()]);
+    await Promise.all([loadAssistTags(tag.name), loadTemplates(), loadSettings()]);
     els.assistTagLibraryStatus.textContent = `Imported ${assistTagDisplayName(tag.name)}`;
   } catch (error) {
-    els.assistTagLibraryStatus.textContent = "Import failed";
+    els.assistTagLibraryStatus.textContent = error.message || "Import failed";
     showError(error);
   } finally {
     state.assistTagBusy = false;
@@ -1153,7 +1153,7 @@ async function toggleAssistTagBinding() {
     renderSelectedAssistTag();
     els.assistTagLibraryStatus.textContent = bound ? "Unbound from script" : "Bound to script";
   } catch (error) {
-    els.assistTagLibraryStatus.textContent = "Script update failed";
+    els.assistTagLibraryStatus.textContent = error.message || "Script update failed";
     showError(error);
   } finally {
     state.assistTagBusy = false;
@@ -1170,10 +1170,10 @@ async function deleteAssistTag() {
   updateControls();
   try {
     await api(`/api/assist-tags/${encodeURIComponent(tag.name)}`, { method: "DELETE" });
-    await Promise.all([loadAssistTags(), loadTemplates()]);
+    await Promise.all([loadAssistTags(), loadTemplates(), loadSettings()]);
     els.assistTagLibraryStatus.textContent = "Tag deleted";
   } catch (error) {
-    els.assistTagLibraryStatus.textContent = "Delete failed";
+    els.assistTagLibraryStatus.textContent = error.message || "Delete failed";
     showError(error);
   } finally {
     state.assistTagBusy = false;
