@@ -137,7 +137,14 @@ def _select_strategy(
 
     result = choose(0, selected, set(), selected_nps, set(selected_nps))
     if result is None:
-        raise StrategySelectionError("Strategy has no matching command card combination.")
+        message = "Strategy has no matching command card combination."
+        constrained_stars = any(
+            isinstance(spec, dict) and (spec.get("criticalStar", 0) or not spec.get("more_or_less", True))
+            for spec in (strategy.get(name) for name in ("card1", "card2", "card3"))
+        )
+        if constrained_stars and any(card.get("stars") is None for card in cards):
+            message += " Some critical star values are unknown."
+        raise StrategySelectionError(message)
     return result
 
 
@@ -225,10 +232,8 @@ def _eligible_cards(
             continue
         stars = card.get("stars")
         if stars is None:
-            if threshold:
-                raise StrategySelectionError(
-                    "critical star recognition is required by this strategy."
-                )
+            if threshold or not more_or_less:
+                continue
             stars = 0
         if not isinstance(stars, (int, float)) or isinstance(stars, bool):
             continue

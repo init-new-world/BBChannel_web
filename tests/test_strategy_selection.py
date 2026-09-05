@@ -234,3 +234,27 @@ def test_strategy_backtracking_matches_exhaustive_face_card_oracle():
                 for card, preference in zip(candidate, specs, strict=True)
             ))
             assert [card["slot"] for card in select_command_cards([strategy], cards)] == [card["slot"] for card in expected]
+
+
+def test_strategy_backtracks_past_branch_with_unknown_star_counts():
+    cards = [_card(1, "1B", 10), _card(2, "2A", None), _card(3, "3Q", 0)]
+    strategy = {
+        "card1": _spec(1, ["1B", "2A"]), "card2": _spec(1, ["1B"], stars=5),
+        "card3": _spec(1, ["3Q"]),
+    }
+    assert [card["slot"] for card in select_command_cards([strategy], cards)] == [2, 1, 3]
+
+
+def test_strategy_known_star_match_is_not_blocked_by_unrelated_unknown_card():
+    cards = [_card(1, "1B", 10), _card(2, "2A", None), _card(3, "3Q", 0)]
+    strategy = {
+        "card1": _spec(1, ["1B"], stars=5), "card2": _spec(1, ["2A"]),
+        "card3": _spec(1, ["3Q"]),
+    }
+    assert [card["slot"] for card in select_command_cards([strategy], cards)] == [1, 2, 3]
+
+
+def test_strategy_does_not_treat_unknown_stars_as_known_zero_for_maximum_constraint():
+    cards = [_card(1, "1B", None), _card(2, "2A", 0), _card(3, "3Q", 1)]
+    strategy = {"card1": _spec(1, ["1B", "2A"], stars=0, more=False), "card2": _spec(2, []), "card3": _spec(2, [])}
+    assert select_command_cards([strategy], cards)[0]["slot"] == 2
