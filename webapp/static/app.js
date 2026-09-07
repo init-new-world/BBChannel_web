@@ -13,6 +13,9 @@ const state = {
   equipNonFullCandidate: null,
   equipTemplateBusy: false,
   assistTags: [],
+  assistTagMode: "assist",
+  assistTagGeneration: 0,
+  assistTagListSequence: 0,
   assistTagBusy: false,
   assistTagCandidates: [],
   assistTagScreenshotBase64: "",
@@ -168,6 +171,12 @@ const els = {
   archiveEquipTemplate: document.querySelector("#archive-equip-template"),
   openAssistTags: document.querySelector("#open-assist-tags"),
   assistTagDialog: document.querySelector("#assist-tag-dialog"),
+  assistTagModes: document.querySelectorAll("[data-tag-mode]"),
+  assistTagModeLabel: document.querySelector("#assist-tag-mode-label"),
+  assistTagWorkspace: document.querySelector("#assist-tag-workspace"),
+  assistTagCaptureLabel: document.querySelector("#assist-tag-capture-label"),
+  assistTagCandidateLabel: document.querySelector("#assist-tag-candidate-label"),
+  assistTagBindingStatus: document.querySelector("#assist-tag-binding-status"),
   closeAssistTags: document.querySelector("#close-assist-tags"),
   captureAssistTagScreen: document.querySelector("#capture-assist-tag-screen"),
   assistTagCandidate: document.querySelector("#assist-tag-candidate"),
@@ -361,12 +370,23 @@ function bindEvents() {
   els.archiveEquipTemplate.addEventListener("click", () => moveEquipTemplate("archive"));
   els.openAssistTags.addEventListener("click", openAssistTagMaker);
   els.closeAssistTags.addEventListener("click", () => els.assistTagDialog.close());
-  els.assistTagDialog.addEventListener("cancel", () => {
-    state.assistTagDragStart = null;
+  els.assistTagDialog.addEventListener("close", resetAssistTagMaker);
+  els.assistTagModes.forEach((tab) => {
+    tab.addEventListener("click", () => changeAssistTagMode(tab.dataset.tagMode));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const tabs = [...els.assistTagModes];
+      const next = event.key === "Home" ? tabs[0] : event.key === "End" ? tabs.at(-1)
+        : tabs[(tabs.indexOf(tab) + 1) % tabs.length];
+      next.focus();
+      changeAssistTagMode(next.dataset.tagMode);
+    });
   });
   els.captureAssistTagScreen.addEventListener("click", captureAssistTagScreen);
   els.assistTagCandidate.addEventListener("change", () => {
     state.assistTagCropBounds = null;
+    state.assistTagDragStart = null;
     updateAssistTagCropStatus();
     drawAssistTagCanvas();
     updateControls();
@@ -804,19 +824,93 @@ function requestEquipTemplateMove(template, action, overwrite) {
 }
 
 async function openAssistTagMaker() {
+  els.assistTagDialog.showModal();
+  const request = assistTagRequest();
   try {
     await loadAssistTags();
-    els.assistTagDialog.showModal();
-    drawAssistTagCanvas();
   } catch (error) {
-    showError(error);
+    if (isCurrentAssistTagRequest(request)) {
+      els.assistTagLibraryStatus.textContent = error.message || "Tags unavailable";
+    }
+  }
+}
+
+function assistTagRequest() {
+  return {
+    generation: state.assistTagGeneration,
+    mode: state.assistTagMode,
+    endpoint: `/api/${state.assistTagMode}-tags`,
+  };
+}
+
+function isCurrentAssistTagRequest(request) {
+  return request.generation === state.assistTagGeneration;
+}
+
+function resetAssistTagCapture() {
+  state.assistTagCandidates = [];
+  state.assistTagScreenshotBase64 = "";
+  state.assistTagImage = null;
+  state.assistTagCropBounds = null;
+  state.assistTagDragStart = null;
+  els.assistTagCandidate.replaceChildren();
+  els.assistTagCanvasEmpty.hidden = false;
+  updateAssistTagCropStatus();
+  drawAssistTagCanvas();
+}
+
+function resetAssistTagMaker() {
+  // Invalidate every outstanding operation, including a round trip to the same mode.
+  state.assistTagGeneration += 1;
+  state.assistTagBusy = false;
+  state.assistTags = [];
+  els.assistTagList.replaceChildren();
+  els.assistTagFile.value = "";
+  els.assistTagLabel.value = "Custom";
+  els.assistTagThreshold.value = "0.80";
+  els.assistTagMakerStatus.textContent = "Idle";
+  els.assistTagLibraryStatus.textContent = "Ready";
+  resetAssistTagCapture();
+  renderSelectedAssistTag();
+}
+
+async function changeAssistTagMode(mode) {
+  if (mode === state.assistTagMode) return;
+  state.assistTagMode = mode;
+  resetAssistTagMaker();
+  const command = mode === "command";
+  els.assistTagModes.forEach((tab) => {
+    const selected = tab.dataset.tagMode === mode;
+    tab.classList.toggle("active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+  els.assistTagWorkspace.setAttribute("aria-labelledby", `assist-tag-mode-${mode}`);
+  els.assistTagModeLabel.textContent = command ? "Command Card Tags" : "Assist Tags";
+  els.assistTagCaptureLabel.textContent = command ? "Capture Cards" : "Capture & Match";
+  els.assistTagCandidateLabel.textContent = command ? "Card slot" : "Support";
+  els.assistTagCandidate.setAttribute("aria-label", command ? "Command card slot" : "Matched support");
+  els.assistTagCanvas.setAttribute("aria-label", command ? "Command card tag crop canvas" : "Assist tag crop canvas");
+  els.assistTagList.setAttribute("aria-label", command ? "Command card tag" : "Assist tag");
+  els.assistTagPreview.alt = command ? "Selected command card tag" : "Selected assist tag";
+  const request = assistTagRequest();
+  try {
+    await loadAssistTags();
+  } catch (error) {
+    if (isCurrentAssistTagRequest(request)) {
+      els.assistTagLibraryStatus.textContent = error.message || "Tags unavailable";
+    }
   }
 }
 
 async function loadAssistTags(preferredName = "") {
+  const request = assistTagRequest();
+  const sequence = ++state.assistTagListSequence;
+  const current = () => isCurrentAssistTagRequest(request) && sequence === state.assistTagListSequence;
   const selectedName = preferredName || els.assistTagList.value;
   try {
-    const payload = await api("/api/assist-tags");
+    const payload = await api(request.endpoint);
+    if (!current()) return;
     state.assistTags = payload.tags || [];
     els.assistTagList.replaceChildren(
       ...state.assistTags.map((tag) => {
@@ -831,6 +925,7 @@ async function loadAssistTags(preferredName = "") {
     }
     renderSelectedAssistTag();
   } catch (error) {
+    if (!current()) return;
     state.assistTags = [];
     els.assistTagList.replaceChildren();
     renderSelectedAssistTag();
@@ -848,12 +943,15 @@ function assistTagDisplayName(name) {
 }
 
 function assistTagConfigName(path) {
-  const normalized = String(path || "").replaceAll("\\", "/");
+  const value = Array.isArray(path) ? path[0] : path;
+  const normalized = String(value || "").replaceAll("\\", "/");
   return normalized.slice(normalized.lastIndexOf("/") + 1);
 }
 
 function isAssistTagBound(tag) {
-  const configured = state.selectedSettingPlan?.assist?.tags || [];
+  const configured = state.assistTagMode === "command"
+    ? state.selectedSettingPlan?.special_keys || []
+    : state.selectedSettingPlan?.assist?.tags || [];
   return configured.some((entry) => entry.template_name === tag?.name);
 }
 
@@ -871,7 +969,7 @@ function renderSelectedAssistTag() {
   }
   els.assistTagPreviewEmpty.hidden = true;
   els.assistTagPreview.hidden = false;
-  els.assistTagPreview.src = `/api/assist-tags/${encodeURIComponent(tag.name)}/image?v=${Date.now()}`;
+  els.assistTagPreview.src = `${assistTagRequest().endpoint}/${encodeURIComponent(tag.name)}/image?v=${Date.now()}`;
   const [sourceWidth, sourceHeight] = tag.source_size;
   const [left, top, right, bottom] = tag.offsets;
   els.assistTagMetadata.textContent = [
@@ -887,31 +985,28 @@ function renderSelectedAssistTag() {
 
 async function captureAssistTagScreen() {
   const settingName = els.settingSelect.value;
-  if (!settingName || state.assistTagBusy) {
+  const request = assistTagRequest();
+  if ((request.mode === "assist" && !settingName) || state.assistTagBusy
+      || (!state.connected && !state.screenshotBase64)) {
     return;
   }
   state.assistTagBusy = true;
-  state.assistTagCandidates = [];
-  state.assistTagScreenshotBase64 = "";
-  state.assistTagImage = null;
-  state.assistTagCropBounds = null;
-  state.assistTagDragStart = null;
-  els.assistTagCandidate.replaceChildren();
-  els.assistTagCanvasEmpty.hidden = false;
-  updateAssistTagCropStatus();
-  drawAssistTagCanvas();
+  resetAssistTagCapture();
   els.assistTagMakerStatus.textContent = "Capturing...";
   updateControls();
   try {
-    const payload = await api("/api/assist-tags/candidates", {
+    const body = state.connected ? {} : { screenshot_base64: state.screenshotBase64 };
+    if (request.mode === "assist") {
+      body.setting_name = settingName;
+      body.threshold = 0.85;
+    }
+    const payload = await api(`${request.endpoint}/candidates`, {
       method: "POST",
-      body: JSON.stringify({
-        setting_name: settingName,
-        screenshot_base64: state.connected ? null : state.screenshotBase64 || null,
-        threshold: 0.85,
-      }),
+      body: JSON.stringify(body),
     });
+    if (!isCurrentAssistTagRequest(request)) return;
     const image = await loadAssistTagCanvasImage(payload.screenshot_base64 || "");
+    if (!isCurrentAssistTagRequest(request)) return;
     state.assistTagCandidates = payload.candidates || [];
     state.assistTagScreenshotBase64 = payload.screenshot_base64 || "";
     state.assistTagImage = image;
@@ -919,7 +1014,8 @@ async function captureAssistTagScreen() {
       ...state.assistTagCandidates.map((candidate, index) => {
         const option = document.createElement("option");
         option.value = String(index);
-        option.textContent = `Match ${index + 1} | ${(candidate.confidence * 100).toFixed(1)}%`;
+        option.textContent = request.mode === "command" ? `Card ${candidate.slot}`
+          : `Match ${index + 1} | ${(candidate.confidence * 100).toFixed(1)}%`;
         return option;
       }),
     );
@@ -928,13 +1024,18 @@ async function captureAssistTagScreen() {
     els.assistTagCanvasEmpty.hidden = true;
     drawAssistTagCanvas();
     updateAssistTagCropStatus();
-    els.assistTagMakerStatus.textContent = `${state.assistTagCandidates.length} supports matched`;
+    els.assistTagMakerStatus.textContent = request.mode === "command"
+      ? `${state.assistTagCandidates.length} command cards`
+      : `${state.assistTagCandidates.length} supports matched`;
   } catch (error) {
+    if (!isCurrentAssistTagRequest(request)) return;
     els.assistTagMakerStatus.textContent = error.message || "Capture failed";
     showError(error);
   } finally {
-    state.assistTagBusy = false;
-    updateControls();
+    if (isCurrentAssistTagRequest(request)) {
+      state.assistTagBusy = false;
+      updateControls();
+    }
   }
 }
 
@@ -960,10 +1061,10 @@ function assistTagCanvasPoint(event) {
   const bounds = els.assistTagCanvas.getBoundingClientRect();
   const x = Math.round((event.clientX - bounds.left) * els.assistTagCanvas.width / bounds.width);
   const y = Math.round((event.clientY - bounds.top) * els.assistTagCanvas.height / bounds.height);
-  return [
-    Math.min(Math.max(x, 0), els.assistTagCanvas.width),
-    Math.min(Math.max(y, 0), els.assistTagCanvas.height),
-  ];
+  const candidate = selectedAssistTagCandidate();
+  const [left, top, width, height] = state.assistTagMode === "command" && candidate
+    ? candidate.bounds : [0, 0, els.assistTagCanvas.width, els.assistTagCanvas.height];
+  return [Math.min(Math.max(x, left), left + width), Math.min(Math.max(y, top), top + height)];
 }
 
 function beginAssistTagCrop(event) {
@@ -1073,6 +1174,7 @@ function drawAssistTagCanvas() {
 }
 
 async function saveAssistTag() {
+  const context = assistTagRequest();
   const candidate = selectedAssistTagCandidate();
   const crop = state.assistTagCropBounds;
   const label = els.assistTagLabel.value.trim();
@@ -1085,7 +1187,7 @@ async function saveAssistTag() {
   updateControls();
   const request = {
     screenshot_base64: state.assistTagScreenshotBase64,
-    anchor: candidate.anchor,
+    ...(context.mode === "command" ? { slot: candidate.slot } : { anchor: candidate.anchor }),
     bounds: crop,
     label,
     threshold,
@@ -1094,32 +1196,39 @@ async function saveAssistTag() {
   try {
     let tag;
     try {
-      tag = await api("/api/assist-tags", {
+      tag = await api(context.endpoint, {
         method: "POST",
         body: JSON.stringify(request),
       });
     } catch (error) {
+      if (!isCurrentAssistTagRequest(context)) return;
       const conflict = error?.payload?.error?.code === "data_file_conflict";
-      if (!conflict || !window.confirm("Replace the existing assist tag?")) {
+      if (!conflict || !window.confirm(`Replace the existing ${context.mode} tag?`)) {
         throw error;
       }
-      tag = await api("/api/assist-tags", {
+      tag = await api(context.endpoint, {
         method: "POST",
         body: JSON.stringify({ ...request, overwrite: true }),
       });
     }
+    if (!isCurrentAssistTagRequest(context)) return;
     await Promise.all([loadAssistTags(tag.name), loadTemplates(), loadSettings()]);
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagMakerStatus.textContent = `Saved ${assistTagDisplayName(tag.name)}`;
   } catch (error) {
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagMakerStatus.textContent = error.message || "Save failed";
     showError(error);
   } finally {
-    state.assistTagBusy = false;
-    updateControls();
+    if (isCurrentAssistTagRequest(context)) {
+      state.assistTagBusy = false;
+      updateControls();
+    }
   }
 }
 
 async function importAssistTag() {
+  const context = assistTagRequest();
   const file = els.assistTagFile.files[0];
   if (!file || state.assistTagBusy) {
     return;
@@ -1133,35 +1242,43 @@ async function importAssistTag() {
       image_base64: await blobToDataUrl(file),
       overwrite: false,
     };
+    if (!isCurrentAssistTagRequest(context)) return;
     let tag;
     try {
-      tag = await api("/api/assist-tags/import", {
+      tag = await api(`${context.endpoint}/import`, {
         method: "POST",
         body: JSON.stringify(request),
       });
     } catch (error) {
+      if (!isCurrentAssistTagRequest(context)) return;
       const conflict = error?.payload?.error?.code === "data_file_conflict";
       if (!conflict || !window.confirm(`Replace ${file.name}?`)) {
         throw error;
       }
-      tag = await api("/api/assist-tags/import", {
+      tag = await api(`${context.endpoint}/import`, {
         method: "POST",
         body: JSON.stringify({ ...request, overwrite: true }),
       });
     }
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagFile.value = "";
     await Promise.all([loadAssistTags(tag.name), loadTemplates(), loadSettings()]);
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagLibraryStatus.textContent = `Imported ${assistTagDisplayName(tag.name)}`;
   } catch (error) {
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagLibraryStatus.textContent = error.message || "Import failed";
     showError(error);
   } finally {
-    state.assistTagBusy = false;
-    updateControls();
+    if (isCurrentAssistTagRequest(context)) {
+      state.assistTagBusy = false;
+      updateControls();
+    }
   }
 }
 
 async function toggleAssistTagBinding() {
+  const context = assistTagRequest();
   const tag = selectedAssistTag();
   const settingName = els.settingSelect.value;
   if (!tag || !settingName || state.assistTagBusy) {
@@ -1171,31 +1288,48 @@ async function toggleAssistTagBinding() {
   updateControls();
   try {
     const detail = await api(`/api/settings/${encodeURIComponent(settingName)}`);
+    if (!isCurrentAssistTagRequest(context) || els.settingSelect.value !== settingName) return;
     const config = detail.config;
-    const current = Array.isArray(config.assistTags) ? config.assistTags : [];
+    const configured = context.mode === "command" ? config.specialKeys : config.assistTags;
+    const current = Array.isArray(configured) ? configured : [];
     const bound = current.some((path) => assistTagConfigName(path) === tag.name);
-    const assistTags = current.filter((path) => assistTagConfigName(path) !== tag.name);
-    if (!bound) {
-      assistTags.push(tag.template_path);
+    let message;
+    if (context.mode === "command") {
+      const result = await api(`/api/settings/${encodeURIComponent(settingName)}/command-tags`, {
+        method: "PUT",
+        body: JSON.stringify({ tag_name: tag.name, bound: !bound }),
+      });
+      message = result.command_tag_binding.bound
+        ? `Bound to script as ${result.command_tag_binding.code}` : "Unbound from script";
+    } else {
+      const assistTags = current.filter((path) => assistTagConfigName(path) !== tag.name);
+      if (!bound) assistTags.push(tag.template_path);
+      config.assistTags = assistTags;
+      await api(`/api/settings/${encodeURIComponent(settingName)}`, {
+        method: "PUT",
+        body: JSON.stringify({ config, overwrite: true }),
+      });
+      message = bound ? "Unbound from script" : "Bound to script";
     }
-    config.assistTags = assistTags;
-    await api(`/api/settings/${encodeURIComponent(settingName)}`, {
-      method: "PUT",
-      body: JSON.stringify({ config, overwrite: true }),
-    });
+    if (!isCurrentAssistTagRequest(context) || els.settingSelect.value !== settingName) return;
     await loadSettings(settingName);
+    if (!isCurrentAssistTagRequest(context) || els.settingSelect.value !== settingName) return;
     renderSelectedAssistTag();
-    els.assistTagLibraryStatus.textContent = bound ? "Unbound from script" : "Bound to script";
+    els.assistTagLibraryStatus.textContent = message;
   } catch (error) {
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagLibraryStatus.textContent = error.message || "Script update failed";
     showError(error);
   } finally {
-    state.assistTagBusy = false;
-    updateControls();
+    if (isCurrentAssistTagRequest(context)) {
+      state.assistTagBusy = false;
+      updateControls();
+    }
   }
 }
 
 async function deleteAssistTag() {
+  const context = assistTagRequest();
   const tag = selectedAssistTag();
   if (!tag || state.assistTagBusy || !window.confirm(`Delete ${assistTagDisplayName(tag.name)}?`)) {
     return;
@@ -1203,15 +1337,20 @@ async function deleteAssistTag() {
   state.assistTagBusy = true;
   updateControls();
   try {
-    await api(`/api/assist-tags/${encodeURIComponent(tag.name)}`, { method: "DELETE" });
+    await api(`${context.endpoint}/${encodeURIComponent(tag.name)}`, { method: "DELETE" });
+    if (!isCurrentAssistTagRequest(context)) return;
     await Promise.all([loadAssistTags(), loadTemplates(), loadSettings()]);
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagLibraryStatus.textContent = "Tag deleted";
   } catch (error) {
+    if (!isCurrentAssistTagRequest(context)) return;
     els.assistTagLibraryStatus.textContent = error.message || "Delete failed";
     showError(error);
   } finally {
-    state.assistTagBusy = false;
-    updateControls();
+    if (isCurrentAssistTagRequest(context)) {
+      state.assistTagBusy = false;
+      updateControls();
+    }
   }
 }
 
@@ -2927,7 +3066,7 @@ function updateControls() {
     || !equipTemplate
     || equipTemplate.location === "archive";
   els.captureAssistTagScreen.disabled = state.assistTagBusy
-    || !els.settingSelect.value
+    || (state.assistTagMode === "assist" && !els.settingSelect.value)
     || (!state.connected && !state.screenshotBase64);
   els.assistTagCandidate.disabled = state.assistTagBusy
     || !state.assistTagCandidates.length;
@@ -2948,6 +3087,11 @@ function updateControls() {
   els.bindAssistTag.textContent = isAssistTagBound(assistTag)
     ? "Unbind from Script"
     : "Bind to Script";
+  const binding = (state.selectedSettingPlan?.special_keys || [])
+    .find((entry) => entry.template_name === assistTag?.name);
+  els.assistTagBindingStatus.hidden = state.assistTagMode !== "command" || !assistTag;
+  els.assistTagBindingStatus.textContent = binding ? `Bound as ${binding.code}`
+    : els.settingSelect.value ? "Not bound" : "No script selected";
   els.deleteAssistTag.disabled = state.assistTagBusy || !assistTag;
 }
 

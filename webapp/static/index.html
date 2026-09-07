@@ -293,7 +293,7 @@
               <button id="archive-equip-template" class="ghost-button" type="button">Archive</button>
             </div>
             <div class="panel-divider"></div>
-            <div class="section-label">Assist Tags</div>
+            <div class="section-label">Custom Tags</div>
             <button id="open-assist-tags" class="ghost-button wide" type="button">Open Tag Maker</button>
             <div class="panel-divider"></div>
             <div class="section-label">Material Drops</div>
@@ -497,21 +497,25 @@
         </div>
       </form>
     </dialog>
-    <dialog id="assist-tag-dialog" class="assist-tag-dialog">
+    <dialog id="assist-tag-dialog" class="assist-tag-dialog" aria-labelledby="assist-tag-title">
       <div class="assist-tag-form">
         <div class="preset-dialog-header assist-tag-header">
           <div>
-            <div class="section-label">Assist Tags</div>
-            <h2>Tag Maker</h2>
+            <div id="assist-tag-mode-label" class="section-label">Assist Tags</div>
+            <h2 id="assist-tag-title">Tag Maker</h2>
           </div>
           <button id="close-assist-tags" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
         </div>
-        <div class="assist-tag-workspace">
+        <div class="segmented-control assist-tag-modes" role="tablist" aria-label="Tag type">
+          <button id="assist-tag-mode-assist" class="segment active" type="button" role="tab" aria-selected="true" aria-controls="assist-tag-workspace" data-tag-mode="assist">Assist</button>
+          <button id="assist-tag-mode-command" class="segment" type="button" role="tab" aria-selected="false" aria-controls="assist-tag-workspace" tabindex="-1" data-tag-mode="command">Command Cards</button>
+        </div>
+        <div id="assist-tag-workspace" class="assist-tag-workspace" role="tabpanel" aria-labelledby="assist-tag-mode-assist">
           <section class="assist-tag-capture">
             <div class="assist-tag-toolbar">
-              <button id="capture-assist-tag-screen" class="primary-button" type="button">Capture &amp; Match</button>
+              <button id="capture-assist-tag-screen" class="primary-button" type="button"><span aria-hidden="true">&#8635;</span> <span id="assist-tag-capture-label">Capture &amp; Match</span></button>
               <label class="field-stack">
-                <span>Support</span>
+                <span id="assist-tag-candidate-label">Support</span>
                 <select id="assist-tag-candidate" class="field" aria-label="Matched support"></select>
               </label>
             </div>
@@ -546,11 +550,12 @@
               <span id="assist-tag-preview-empty">No tags</span>
             </div>
             <div id="assist-tag-metadata" class="assist-tag-metadata">No tag selected</div>
+            <div id="assist-tag-binding-status" class="assist-tag-status" role="status" hidden></div>
             <label class="field-stack file-field">
               <span>Import PNG</span>
               <input id="assist-tag-file" class="field" type="file" accept="image/png,.png">
             </label>
-            <button id="import-assist-tag" class="ghost-button wide" type="button">Import Tag</button>
+            <button id="import-assist-tag" class="ghost-button wide" type="button"><span aria-hidden="true">&darr;</span> Import Tag</button>
             <div class="assist-tag-library-actions">
               <button id="bind-assist-tag" class="ghost-button" type="button">Bind to Script</button>
               <button id="delete-assist-tag" class="danger-button" type="button">Delete</button>

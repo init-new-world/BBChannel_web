@@ -4,8 +4,11 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from json import JSONDecodeError
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from webapp.core.errors import AppError, ErrorCode
@@ -24,12 +27,30 @@ SPECIAL_KEY_NAME_RE = re.compile(
 )
 
 
+def _uses_special_key(value: Any, code: str) -> bool:
+    if isinstance(value, str):
+        match = re.fullmatch(r"(?:[1-3][ABQ])?(S[0-9]+)", value)
+        return match is not None and match.group(1) == code
+    if isinstance(value, list):
+        return any(_uses_special_key(entry, code) for entry in value)
+    if isinstance(value, dict):
+        return any(_uses_special_key(entry, code) for entry in value.values())
+    return False
+
+
 class ScriptDataService:
     def __init__(self, data_dir: Path | str, *, resources: ResourceService | None = None) -> None:
         self.data_dir = Path(data_dir).resolve()
         self.settings_dir = self.data_dir / "settings"
         self.strategy_dir = self.data_dir / "strategy"
         self._resources = resources
+        self._lock = RLock()
+
+    @contextmanager
+    def settings_transaction(self) -> Iterator[None]:
+        """Serialize script edits with changes to their referenced resources."""
+        with self._lock:
+            yield
 
     def list_settings(self) -> list[dict[str, str]]:
         return self._list_named_json(self.settings_dir, "settings")
@@ -60,6 +81,12 @@ class ScriptDataService:
         *,
         overwrite: bool = False,
     ) -> dict[str, Any]:
+        with self._lock:
+            return self._save_setting(name, config, overwrite=overwrite)
+
+    def _save_setting(
+        self, name: str, config: dict[str, Any], *, overwrite: bool,
+    ) -> dict[str, Any]:
         if not isinstance(config, dict):
             raise AppError(
                 ErrorCode.DATA_FILE_INVALID,
@@ -84,9 +111,16 @@ class ScriptDataService:
         return self.get_setting(path.stem)
 
     def delete_setting(self, name: str) -> dict[str, Any]:
-        return self._delete_named_json(self.settings_dir, name, "settings")
+        with self._lock:
+            return self._delete_named_json(self.settings_dir, name, "settings")
 
     def find_assist_tag_references(self, tag_name: str) -> list[str]:
+        return self._find_tag_references(tag_name, "assistTags")
+
+    def find_command_tag_references(self, tag_name: str) -> list[str]:
+        return self._find_tag_references(tag_name, "specialKeys")
+
+    def _find_tag_references(self, tag_name: str, field: str) -> list[str]:
         references = []
         for setting in self.list_settings():
             try:
@@ -98,15 +132,57 @@ class ScriptDataService:
                     f"Cannot verify tag references in unreadable script: {setting['name']}",
                     {"settings": [setting["name"]]},
                 ) from exc
-            tags = config.get("assistTags") if isinstance(config, dict) else None
+            tags = config.get(field) if isinstance(config, dict) else None
             if isinstance(tags, str):
                 tags = [tags]
+            if field == "specialKeys" and isinstance(tags, list):
+                tags = [tag[0] if isinstance(tag, list) and tag else tag for tag in tags]
             if isinstance(tags, list) and any(
                 isinstance(tag, str) and tag.strip().replace("\\", "/").rsplit("/", 1)[-1] == tag_name
                 for tag in tags
             ):
                 references.append(setting["name"])
         return references
+
+    def bind_command_tag(
+        self, name: str, *, tag_name: str, template_path: str, bound: bool,
+    ) -> dict[str, Any]:
+        with self._lock:
+            detail = self.get_setting(name)
+            config = detail["config"]
+            try:
+                keys = self._plan_special_keys(config)
+            except ValueError as exc:
+                raise AppError(ErrorCode.DATA_FILE_INVALID, str(exc)) from exc
+            matches = [index for index, key in enumerate(keys) if key["template_name"] == tag_name]
+            entries = list(config.get("specialKeys") or [])
+            index = matches[0] if matches else len(entries)
+            code = f"S{index}"
+            if bound and not matches:
+                entries.append(template_path)
+            elif not bound and matches:
+                if len(matches) > 1 or index != len(entries) - 1:
+                    raise AppError(
+                        ErrorCode.DATA_FILE_CONFLICT,
+                        "Only the last command tag can be unbound without renumbering other tags.",
+                        {"name": name, "code": code},
+                    )
+                references = [
+                    field for field, value in config.items()
+                    if SETTING_STRATEGY_FIELD_RE.fullmatch(field) and _uses_special_key(value, code)
+                ]
+                if references:
+                    raise AppError(
+                        ErrorCode.DATA_FILE_CONFLICT,
+                        f"Command tag {code} is still referenced by this script's strategies.",
+                        {"name": name, "code": code, "fields": references},
+                    )
+                entries.pop()
+            if entries != (config.get("specialKeys") or []):
+                config["specialKeys"] = entries
+                detail = self.save_setting(name, config, overwrite=True)
+            detail["command_tag_binding"] = {"bound": bound, "code": code if bound or matches else None}
+            return detail
 
     def get_setting_plan(self, name: str) -> dict[str, Any]:
         detail = self.get_setting(name)
@@ -704,7 +780,7 @@ class ScriptDataService:
                 template_path = normalized_path.split(assets_marker, 1)[1]
             elif normalized_path.startswith("assets/"):
                 template_path = normalized_path[7:]
-            elif normalized_path.startswith("special_keys/"):
+            elif normalized_path.startswith(("special_keys/", "battle/customCommandCard/")):
                 template_path = normalized_path
             else:
                 template_path = f"special_keys/{template_name}"

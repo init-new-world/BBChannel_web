@@ -175,10 +175,14 @@ def test_operator_console_references_api_controls():
     assert "testEquipTemplate" in script
     assert "/test`" in script
     assert "screenshot_base64: state.screenshotBase64 || null" in script
-    assert 'api("/api/assist-tags")' in script
-    assert 'api("/api/assist-tags/candidates"' in script
-    assert 'api("/api/assist-tags"' in script
-    assert '/api/assist-tags/${encodeURIComponent(tag.name)}' in script
+    assert 'data-tag-mode="assist"' in index
+    assert 'data-tag-mode="command"' in index
+    assert 'endpoint: `/api/${state.assistTagMode}-tags`' in script
+    assert 'api(request.endpoint)' in script
+    assert 'api(`${request.endpoint}/candidates`' in script
+    assert 'api(context.endpoint' in script
+    assert '`${context.endpoint}/${encodeURIComponent(tag.name)}`' in script
+    assert '/api/settings/${encodeURIComponent(settingName)}/command-tags' in script
     assert 'config.assistTags = assistTags' in script
     assert 'drawAssistTagCanvas' in script
     assert 'pointerdown' in script

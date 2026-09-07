@@ -92,3 +92,51 @@ def test_special_key_outside_card_or_larger_than_card_is_not_matched(special_key
         }],
     )
     assert all(card["special_keys"] == [] for card in result["cards"])
+
+
+@pytest.mark.parametrize("source_slot", [1, 2, 3, 4, 5])
+def test_created_command_tag_resolves_and_matches_each_card_slot(special_key_recognizer, source_slot):
+    np = pytest.importorskip("numpy")
+    from webapp.services.command_tags import CommandTagService
+    from webapp.services.script_data import ScriptDataService
+
+    recognizer, assets = special_key_recognizer
+    resources = ResourceService(assets, assets.parent / "data")
+    tags = CommandTagService(resources)
+    screen = Image.new("RGB", (1280, 720), (18, 24, 32))
+    motif = Image.fromarray(np.random.default_rng(73).integers(20, 235, (24, 24, 3), dtype=np.uint8))
+    candidates = tags.candidates()
+    for candidate in candidates:
+        x, y = candidate["anchor"]
+        screen.paste(motif, (x + 20, y + 60))
+    x, y = candidates[source_slot - 1]["anchor"]
+    tag = tags.build_card(
+        label="Runtime", screenshot=_screenshot_bytes(screen), slot=source_slot,
+        bounds=[x + 20, y + 60, x + 44, y + 84], threshold=0.99,
+    )
+    keys = ScriptDataService._plan_special_keys({"specialKeys": [tag["template_path"]]})
+    assert resources.resolve_template(keys[0]["template_path"]).is_file()
+    result = recognizer.recognize(_screenshot_bytes(screen), "CH", [], special_keys=keys)
+    assert [card["special_keys"] for card in result["cards"]] == [["S0"]] * 5
+
+
+def test_full_width_command_tag_remains_portable_between_slots(special_key_recognizer):
+    np = pytest.importorskip("numpy")
+    from webapp.services.command_tags import CommandTagService
+    from webapp.services.script_data import ScriptDataService
+
+    recognizer, assets = special_key_recognizer
+    tags = CommandTagService(ResourceService(assets, assets.parent / "data"))
+    candidates = tags.candidates()
+    screen = Image.new("RGB", (1280, 720), (18, 24, 32))
+    motif = Image.fromarray(np.random.default_rng(85).integers(20, 235, (260, 193, 3), dtype=np.uint8))
+    for candidate in candidates:
+        screen.paste(motif, tuple(candidate["anchor"]))
+    x, y, width, height = candidates[-1]["bounds"]
+    tag = tags.build_card(
+        label="FullWidth", screenshot=_screenshot_bytes(screen), slot=5,
+        bounds=[x, y, x + width, y + height], threshold=0.99,
+    )
+    keys = ScriptDataService._plan_special_keys({"specialKeys": [tag["template_path"]]})
+    result = recognizer.recognize(_screenshot_bytes(screen), "CH", [], special_keys=keys)
+    assert [card["special_keys"] for card in result["cards"]] == [["S0"]] * 5

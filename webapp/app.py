@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from webapp.api import create_job_router
 from webapp.automation import (
@@ -59,6 +59,7 @@ from webapp.services.cards import CommandCardRecognizer
 from webapp.services.chocolate import ChocolateRecognizer
 from webapp.services.assist import AssistRecognizer
 from webapp.services.assist_tags import AssistTagService
+from webapp.services.command_tags import CommandTagService
 from webapp.services.devices import DeviceService
 from webapp.services.digdig import DigdigRecognizer
 from webapp.services.event_log import EventLog
@@ -177,6 +178,23 @@ class ImportAssistTagRequest(BaseModel):
     overwrite: bool = False
 
 
+class CaptureCommandTagsRequest(BaseModel):
+    screenshot_base64: str | None = None
+
+
+class BuildCommandTagRequest(CaptureCommandTagsRequest):
+    slot: StrictInt = Field(ge=1, le=5)
+    bounds: list[StrictInt] = Field(min_length=4, max_length=4)
+    label: str = Field(min_length=1, max_length=64)
+    threshold: float = Field(default=0.8, gt=0.0, lt=1.0)
+    overwrite: bool = False
+
+
+class BindCommandTagRequest(BaseModel):
+    tag_name: str = Field(min_length=1, max_length=255)
+    bound: StrictBool
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -202,6 +220,7 @@ def create_app(
     recognition = RecognitionService(resources)
     assist_recognizer = AssistRecognizer(resources, recognition)
     assist_tags = AssistTagService(resources)
+    command_tags = CommandTagService(resources)
     card_recognizer = CommandCardRecognizer(resources, recognition)
     team_recognizer = TeamRecognizer(resources, recognition)
     quest_recognizer = QuestRecognizer(recognition)
@@ -443,6 +462,7 @@ def create_app(
     app.state.recognition = recognition
     app.state.assist_recognizer = assist_recognizer
     app.state.assist_tags = assist_tags
+    app.state.command_tags = command_tags
     app.state.card_recognizer = card_recognizer
     app.state.quest_recognizer = quest_recognizer
     app.state.chocolate_recognizer = chocolate_recognizer
@@ -616,14 +636,68 @@ def create_app(
 
     @app.delete("/api/assist-tags/{name}")
     def delete_assist_tag(name: str) -> dict[str, object]:
-        references = script_data.find_assist_tag_references(name)
-        if references:
-            raise AppError(
-                ErrorCode.DATA_FILE_CONFLICT,
-                f"Assist tag is still referenced by scripts: {', '.join(references)}",
-                {"name": name, "settings": references},
+        with script_data.settings_transaction():
+            references = script_data.find_assist_tag_references(name)
+            if references:
+                raise AppError(
+                    ErrorCode.DATA_FILE_CONFLICT,
+                    f"Assist tag is still referenced by scripts: {', '.join(references)}",
+                    {"name": name, "settings": references},
+                )
+            return assist_tags.delete(name)
+
+    @app.get("/api/command-tags")
+    def command_tag_inventory() -> dict[str, list[dict[str, object]]]:
+        return {"tags": command_tags.inventory()}
+
+    @app.post("/api/command-tags/candidates")
+    def capture_command_tags(request: CaptureCommandTagsRequest) -> dict[str, object]:
+        screenshot = _decode_optional_image(request.screenshot_base64) or device_service.snapshot()
+        return command_tags.capture(screenshot)
+
+    @app.post("/api/command-tags")
+    def build_command_tag(request: BuildCommandTagRequest) -> dict[str, object]:
+        screenshot = _decode_optional_image(request.screenshot_base64) or device_service.snapshot()
+        return command_tags.build_card(
+            label=request.label, screenshot=screenshot, slot=request.slot,
+            bounds=request.bounds, threshold=request.threshold, overwrite=request.overwrite,
+        )
+
+    @app.post("/api/command-tags/import")
+    def import_command_tag(request: ImportAssistTagRequest) -> dict[str, object]:
+        return command_tags.import_image(
+            request.name, _decode_optional_image(request.image_base64) or b"",
+            overwrite=request.overwrite,
+        )
+
+    @app.get("/api/command-tags/{name}/image")
+    def command_tag_image(name: str) -> Response:
+        return Response(
+            content=command_tags.read_image(name), media_type="image/png",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.delete("/api/command-tags/{name}")
+    def delete_command_tag(name: str) -> dict[str, object]:
+        with script_data.settings_transaction():
+            references = script_data.find_command_tag_references(name)
+            if references:
+                raise AppError(
+                    ErrorCode.DATA_FILE_CONFLICT,
+                    f"Command tag is still referenced by scripts: {', '.join(references)}",
+                    {"name": name, "settings": references},
+                )
+            return command_tags.delete(name)
+
+    @app.put("/api/settings/{name}/command-tags")
+    def bind_command_tag(name: str, request: BindCommandTagRequest) -> dict[str, object]:
+        with script_data.settings_transaction():
+            if request.bound:
+                command_tags.read_image(request.tag_name)
+            return script_data.bind_command_tag(
+                name, tag_name=request.tag_name,
+                template_path=f"battle/customCommandCard/{request.tag_name}", bound=request.bound,
             )
-        return assist_tags.delete(name)
 
     @app.get("/api/equip-templates")
     def equip_template_inventory() -> dict[str, list[dict[str, object]]]:
