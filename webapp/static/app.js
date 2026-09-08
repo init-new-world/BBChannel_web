@@ -75,6 +75,12 @@ const els = {
   presetSkillInputs: [...document.querySelectorAll("[data-assist-skill-index]")],
   presetStrategyRules: document.querySelector("#preset-strategy-rules"),
   presetStrategyEntry: document.querySelector("#preset-strategy-entry"),
+  presetStrategyTag: document.querySelector("#preset-strategy-tag"),
+  addStrategyEntry: document.querySelector("#add-strategy-entry"),
+  duplicateStrategyEntry: document.querySelector("#duplicate-strategy-entry"),
+  deleteStrategyEntry: document.querySelector("#delete-strategy-entry"),
+  moveStrategyEntryUp: document.querySelector("#move-strategy-entry-up"),
+  moveStrategyEntryDown: document.querySelector("#move-strategy-entry-down"),
   presetStrategyBreakpoints: [...document.querySelectorAll("[data-strategy-breakpoint]")],
   presetStrategyColorFirst: document.querySelector("#preset-strategy-color-first"),
   presetStrategyCards: [...document.querySelectorAll("[data-strategy-card]")],
@@ -312,6 +318,12 @@ function bindEvents() {
       renderPresetStrategyRules();
     }
   });
+  els.presetStrategyTag.addEventListener("change", updatePresetStrategyTag);
+  els.addStrategyEntry.addEventListener("click", () => changePresetStrategyEntries("add"));
+  els.duplicateStrategyEntry.addEventListener("click", () => changePresetStrategyEntries("duplicate"));
+  els.deleteStrategyEntry.addEventListener("click", () => changePresetStrategyEntries("delete"));
+  els.moveStrategyEntryUp.addEventListener("click", () => changePresetStrategyEntries("up"));
+  els.moveStrategyEntryDown.addEventListener("click", () => changePresetStrategyEntries("down"));
   [...els.presetStrategyBreakpoints, els.presetStrategyColorFirst].forEach((input) => {
     input.addEventListener("change", updatePresetStrategyRule);
   });
@@ -1630,7 +1642,7 @@ async function openPresetEditor(kind, editing) {
     return;
   }
   try {
-    let value = isSetting ? { server: "CH", round1_turns: 0 } : [];
+    let value = isSetting ? { server: "CH", round1_turns: 0 } : [newStrategyEntry("Entry 1")];
     if (editing) {
       const detail = await api(`/api/${kind}/${encodeURIComponent(selectedName)}`);
       value = isSetting ? detail.config : detail.entries;
@@ -1712,6 +1724,91 @@ function renderPresetFields() {
   renderPresetStrategyRules();
 }
 
+function newStrategyEntry(tag) {
+  const strategy = { breakpoint: [false, false], colorFirst: true };
+  ["card1", "card2", "card3"].forEach((card) => {
+    strategy[card] = { type: 2, cards: [], criticalStar: 0, more_or_less: true };
+  });
+  return { tag, strategy };
+}
+
+function changePresetStrategyEntries(action) {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "strategies" || els.presetStrategyRules.disabled) return;
+  try {
+    const entries = JSON.parse(els.presetJson.value);
+    if (!Array.isArray(entries)) return;
+    const sources = entries.map((_entry, index) => index);
+    const index = editor.strategyIndex || 0;
+    let selectedIndex = index;
+    if (action === "add") {
+      let number = entries.length + 1;
+      while (entries.some((entry) => entry?.tag === `Entry ${number}`)) number += 1;
+      selectedIndex = entries.length ? index + 1 : 0;
+      entries.splice(selectedIndex, 0, newStrategyEntry(`Entry ${number}`));
+      sources.splice(selectedIndex, 0, -1);
+    } else if (action === "duplicate") {
+      const entry = entries[index];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+      const copy = structuredClone(entry);
+      copy.tag = `${typeof entry.tag === "string" && entry.tag ? entry.tag : "Entry"} Copy`;
+      selectedIndex = index + 1;
+      entries.splice(selectedIndex, 0, copy);
+      sources.splice(selectedIndex, 0, index);
+    } else if (action === "delete") {
+      if (!entries.length || !window.confirm("Delete this strategy entry?")) return;
+      entries.splice(index, 1);
+      sources.splice(index, 1);
+      selectedIndex = Math.min(index, Math.max(0, entries.length - 1));
+    } else if (action === "up" || action === "down") {
+      selectedIndex = index + (action === "up" ? -1 : 1);
+      if (selectedIndex < 0 || selectedIndex >= entries.length) return;
+      [entries[index], entries[selectedIndex]] = [entries[selectedIndex], entries[index]];
+      [sources[index], sources[selectedIndex]] = [sources[selectedIndex], sources[index]];
+    } else {
+      return;
+    }
+    // Carry each entry's rejected edits with it, including copies of draft entries.
+    const drafts = {};
+    sources.forEach((sourceIndex, newIndex) => {
+      if (sourceIndex < 0) return;
+      const prefix = `${sourceIndex}.`;
+      Object.entries(editor.strategyDrafts || {}).forEach(([key, value]) => {
+        if (key.startsWith(prefix)) drafts[`${newIndex}.${key.slice(prefix.length)}`] = { ...value };
+      });
+    });
+    editor.strategyDrafts = drafts;
+    editor.strategyIndex = selectedIndex;
+    els.presetJson.value = JSON.stringify(entries, null, 2);
+    renderPresetStrategyRules();
+    setPresetError(Object.values(drafts)[0]?.error || "");
+  } catch (error) {
+    setPresetError(error.message);
+  }
+}
+
+function updatePresetStrategyTag() {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "strategies" || els.presetStrategyTag.disabled || els.presetStrategyRules.disabled) return;
+  const key = `${editor.strategyIndex}.tag`;
+  const drafts = editor.strategyDrafts ||= {};
+  els.presetStrategyTag.setCustomValidity("");
+  try {
+    const tag = els.presetStrategyTag.value.trim();
+    if (!tag) throw new Error("Entry name is required.");
+    const entries = JSON.parse(els.presetJson.value);
+    entries[editor.strategyIndex].tag = tag;
+    delete drafts[key];
+    els.presetJson.value = JSON.stringify(entries, null, 2);
+    renderPresetStrategyRules();
+    setPresetError(Object.values(drafts)[0]?.error || "");
+  } catch (error) {
+    drafts[key] = { value: els.presetStrategyTag.value, error: error.message };
+    els.presetStrategyTag.setCustomValidity(error.message);
+    setPresetError(error.message);
+  }
+}
+
 function renderPresetStrategyRules() {
   const editor = state.presetEditor;
   const isStrategy = editor?.kind === "strategies";
@@ -1727,22 +1824,34 @@ function renderPresetStrategyRules() {
   } catch (_error) {
     return;
   }
-  if (!Array.isArray(entries) || !entries.length) {
+  if (!Array.isArray(entries)) return;
+  if (!entries.length) {
     const option = document.createElement("option");
+    option.value = "";
     option.textContent = "No strategy entries";
     els.presetStrategyEntry.append(option);
-    return;
   }
-  const selectedIndex = Math.min(Math.max(editor.strategyIndex || 0, 0), entries.length - 1);
+  const selectedIndex = Math.max(0, Math.min(editor.strategyIndex || 0, entries.length - 1));
   editor.strategyIndex = selectedIndex;
-  els.presetStrategyEntry.replaceChildren(...entries.map((entry, index) => {
+  if (entries.length) els.presetStrategyEntry.replaceChildren(...entries.map((entry, index) => {
     const option = document.createElement("option");
     option.value = String(index);
-    option.textContent = `${index + 1}. ${entry?.tag || "Untitled"}`;
+    option.textContent = `${index + 1}. ${typeof entry?.tag === "string" && entry.tag ? entry.tag : "Untitled"}`;
     return option;
   }));
-  els.presetStrategyEntry.value = String(selectedIndex);
+  els.presetStrategyEntry.value = entries.length ? String(selectedIndex) : "";
+  els.presetStrategyEntry.disabled = !entries.length;
   els.presetStrategyRules.disabled = false;
+  const selectedEntry = entries[selectedIndex];
+  const validEntry = selectedEntry && typeof selectedEntry === "object" && !Array.isArray(selectedEntry);
+  els.duplicateStrategyEntry.disabled = !validEntry;
+  els.deleteStrategyEntry.disabled = !entries.length;
+  els.moveStrategyEntryUp.disabled = selectedIndex <= 0;
+  els.moveStrategyEntryDown.disabled = selectedIndex >= entries.length - 1;
+  const tagDraft = editor.strategyDrafts?.[`${selectedIndex}.tag`];
+  els.presetStrategyTag.disabled = !validEntry;
+  els.presetStrategyTag.value = tagDraft ? tagDraft.value : typeof selectedEntry?.tag === "string" ? selectedEntry.tag : "";
+  els.presetStrategyTag.setCustomValidity(tagDraft?.error || "");
   const strategy = entries[selectedIndex]?.strategy;
   const validStrategy = strategy && typeof strategy === "object" && !Array.isArray(strategy);
   const breakpoints = validStrategy ? strategy.breakpoint : null;

@@ -54,7 +54,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py
 ```
 
 Manual smoke steps:
@@ -106,3 +106,5 @@ The Tag Maker's **Command Cards** tab captures a normalized 1280x720 screenshot 
 Strategy preferences accept ordinary card codes (`1B`), tag-only codes (`S0`), and combined codes (`1BS0`). Selection tries alternative matching cards when an earlier preference prevents a complete three-card assignment. The two `breakpoint` booleans require different servants across the first/second and second/third face-card boundaries respectively; a boundary involving a Noble Phantasm is exempt.
 
 The strategy editor exposes each card's type, ordered preferences, and minimum/maximum critical-star threshold. Controls preserve unrelated JSON fields and other entries. Invalid control drafts remain visible across unrelated changes and prevent saving, including when the invalid draft belongs to another entry. Editing raw JSON replaces the control drafts. Strategy files and embedded script strategies reject invalid types, preference codes, star thresholds outside `0` through `10`, and non-boolean comparison values.
+
+New strategy presets start with one editable entry. Entries can be added, duplicated, renamed, reordered, and deleted without editing JSON. Reordering preserves both extension fields and invalid input drafts; duplicating copies the entry and its drafts, while deletion discards only that entry's drafts. The editor does not write the preset file until Save. Local toolbar icons come from Lucide Static 1.43.0; their license is included in `webapp/static/icons/LICENSE.txt`.

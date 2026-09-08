@@ -389,10 +389,23 @@
         <fieldset id="preset-strategy-rules" class="preset-strategy-rules" hidden>
           <legend>Strategy Rules</legend>
           <div class="preset-strategy-fields">
-            <label class="field-stack">
-              <span>Entry</span>
-              <select id="preset-strategy-entry" class="field" aria-label="Strategy entry"></select>
-            </label>
+            <div class="strategy-entry-toolbar">
+              <label class="field-stack">
+                <span>Entry</span>
+                <select id="preset-strategy-entry" class="field" aria-label="Strategy entry"></select>
+              </label>
+              <div class="strategy-entry-actions" role="group" aria-label="Manage strategy entries">
+                <button id="add-strategy-entry" class="icon-button" type="button" title="Add entry" aria-label="Add entry"><img src="/icons/plus.svg" width="16" height="16" alt=""></button>
+                <button id="duplicate-strategy-entry" class="icon-button" type="button" title="Duplicate entry" aria-label="Duplicate entry"><img src="/icons/copy.svg" width="16" height="16" alt=""></button>
+                <button id="move-strategy-entry-up" class="icon-button" type="button" title="Move entry up" aria-label="Move entry up"><img src="/icons/arrow-up.svg" width="16" height="16" alt=""></button>
+                <button id="move-strategy-entry-down" class="icon-button" type="button" title="Move entry down" aria-label="Move entry down"><img src="/icons/arrow-down.svg" width="16" height="16" alt=""></button>
+                <button id="delete-strategy-entry" class="icon-button" type="button" title="Delete entry" aria-label="Delete entry"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+              </div>
+              <label class="field-stack strategy-entry-name">
+                <span>Entry name</span>
+                <input id="preset-strategy-tag" class="field" type="text" autocomplete="off" required>
+              </label>
+            </div>
             <div class="preset-strategy-toggles">
               <label class="toggle-row"><input data-strategy-breakpoint="0" type="checkbox"><span>Break after card 1</span></label>
               <label class="toggle-row"><input data-strategy-breakpoint="1" type="checkbox"><span>Break after card 2</span></label>

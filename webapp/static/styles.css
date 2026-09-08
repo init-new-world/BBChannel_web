@@ -834,6 +834,44 @@ select:disabled {
   gap: 4px 16px;
 }
 
+.strategy-entry-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.strategy-entry-toolbar > * {
+  min-width: 0;
+}
+
+.strategy-entry-name {
+  grid-column: 1 / -1;
+}
+
+.strategy-entry-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.strategy-entry-actions .icon-button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+}
+
+.strategy-entry-actions img {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 560px) {
+  .strategy-entry-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .preset-strategy-toggles input {
   flex: 0 0 16px;
 }

@@ -329,6 +329,7 @@ def test_strategy_rule_controls_disable_for_invalid_or_empty_json(tag_console):
     page.set_default_timeout(10000)
     page.goto(url)
     page.locator("#new-strategy").click()
+    page.locator("#preset-json").fill("[]")
     controls = page.locator("#preset-strategy-rules")
     playwright.expect(controls).to_be_visible()
     playwright.expect(page.locator("#preset-strategy-entry")).to_be_disabled()
