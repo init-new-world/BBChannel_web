@@ -391,6 +391,14 @@
           <div class="turn-strategy-fields">
             <label class="field-stack"><span>Target</span><select id="preset-strategy-target" class="field" aria-label="Strategy target turn"></select></label>
             <label class="field-stack"><span>Preset</span><select id="preset-strategy-source" class="field" aria-label="Strategy preset source"></select></label>
+            <div id="preset-turn-nps" class="turn-np-fields" hidden>
+              <span class="turn-np-heading">NP Order</span>
+              <label class="field-stack"><span>First</span><select class="field" data-turn-np-index="0" aria-label="First Noble Phantasm"></select></label>
+              <label class="field-stack"><span>Second</span><select class="field" data-turn-np-index="1" aria-label="Second Noble Phantasm"></select></label>
+              <label class="field-stack"><span>Third</span><select class="field" data-turn-np-index="2" aria-label="Third Noble Phantasm"></select></label>
+              <button id="clear-turn-nps" class="icon-button" type="button" title="Clear NP order" aria-label="Clear NP order"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+              <span id="preset-turn-np-status" class="preset-error" role="status" hidden></span>
+            </div>
             <div class="turn-strategy-actions">
               <span id="preset-turn-strategy-status" role="status">No turn selected</span>
               <button id="apply-turn-strategy" class="ghost-button" type="button"><img src="/icons/arrow-right.svg" width="16" height="16" alt=""> Apply Preset</button>

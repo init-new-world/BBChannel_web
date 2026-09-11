@@ -858,6 +858,37 @@ select:disabled {
   flex: 0 0 16px;
 }
 
+.turn-np-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 40px;
+  align-items: end;
+  gap: 8px;
+}
+
+.turn-np-fields[hidden] {
+  display: none;
+}
+
+.turn-np-heading,
+#preset-turn-np-status {
+  grid-column: 1 / -1;
+}
+
+.turn-np-heading {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.turn-np-fields .icon-button {
+  width: 40px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
 @media (max-width: 560px) {
   .turn-strategy-fields {
     grid-template-columns: minmax(0, 1fr);
@@ -1031,6 +1062,11 @@ select:disabled {
 
 .preset-dialog-actions {
   justify-content: flex-end;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--panel);
+  padding-top: 10px;
 }
 
 .preset-dialog-actions button {

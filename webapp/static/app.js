@@ -78,6 +78,10 @@ const els = {
   presetTurnStrategyStatus: document.querySelector("#preset-turn-strategy-status"),
   applyTurnStrategy: document.querySelector("#apply-turn-strategy"),
   clearTurnStrategy: document.querySelector("#clear-turn-strategy"),
+  presetTurnNps: document.querySelector("#preset-turn-nps"),
+  presetTurnNpStatus: document.querySelector("#preset-turn-np-status"),
+  presetTurnNpInputs: [...document.querySelectorAll("[data-turn-np-index]")],
+  clearTurnNps: document.querySelector("#clear-turn-nps"),
   presetSkillInputs: [...document.querySelectorAll("[data-assist-skill-index]")],
   presetStrategyRules: document.querySelector("#preset-strategy-rules"),
   presetStrategyEntry: document.querySelector("#preset-strategy-entry"),
@@ -334,6 +338,8 @@ function bindEvents() {
   });
   els.applyTurnStrategy.addEventListener("click", applyPresetToTurn);
   els.clearTurnStrategy.addEventListener("click", clearTurnStrategy);
+  els.presetTurnNpInputs.forEach((input) => input.addEventListener("change", updateTurnNps));
+  els.clearTurnNps.addEventListener("click", () => updateTurnNps(null));
   els.presetStrategyEntry.addEventListener("change", () => {
     if (state.presetEditor?.kind === "strategies") {
       state.presetEditor.strategyIndex = Number(els.presetStrategyEntry.value);
@@ -1785,6 +1791,7 @@ function renderPresetScriptStrategy() {
   const isSetting = editor?.kind === "settings";
   els.presetScriptStrategy.hidden = !isSetting;
   els.presetScriptStrategy.disabled = true;
+  renderPresetTurnNps(null, "");
   updatePresetSaveState();
   if (!isSetting) return;
   let config;
@@ -1810,6 +1817,7 @@ function renderPresetScriptStrategy() {
     return option;
   }));
   els.presetStrategyTarget.value = target;
+  renderPresetTurnNps(config, target);
   els.presetStrategyTarget.disabled = !targets.length;
   els.presetStrategySource.replaceChildren(...(state.strategies.length ? state.strategies : [{ name: "" }]).map((item) => {
     const option = document.createElement("option");
@@ -1838,6 +1846,83 @@ function readScriptStrategyTarget() {
     throw new Error("Select a valid script turn.");
   }
   return { config, field };
+}
+
+function turnNpField(target) {
+  return /^round[0-9]+_turn[0-9]+_strategy$/.test(target) ? target.replace(/_strategy$/, "_np") : "";
+}
+
+function readTurnNps(config, field) {
+  const nps = Object.hasOwn(config, field) ? config[field] : [];
+  if (!Array.isArray(nps) || nps.length > 3 || new Set(nps).size !== nps.length
+      || nps.some((value) => !Number.isInteger(value) || value < 1 || value > 3)) {
+    throw new Error("Invalid NP sequence.");
+  }
+  return [...nps];
+}
+
+function renderPresetTurnNps(config, target) {
+  const field = turnNpField(target);
+  els.presetTurnNps.hidden = !field;
+  els.presetTurnNpStatus.hidden = true;
+  els.presetTurnNpStatus.textContent = "";
+  els.clearTurnNps.disabled = true;
+  els.presetTurnNpInputs.forEach((input) => { input.disabled = true; });
+  if (!field || !config) return;
+  const value = config[field];
+  els.clearTurnNps.disabled = !Object.hasOwn(config, field) || (Array.isArray(value) && !value.length);
+  try {
+    const nps = readTurnNps(config, field);
+    els.presetTurnNpInputs.forEach((input, index) => {
+      input.replaceChildren(...[0, 1, 2, 3].map((servant) => {
+        const option = document.createElement("option");
+        option.value = String(servant);
+        option.textContent = servant ? `NP ${servant}` : "None";
+        return option;
+      }));
+      input.value = String(nps[index] || 0);
+      input.disabled = index > nps.length;
+    });
+  } catch (error) {
+    els.presetTurnNpInputs.forEach((input) => { input.value = "0"; });
+    els.presetTurnNpStatus.textContent = error.message;
+    els.presetTurnNpStatus.hidden = false;
+  }
+}
+
+function updateTurnNps(event) {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy
+      || els.presetScriptStrategy.disabled) return;
+  try {
+    const { config, field: target } = readScriptStrategyTarget();
+    const field = turnNpField(target);
+    if (!field) return;
+    let nps = [];
+    if (event) {
+      const input = event.currentTarget;
+      if (input.disabled) return;
+      nps = readTurnNps(config, field);
+      const index = Number(input.dataset.turnNpIndex);
+      const servant = Number(input.value);
+      if (servant === 0) {
+        nps.splice(index, 1);
+      } else {
+        const previousIndex = nps.indexOf(servant);
+        if (previousIndex !== -1) nps[previousIndex] = nps[index];
+        nps[index] = servant;
+        nps = nps.filter((value) => value !== undefined);
+      }
+    } else if (els.clearTurnNps.disabled || !window.confirm("Clear Noble Phantasms for this turn?")) {
+      return;
+    }
+    config[field] = nps;
+    els.presetJson.value = JSON.stringify(config, null, 2);
+    renderPresetScriptStrategy();
+    setPresetError("");
+  } catch (error) {
+    setPresetError(error.message);
+  }
 }
 
 async function applyPresetToTurn() {
