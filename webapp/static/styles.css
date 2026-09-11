@@ -807,6 +807,7 @@ select:disabled {
 }
 
 .preset-assist-skills,
+.preset-script-strategy,
 .preset-strategy-rules {
   min-width: 0;
   margin: 0;
@@ -816,6 +817,7 @@ select:disabled {
 }
 
 .preset-assist-skills legend,
+.preset-script-strategy legend,
 .preset-strategy-rules legend {
   padding: 0;
   font-size: 12px;
@@ -826,6 +828,40 @@ select:disabled {
 .preset-strategy-fields {
   display: grid;
   gap: 8px;
+}
+
+.turn-strategy-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.turn-strategy-fields > * {
+  min-width: 0;
+}
+
+.turn-strategy-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.turn-strategy-actions > span {
+  flex: 1 1 150px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.turn-strategy-actions img {
+  flex: 0 0 16px;
+}
+
+@media (max-width: 560px) {
+  .turn-strategy-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .preset-strategy-toggles {

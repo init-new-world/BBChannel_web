@@ -386,6 +386,18 @@
             </div>
           </div>
         </fieldset>
+        <fieldset id="preset-script-strategy" class="preset-script-strategy" hidden>
+          <legend>Turn Strategy</legend>
+          <div class="turn-strategy-fields">
+            <label class="field-stack"><span>Target</span><select id="preset-strategy-target" class="field" aria-label="Strategy target turn"></select></label>
+            <label class="field-stack"><span>Preset</span><select id="preset-strategy-source" class="field" aria-label="Strategy preset source"></select></label>
+            <div class="turn-strategy-actions">
+              <span id="preset-turn-strategy-status" role="status">No turn selected</span>
+              <button id="apply-turn-strategy" class="ghost-button" type="button"><img src="/icons/arrow-right.svg" width="16" height="16" alt=""> Apply Preset</button>
+              <button id="clear-turn-strategy" class="icon-button" type="button" title="Clear turn strategies" aria-label="Clear turn strategies"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+            </div>
+          </div>
+        </fieldset>
         <fieldset id="preset-strategy-rules" class="preset-strategy-rules" hidden>
           <legend>Strategy Rules</legend>
           <div class="preset-strategy-fields">

@@ -54,7 +54,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py
 ```
 
 Manual smoke steps:
@@ -108,3 +108,5 @@ Strategy preferences accept ordinary card codes (`1B`), tag-only codes (`S0`), a
 The strategy editor exposes each card's type, ordered preferences, and minimum/maximum critical-star threshold. Controls preserve unrelated JSON fields and other entries. Invalid control drafts remain visible across unrelated changes and prevent saving, including when the invalid draft belongs to another entry. Editing raw JSON replaces the control drafts. Strategy files and embedded script strategies reject invalid types, preference codes, star thresholds outside `0` through `10`, and non-boolean comparison values.
 
 New strategy presets start with one editable entry. Entries can be added, duplicated, renamed, reordered, and deleted without editing JSON. Reordering preserves both extension fields and invalid input drafts; duplicating copies the entry and its drafts, while deletion discards only that entry's drafts. The editor does not write the preset file until Save. Local toolbar icons come from Lucide Static 1.43.0; their license is included in `webapp/static/icons/LICENSE.txt`.
+
+The script editor's Turn Strategy controls apply a saved strategy preset to a regular turn or a wave's extra turns. Applying copies all strategy entries in order, including extension fields, without linking future preset edits to that script. Replacing or clearing existing strategies requires confirmation; clearing leaves an empty strategy array so turns inferred from legacy keys are retained. Changes remain in the editor until Save. Loading a preset locks strategy actions and Save, rejects responses for a changed JSON draft, and ignores responses after the editor is closed. The turn selector refuses lists above 1,000 entries without changing the source JSON.

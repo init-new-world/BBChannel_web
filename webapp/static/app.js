@@ -72,6 +72,12 @@ const els = {
   presetName: document.querySelector("#preset-name"),
   presetJson: document.querySelector("#preset-json"),
   presetAssistSkills: document.querySelector("#preset-assist-skills"),
+  presetScriptStrategy: document.querySelector("#preset-script-strategy"),
+  presetStrategyTarget: document.querySelector("#preset-strategy-target"),
+  presetStrategySource: document.querySelector("#preset-strategy-source"),
+  presetTurnStrategyStatus: document.querySelector("#preset-turn-strategy-status"),
+  applyTurnStrategy: document.querySelector("#apply-turn-strategy"),
+  clearTurnStrategy: document.querySelector("#clear-turn-strategy"),
   presetSkillInputs: [...document.querySelectorAll("[data-assist-skill-index]")],
   presetStrategyRules: document.querySelector("#preset-strategy-rules"),
   presetStrategyEntry: document.querySelector("#preset-strategy-entry"),
@@ -304,6 +310,10 @@ function bindEvents() {
   els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
   els.presetForm.addEventListener("submit", savePreset);
+  els.presetDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closePresetEditor();
+  });
   els.presetJson.addEventListener("input", () => {
     if (state.presetEditor) {
       state.presetEditor.strategyDrafts = {};
@@ -312,6 +322,18 @@ function bindEvents() {
     setPresetError("");
   });
   els.presetSkillInputs.forEach((input) => input.addEventListener("change", updatePresetSkills));
+  els.presetStrategyTarget.addEventListener("change", () => {
+    if (state.presetEditor?.kind !== "settings") return;
+    state.presetEditor.strategyTarget = els.presetStrategyTarget.value;
+    renderPresetScriptStrategy();
+  });
+  els.presetStrategySource.addEventListener("change", () => {
+    if (state.presetEditor?.kind !== "settings") return;
+    state.presetEditor.strategySource = els.presetStrategySource.value;
+    renderPresetScriptStrategy();
+  });
+  els.applyTurnStrategy.addEventListener("click", applyPresetToTurn);
+  els.clearTurnStrategy.addEventListener("click", clearTurnStrategy);
   els.presetStrategyEntry.addEventListener("change", () => {
     if (state.presetEditor?.kind === "strategies") {
       state.presetEditor.strategyIndex = Number(els.presetStrategyEntry.value);
@@ -1610,6 +1632,7 @@ async function loadStrategies(preferredName = "") {
       els.strategySelect.value = selectedName;
     }
     await loadSelectedStrategy();
+    renderPresetScriptStrategy();
     updateControls();
   } catch (error) {
     els.strategySummary.textContent = "Strategies unavailable";
@@ -1716,12 +1739,152 @@ async function exportSelectedSetting() {
 function closePresetEditor() {
   els.presetDialog.close();
   state.presetEditor = null;
+  updatePresetSaveState();
   setPresetError("");
 }
 
 function renderPresetFields() {
   renderPresetSkills();
   renderPresetStrategyRules();
+  renderPresetScriptStrategy();
+}
+
+function updatePresetSaveState() {
+  els.savePreset.disabled = Boolean(state.presetEditor?.saving || state.presetEditor?.strategyApplyBusy);
+}
+
+function scriptStrategyTargets(config) {
+  const rounds = new Map();
+  Object.keys(config).forEach((key) => {
+    const roundMatch = /^round([0-9]+)_/.exec(key);
+    if (!roundMatch) return;
+    const round = Number(roundMatch[1]);
+    if (!Number.isSafeInteger(round)) throw new Error("Invalid wave number.");
+    if (!rounds.has(round)) rounds.set(round, 0);
+    const turnMatch = /^round[0-9]+_turn([0-9]+)_(skill|np|strategy|condition|replace)$/.exec(key);
+    if (turnMatch) rounds.set(round, Math.max(rounds.get(round), Number(turnMatch[1]) + 1));
+  });
+  const targets = [];
+  [...rounds].sort(([left], [right]) => left - right).forEach(([round, inferred]) => {
+    const declared = config[`round${round}_turns`];
+    const count = Math.max(inferred, Number.isInteger(declared) ? declared : 0);
+    if (!count) return;
+    if (!Number.isSafeInteger(count) || targets.length + count + 1 > 1000) {
+      throw new Error("Turn list exceeds 1,000 entries.");
+    }
+    for (let turn = 0; turn < count; turn += 1) {
+      targets.push({ field: `round${round}_turn${turn}_strategy`, label: `Wave ${round} / Turn ${turn + 1}` });
+    }
+    targets.push({ field: `round${round}_extraStrategy`, label: `Wave ${round} / Extra turns` });
+  });
+  return targets;
+}
+
+function renderPresetScriptStrategy() {
+  const editor = state.presetEditor;
+  const isSetting = editor?.kind === "settings";
+  els.presetScriptStrategy.hidden = !isSetting;
+  els.presetScriptStrategy.disabled = true;
+  updatePresetSaveState();
+  if (!isSetting) return;
+  let config;
+  let targets;
+  try {
+    config = JSON.parse(els.presetJson.value);
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid script JSON.");
+    targets = scriptStrategyTargets(config);
+  } catch (error) {
+    els.presetTurnStrategyStatus.textContent = error instanceof SyntaxError ? "Invalid script JSON." : error.message;
+    return;
+  }
+  const target = targets.some((item) => item.field === editor.strategyTarget)
+    ? editor.strategyTarget : targets[0]?.field || "";
+  editor.strategyTarget = target;
+  const source = state.strategies.some((item) => item.name === editor.strategySource)
+    ? editor.strategySource : state.strategies[0]?.name || "";
+  editor.strategySource = source;
+  els.presetStrategyTarget.replaceChildren(...(targets.length ? targets : [{ field: "", label: "No turns configured" }]).map((item) => {
+    const option = document.createElement("option");
+    option.value = item.field;
+    option.textContent = item.label;
+    return option;
+  }));
+  els.presetStrategyTarget.value = target;
+  els.presetStrategyTarget.disabled = !targets.length;
+  els.presetStrategySource.replaceChildren(...(state.strategies.length ? state.strategies : [{ name: "" }]).map((item) => {
+    const option = document.createElement("option");
+    option.value = item.name;
+    option.textContent = item.name || "No presets available";
+    return option;
+  }));
+  els.presetStrategySource.value = source;
+  els.presetStrategySource.disabled = !state.strategies.length;
+  els.presetScriptStrategy.disabled = Boolean(editor.strategyApplyBusy || editor.saving);
+  els.applyTurnStrategy.disabled = !target || !source;
+  const strategies = config[target];
+  els.clearTurnStrategy.disabled = !target || strategies == null || (Array.isArray(strategies) && !strategies.length);
+  els.presetTurnStrategyStatus.textContent = editor.strategyApplyBusy ? "Loading preset..."
+    : !target ? "No turn selected"
+      : Array.isArray(strategies) && strategies.length ? `${strategies.length} strategies configured`
+        : strategies !== undefined && strategies !== null && !Array.isArray(strategies) ? "Invalid strategy value"
+          : "No strategy configured";
+}
+
+function readScriptStrategyTarget() {
+  const config = JSON.parse(els.presetJson.value);
+  const field = els.presetStrategyTarget.value;
+  if (!config || typeof config !== "object" || Array.isArray(config)
+      || !scriptStrategyTargets(config).some((target) => target.field === field)) {
+    throw new Error("Select a valid script turn.");
+  }
+  return { config, field };
+}
+
+async function applyPresetToTurn() {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy || els.applyTurnStrategy.disabled
+      || els.presetScriptStrategy.disabled) return;
+  try {
+    const { config, field } = readScriptStrategyTarget();
+    const existing = config[field];
+    if (existing != null && (!Array.isArray(existing) || existing.length)
+        && !window.confirm("Replace the current turn strategies?")) return;
+    const sourceName = els.presetStrategySource.value;
+    const sourceJson = els.presetJson.value;
+    editor.strategyApplyBusy = true;
+    renderPresetScriptStrategy();
+    const preset = await api(`/api/strategies/${encodeURIComponent(sourceName)}`);
+    if (state.presetEditor !== editor) return;
+    if (els.presetJson.value !== sourceJson) throw new Error("Script changed while the preset was loading. Apply it again.");
+    if (!preset.validation?.ok || !Array.isArray(preset.entries) || !preset.entries.length) {
+      throw new Error("Selected strategy preset is invalid or empty.");
+    }
+    config[field] = preset.entries.map((entry) => structuredClone(entry.strategy));
+    els.presetJson.value = JSON.stringify(config, null, 2);
+    setPresetError("");
+  } catch (error) {
+    if (state.presetEditor === editor) setPresetError(error.message);
+  } finally {
+    editor.strategyApplyBusy = false;
+    if (state.presetEditor === editor) renderPresetScriptStrategy();
+    updatePresetSaveState();
+  }
+}
+
+function clearTurnStrategy() {
+  if (state.presetEditor?.kind !== "settings" || state.presetEditor.saving || els.clearTurnStrategy.disabled
+      || els.presetScriptStrategy.disabled) return;
+  try {
+    const { config, field } = readScriptStrategyTarget();
+    if (!window.confirm("Clear strategies for this turn?")) return;
+    // The empty field preserves turn counts inferred from legacy script keys.
+    config[field] = [];
+    els.presetJson.value = JSON.stringify(config, null, 2);
+    renderPresetScriptStrategy();
+    setPresetError("");
+  } catch (error) {
+    setPresetError(error.message);
+  }
 }
 
 function newStrategyEntry(tag) {
@@ -2026,7 +2189,7 @@ function updatePresetSkills() {
 async function savePreset(event) {
   event.preventDefault();
   const editor = state.presetEditor;
-  if (!editor) {
+  if (!editor || editor.saving || editor.strategyApplyBusy) {
     return;
   }
   const invalidDraft = editor.kind === "strategies" && Object.entries(editor.strategyDrafts || {})[0];
@@ -2052,22 +2215,25 @@ async function savePreset(event) {
   const isSetting = editor.kind === "settings";
   const request = isSetting ? { config: value } : { entries: value };
   request.overwrite = Boolean(editor.originalName && editor.originalName === name);
-  els.savePreset.disabled = true;
+  editor.saving = true;
+  renderPresetScriptStrategy();
   try {
     await api(`/api/${editor.kind}/${encodeURIComponent(name)}`, {
       method: "PUT",
       body: JSON.stringify(request),
     });
-    closePresetEditor();
+    if (state.presetEditor === editor) closePresetEditor();
     if (isSetting) {
       await loadSettings(name);
     } else {
       await loadStrategies(name);
     }
   } catch (error) {
-    setPresetError(error?.payload?.error?.message || error.message || "Save failed.");
+    if (state.presetEditor === editor) setPresetError(error?.payload?.error?.message || error.message || "Save failed.");
   } finally {
-    els.savePreset.disabled = false;
+    editor.saving = false;
+    if (state.presetEditor === editor) renderPresetScriptStrategy();
+    else updatePresetSaveState();
   }
 }
 
