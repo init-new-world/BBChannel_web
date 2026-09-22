@@ -77,6 +77,9 @@ const els = {
   presetWaveList: document.querySelector("#preset-wave-list"),
   presetWaveStatus: document.querySelector("#preset-wave-status"),
   addScriptWave: document.querySelector("#add-script-wave"),
+  presetRunOptions: document.querySelector("#preset-run-options"),
+  presetRunControls: document.querySelector("#preset-run-controls"),
+  presetRunInputs: [...document.querySelectorAll("[data-run-option]")],
   presetAssistSkills: document.querySelector("#preset-assist-skills"),
   presetScriptStrategy: document.querySelector("#preset-script-strategy"),
   presetStrategyTarget: document.querySelector("#preset-strategy-target"),
@@ -327,11 +330,17 @@ function bindEvents() {
   els.presetJson.addEventListener("input", () => {
     if (state.presetEditor) {
       state.presetEditor.strategyDrafts = {};
+      state.presetEditor.runOptionDrafts = {};
     }
     renderPresetFields();
     setPresetError("");
   });
   els.presetSkillInputs.forEach((input) => input.addEventListener("change", updatePresetSkills));
+  els.presetRunInputs.forEach((input) => {
+    input.addEventListener("change", updatePresetRunOption);
+    if (input.type === "number") input.addEventListener("input", (event) => updatePresetRunOption(event, true));
+    input.addEventListener("invalid", () => { els.presetRunOptions.open = true; });
+  });
   els.addScriptWave.addEventListener("click", () => changeScriptWaves("add-wave"));
   els.presetWaveList.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-wave-action]");
@@ -1929,6 +1938,7 @@ function changeScriptWaves(action, round) {
 
 function renderPresetScriptStrategy() {
   renderPresetWaves();
+  renderPresetRunOptions();
   const editor = state.presetEditor;
   const isSetting = editor?.kind === "settings";
   els.presetScriptStrategy.hidden = !isSetting;
@@ -1988,6 +1998,73 @@ function readScriptStrategyTarget() {
     throw new Error("Select a valid script turn.");
   }
   return { config, field };
+}
+
+function renderPresetRunOptions() {
+  const editor = state.presetEditor;
+  els.presetRunOptions.hidden = editor?.kind !== "settings";
+  els.presetRunControls.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy);
+  if (editor?.kind !== "settings") return;
+  if (!editor.runOptionsInitialized) {
+    els.presetRunOptions.open = false;
+    editor.runOptionsInitialized = true;
+  }
+  try {
+    const config = JSON.parse(els.presetJson.value);
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      els.presetRunControls.disabled = true;
+      return;
+    }
+    els.presetRunInputs.forEach((input) => {
+      const field = input.dataset.runOption;
+      const draft = editor.runOptionDrafts?.[field];
+      input.setCustomValidity(draft?.error || "");
+      if (input.type === "checkbox") {
+        input.checked = Boolean(config[field]);
+      } else {
+        const value = Object.hasOwn(config, field) ? config[field] : 30;
+        // Reassigning value would erase native partial numbers such as "1e".
+        if (!draft) input.value = typeof value === "number" ? String(value) : "";
+        input.disabled = !config.stuckRestart && !draft;
+      }
+    });
+  } catch {
+    // Raw JSON remains authoritative while its syntax is incomplete.
+    els.presetRunControls.disabled = true;
+  }
+}
+
+function updatePresetRunOption(event, draftOnly = false) {
+  const editor = state.presetEditor;
+  const input = event.currentTarget;
+  if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy
+      || els.presetRunControls.disabled || input.disabled) return;
+  try {
+    const config = JSON.parse(els.presetJson.value);
+    if (!config || typeof config !== "object" || Array.isArray(config)) return;
+    const field = input.dataset.runOption;
+    if (input.type === "checkbox") {
+      config[field] = input.checked;
+    } else {
+      const value = input.valueAsNumber;
+      if (!Number.isFinite(value) || value < 1 || value > 600) {
+        const error = "Check interval must be between 1 and 600 seconds.";
+        editor.runOptionDrafts ||= {};
+        editor.runOptionDrafts[field] = { error };
+        input.setCustomValidity(error);
+        return;
+      }
+      if (editor.runOptionDrafts) delete editor.runOptionDrafts[field];
+      input.setCustomValidity("");
+      if (draftOnly) return;
+      config[field] = value;
+    }
+    els.presetJson.value = JSON.stringify(config, null, 2);
+    renderPresetScriptStrategy();
+    setPresetError("");
+  } catch (error) {
+    setPresetError(error.message);
+  }
 }
 
 function turnNpField(target) {
@@ -2417,6 +2494,13 @@ async function savePreset(event) {
   event.preventDefault();
   const editor = state.presetEditor;
   if (!editor || editor.saving || editor.strategyApplyBusy) {
+    return;
+  }
+  const invalidRunField = editor.kind === "settings" && Object.keys(editor.runOptionDrafts || {})[0];
+  if (invalidRunField) {
+    els.presetRunOptions.open = true;
+    renderPresetRunOptions();
+    els.presetRunInputs.find((input) => input.dataset.runOption === invalidRunField)?.reportValidity();
     return;
   }
   const invalidDraft = editor.kind === "strategies" && Object.entries(editor.strategyDrafts || {})[0];

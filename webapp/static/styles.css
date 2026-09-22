@@ -807,12 +807,14 @@ select:disabled {
   flex-shrink: 0;
 }
 
-.preset-waves {
+.preset-waves,
+.preset-run-options {
   border-bottom: 1px solid var(--line);
   padding: 0 0 12px;
 }
 
-.preset-waves summary {
+.preset-waves summary,
+.preset-run-options summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12px;
@@ -859,6 +861,33 @@ select:disabled {
 #preset-wave-status:not([hidden]) {
   display: block;
   margin-top: 8px;
+}
+
+.preset-run-fields {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: center;
+}
+
+.preset-run-fields > * {
+  min-width: 0;
+}
+
+.preset-run-fields .checkline {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  white-space: normal;
+}
+
+.preset-run-fields .checkline input {
+  flex: none;
+  margin: 3px 0 0;
 }
 
 .preset-assist-skills,

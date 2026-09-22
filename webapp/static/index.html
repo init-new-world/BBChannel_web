@@ -377,6 +377,15 @@
             <span id="preset-wave-status" class="preset-error" role="status" hidden></span>
           </fieldset>
         </details>
+        <details id="preset-run-options" class="preset-run-options" hidden>
+          <summary>Run Options</summary>
+          <fieldset id="preset-run-controls" class="preset-run-fields">
+            <label class="checkline"><input data-run-option="noChain" type="checkbox"><span>Prefer no chain with single NP</span></label>
+            <label class="checkline"><input data-run-option="gameCrushRestart" type="checkbox"><span>Restart after game crash</span></label>
+            <label class="checkline"><input data-run-option="stuckRestart" type="checkbox"><span>Restart frozen screens</span></label>
+            <label class="field-stack"><span>Stall check interval (seconds)</span><input class="field" data-run-option="checkStuckInterval" type="number" min="1" max="600" step="any" required></label>
+          </fieldset>
+        </details>
         <fieldset id="preset-assist-skills" class="preset-assist-skills" hidden>
           <legend>Assist Skill Levels</legend>
           <div class="preset-skill-groups">
