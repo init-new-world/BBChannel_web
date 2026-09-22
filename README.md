@@ -54,7 +54,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py
 ```
 
 Manual smoke steps:
@@ -112,3 +112,5 @@ New strategy presets start with one editable entry. Entries can be added, duplic
 The script editor's Turn Strategy controls apply a saved strategy preset to a regular turn or a wave's extra turns. Applying copies all strategy entries in order, including extension fields, without linking future preset edits to that script. Replacing or clearing existing strategies requires confirmation; clearing leaves an empty strategy array so turns inferred from legacy keys are retained. Changes remain in the editor until Save. Loading a preset locks strategy actions and Save, rejects responses for a changed JSON draft, and ignores responses after the editor is closed. The turn selector refuses lists above 1,000 entries without changing the source JSON.
 
 Regular turns also expose an ordered list of up to three Noble Phantasms. Selecting an NP already in the sequence exchanges positions; choosing None removes that slot and compacts the sequence. These selections are preselected before command-card strategy evaluation. The controls preserve other turns and raw extension fields. Malformed sequences remain unchanged until explicitly cleared, and clearing keeps the empty NP array so inferred turns are retained. NP editing is unavailable for extra turns or during a pending preset load or save. Save and Cancel remain visible at the bottom of the scrollable editor.
+
+The collapsible Waves section can append waves and turns without editing JSON. A new wave starts with one turn. Removing a turn deletes only the last turn of its wave, including extension fields under that turn's key prefix; deleting a wave is allowed only for the highest-numbered wave and removes that wave's fields after confirmation. Other wave numbers and fields are never renumbered or rewritten. Counts include turns inferred from existing script fields. An empty script opens this section automatically; existing nonempty scripts keep it collapsed. Structural editing is disabled for noncanonical round/turn keys, invalid declared counts, or lists exceeding 1,000 waves or 1,000 selectable turn entries. All changes stay in the draft until Save, and wave controls are locked during preset loads and saves.

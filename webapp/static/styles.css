@@ -794,16 +794,71 @@ select:disabled {
 }
 
 .preset-form {
+  --preset-padding: 16px;
   height: 100%;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 16px;
+  padding: var(--preset-padding);
   overflow: auto;
 }
 
 .preset-form > * {
   flex-shrink: 0;
+}
+
+.preset-waves {
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 12px;
+}
+
+.preset-waves summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#preset-wave-count {
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+#preset-wave-controls {
+  min-width: 0;
+  border: 0;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.preset-wave-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px repeat(3, 34px);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.preset-wave-row > span {
+  overflow-wrap: anywhere;
+}
+
+.preset-wave-row output {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.preset-wave-row .icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+#preset-wave-status:not([hidden]) {
+  display: block;
+  margin-top: 8px;
 }
 
 .preset-assist-skills,
@@ -1063,10 +1118,12 @@ select:disabled {
 .preset-dialog-actions {
   justify-content: flex-end;
   position: sticky;
-  bottom: 0;
+  bottom: calc(-1 * var(--preset-padding));
   z-index: 1;
   background: var(--panel);
   padding-top: 10px;
+  padding-bottom: var(--preset-padding);
+  margin-bottom: calc(-1 * var(--preset-padding));
 }
 
 .preset-dialog-actions button {
@@ -1577,7 +1634,7 @@ select:disabled {
   }
 
   .preset-form {
-    padding: 12px;
+    --preset-padding: 12px;
   }
 
   .preset-dialog-actions button {

@@ -369,6 +369,14 @@
           <span>Name</span>
           <input id="preset-name" class="field" type="text" autocomplete="off" required>
         </label>
+        <details id="preset-waves" class="preset-waves" hidden>
+          <summary>Waves <span id="preset-wave-count"></span></summary>
+          <fieldset id="preset-wave-controls">
+            <div id="preset-wave-list"></div>
+            <button id="add-script-wave" class="ghost-button" type="button"><img src="/icons/plus.svg" width="16" height="16" alt=""> Add Wave</button>
+            <span id="preset-wave-status" class="preset-error" role="status" hidden></span>
+          </fieldset>
+        </details>
         <fieldset id="preset-assist-skills" class="preset-assist-skills" hidden>
           <legend>Assist Skill Levels</legend>
           <div class="preset-skill-groups">

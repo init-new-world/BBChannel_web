@@ -71,6 +71,12 @@ const els = {
   presetDialogTitle: document.querySelector("#preset-dialog-title"),
   presetName: document.querySelector("#preset-name"),
   presetJson: document.querySelector("#preset-json"),
+  presetWaves: document.querySelector("#preset-waves"),
+  presetWaveControls: document.querySelector("#preset-wave-controls"),
+  presetWaveCount: document.querySelector("#preset-wave-count"),
+  presetWaveList: document.querySelector("#preset-wave-list"),
+  presetWaveStatus: document.querySelector("#preset-wave-status"),
+  addScriptWave: document.querySelector("#add-script-wave"),
   presetAssistSkills: document.querySelector("#preset-assist-skills"),
   presetScriptStrategy: document.querySelector("#preset-script-strategy"),
   presetStrategyTarget: document.querySelector("#preset-strategy-target"),
@@ -326,6 +332,12 @@ function bindEvents() {
     setPresetError("");
   });
   els.presetSkillInputs.forEach((input) => input.addEventListener("change", updatePresetSkills));
+  els.addScriptWave.addEventListener("click", () => changeScriptWaves("add-wave"));
+  els.presetWaveList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-wave-action]");
+    if (!button || button.disabled) return;
+    changeScriptWaves(button.dataset.waveAction, Number(button.closest("[data-script-wave]").dataset.scriptWave));
+  });
   els.presetStrategyTarget.addEventListener("change", () => {
     if (state.presetEditor?.kind !== "settings") return;
     state.presetEditor.strategyTarget = els.presetStrategyTarget.value;
@@ -1759,7 +1771,7 @@ function updatePresetSaveState() {
   els.savePreset.disabled = Boolean(state.presetEditor?.saving || state.presetEditor?.strategyApplyBusy);
 }
 
-function scriptStrategyTargets(config) {
+function scriptWaveCounts(config) {
   const rounds = new Map();
   Object.keys(config).forEach((key) => {
     const roundMatch = /^round([0-9]+)_/.exec(key);
@@ -1770,14 +1782,23 @@ function scriptStrategyTargets(config) {
     const turnMatch = /^round[0-9]+_turn([0-9]+)_(skill|np|strategy|condition|replace)$/.exec(key);
     if (turnMatch) rounds.set(round, Math.max(rounds.get(round), Number(turnMatch[1]) + 1));
   });
-  const targets = [];
-  [...rounds].sort(([left], [right]) => left - right).forEach(([round, inferred]) => {
+  if (rounds.size > 1000) throw new Error("Wave list exceeds 1,000 entries.");
+  let total = 0;
+  return [...rounds].sort(([left], [right]) => left - right).map(([round, inferred]) => {
     const declared = config[`round${round}_turns`];
     const count = Math.max(inferred, Number.isInteger(declared) ? declared : 0);
-    if (!count) return;
-    if (!Number.isSafeInteger(count) || targets.length + count + 1 > 1000) {
+    total += count ? count + 1 : 0;
+    if (!Number.isSafeInteger(count) || total > 1000) {
       throw new Error("Turn list exceeds 1,000 entries.");
     }
+    return { round, count };
+  });
+}
+
+function scriptStrategyTargets(config) {
+  const targets = [];
+  scriptWaveCounts(config).forEach(({ round, count }) => {
+    if (!count) return;
     for (let turn = 0; turn < count; turn += 1) {
       targets.push({ field: `round${round}_turn${turn}_strategy`, label: `Wave ${round} / Turn ${turn + 1}` });
     }
@@ -1786,7 +1807,128 @@ function scriptStrategyTargets(config) {
   return targets;
 }
 
+function editableScriptWaves(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid script JSON.");
+  const canonicalIndex = /^(?:0|[1-9][0-9]*)$/;
+  Object.entries(config).forEach(([key, value]) => {
+    const match = /^round([^_]*)_(?:turn([^_]*)_)?/.exec(key);
+    if (match && (!canonicalIndex.test(match[1]) || !Number.isSafeInteger(Number(match[1]))
+        || (match[2] !== undefined && (!canonicalIndex.test(match[2]) || !Number.isSafeInteger(Number(match[2])))))) {
+      throw new Error("Wave editing requires canonical round and turn keys.");
+    }
+    if (/^round[0-9]+_turns$/.test(key) && (!Number.isInteger(value) || value < 0)) {
+      throw new Error("Wave turn counts must be non-negative integers.");
+    }
+  });
+  return scriptWaveCounts(config);
+}
+
+function renderPresetWaves() {
+  const editor = state.presetEditor;
+  els.presetWaves.hidden = editor?.kind !== "settings";
+  els.presetWaveControls.disabled = true;
+  els.presetWaveList.replaceChildren();
+  els.presetWaveCount.textContent = "";
+  els.presetWaveStatus.hidden = true;
+  if (editor?.kind !== "settings") return;
+  try {
+    const waves = editableScriptWaves(JSON.parse(els.presetJson.value));
+    if (!editor.wavesInitialized) {
+      els.presetWaves.open = !waves.some((wave) => wave.count);
+      editor.wavesInitialized = true;
+    }
+    els.presetWaveCount.textContent = String(waves.length);
+    const lastRound = waves.at(-1)?.round;
+    const total = waves.reduce((sum, wave) => sum + (wave.count ? wave.count + 1 : 0), 0);
+    els.addScriptWave.disabled = total + 2 > 1000 || waves.length >= 1000
+      || !Number.isSafeInteger((lastRound ?? 0) + 1);
+    waves.forEach(({ round, count }) => {
+      const row = document.createElement("div");
+      row.className = "preset-wave-row";
+      row.dataset.scriptWave = String(round);
+      const name = document.createElement("span");
+      name.textContent = `Wave ${round}`;
+      const turns = document.createElement("output");
+      turns.textContent = `${count} ${count === 1 ? "turn" : "turns"}`;
+      row.append(name, turns);
+      [
+        ["add-turn", `Add turn to wave ${round}`, "plus", total + (count ? 1 : 2) > 1000],
+        ["remove-turn", `Remove last turn from wave ${round}`, "minus", !count],
+        ["delete-wave", `Delete wave ${round}`, "trash-2", round !== lastRound],
+      ].forEach(([action, label, icon, disabled]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "icon-button";
+        button.dataset.waveAction = action;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.disabled = disabled;
+        const image = document.createElement("img");
+        image.src = `/icons/${icon}.svg`;
+        image.alt = "";
+        image.width = 16;
+        image.height = 16;
+        button.append(image);
+        row.append(button);
+      });
+      els.presetWaveList.append(row);
+    });
+    els.presetWaveControls.disabled = Boolean(editor.saving || editor.strategyApplyBusy);
+  } catch (error) {
+    els.presetWaveStatus.textContent = error instanceof SyntaxError ? "Invalid script JSON." : error.message;
+    els.presetWaveStatus.hidden = false;
+  }
+}
+
+function changeScriptWaves(action, round) {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy || els.presetWaveControls.disabled) return;
+  const restoreFocus = els.presetWaveControls.contains(document.activeElement);
+  try {
+    const config = JSON.parse(els.presetJson.value);
+    const waves = editableScriptWaves(config);
+    const wave = waves.find((item) => item.round === round);
+    if (action === "add-wave") {
+      if (els.addScriptWave.disabled) return;
+      round = (waves.at(-1)?.round ?? 0) + 1;
+      config[`round${round}_turns`] = 1;
+      editor.strategyTarget = `round${round}_turn0_strategy`;
+    } else if (!wave) {
+      return;
+    } else if (action === "add-turn") {
+      config[`round${round}_turns`] = wave.count + 1;
+      editor.strategyTarget = `round${round}_turn${wave.count}_strategy`;
+    } else if (action === "remove-turn") {
+      if (!wave.count || !window.confirm(`Remove turn ${wave.count} from wave ${round} and all its fields?`)) return;
+      const prefix = `round${round}_turn${wave.count - 1}_`;
+      Object.keys(config).filter((key) => key.startsWith(prefix)).forEach((key) => { delete config[key]; });
+      config[`round${round}_turns`] = wave.count - 1;
+    } else if (action === "delete-wave") {
+      if (round !== waves.at(-1)?.round || !window.confirm(`Delete wave ${round} and all its fields?`)) return;
+      const prefix = `round${round}_`;
+      Object.keys(config).filter((key) => key.startsWith(prefix)).forEach((key) => { delete config[key]; });
+    } else {
+      return;
+    }
+    editableScriptWaves(config);
+    els.presetJson.value = JSON.stringify(config, null, 2);
+    renderPresetScriptStrategy();
+    if (restoreFocus) {
+      const row = els.presetWaveList.querySelector(`[data-script-wave="${round}"]`);
+      const preferred = action === "add-wave" ? els.addScriptWave : row?.querySelector(`[data-wave-action="${action}"]`);
+      const button = [preferred, row?.querySelector('[data-wave-action="remove-turn"]'),
+        row?.querySelector('[data-wave-action="add-turn"]'), els.addScriptWave,
+        els.presetWaveList.querySelector("button:not(:disabled)")].find((item) => item && !item.disabled);
+      button?.focus({ preventScroll: true });
+    }
+    setPresetError("");
+  } catch (error) {
+    setPresetError(error.message);
+  }
+}
+
 function renderPresetScriptStrategy() {
+  renderPresetWaves();
   const editor = state.presetEditor;
   const isSetting = editor?.kind === "settings";
   els.presetScriptStrategy.hidden = !isSetting;
