@@ -399,6 +399,24 @@
             <label class="field-stack"><span>Stall check interval (seconds)</span><input class="field" data-run-option="checkStuckInterval" type="number" min="1" max="600" step="any" required></label>
           </fieldset>
         </details>
+        <details id="preset-assist-options" class="preset-assist-options" hidden>
+          <summary>Assist Filters</summary>
+          <fieldset id="preset-assist-controls" class="preset-assist-fields">
+            <label class="field-stack"><span>Recognition mode</span><select class="field" data-assist-option="assistMode">
+              <option value="从者礼装" data-servant data-equip>Servant + CE</option>
+              <option value="仅从者" data-servant>Servant only</option>
+              <option value="仅礼装" data-equip>CE only</option>
+              <option value="不识别">First support</option>
+              <option value="冠位助战" data-servant data-equip data-grand>Grand + CE</option>
+              <option value="冠位助战仅礼装" data-equip data-grand>Grand CE only</option>
+            </select></label>
+            <label class="field-stack"><span>Minimum NP level</span><select class="field" data-assist-option="NPlevel" data-value-type="number" data-assist-requires="servant"><option value="1">Any</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
+            <label class="checkline"><input data-assist-option="onlyFriendAssist" data-assist-requires="servant" type="checkbox"><span>Friends only</span></label>
+            <label class="checkline"><input data-assist-option="fullEquip" data-assist-requires="equip" type="checkbox"><span>Max limit break CE</span></label>
+            <label class="field-stack"><span>Grand bond CE</span><select class="field" data-assist-option="jbType" data-assist-requires="grand"><option value="任意">Any</option><option value="初始">Original</option><option value="NP50">NP 50%</option></select></label>
+            <label class="checkline"><input data-assist-option="noGrandRefresh" data-assist-requires="grand" type="checkbox"><span>Refresh at grand boundary</span></label>
+          </fieldset>
+        </details>
         <fieldset id="preset-assist-skills" class="preset-assist-skills" hidden>
           <legend>Assist Skill Levels</legend>
           <div class="preset-skill-groups">

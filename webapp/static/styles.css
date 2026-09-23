@@ -808,6 +808,7 @@ select:disabled {
 }
 
 .preset-team,
+.preset-assist-options,
 .preset-waves,
 .preset-run-options {
   border-bottom: 1px solid var(--line);
@@ -815,6 +816,7 @@ select:disabled {
 }
 
 .preset-team summary,
+.preset-assist-options summary,
 .preset-waves summary,
 .preset-run-options summary {
   cursor: pointer;
@@ -866,6 +868,7 @@ select:disabled {
 }
 
 .preset-team-fields,
+.preset-assist-fields,
 .preset-run-fields {
   min-width: 0;
   border: 0;
@@ -879,6 +882,8 @@ select:disabled {
 
 .preset-team-fields > *,
 .preset-team-fields .field,
+.preset-assist-fields > *,
+.preset-assist-fields .field,
 .preset-run-fields > * {
   min-width: 0;
 }
@@ -892,7 +897,8 @@ select:disabled {
   overflow-wrap: anywhere;
 }
 
-.preset-team-fields select {
+.preset-team-fields select,
+.preset-assist-fields select {
   padding-right: 28px;
   text-overflow: ellipsis;
 }
@@ -901,6 +907,7 @@ select:disabled {
   flex-shrink: 0;
 }
 
+.preset-assist-fields .checkline,
 .preset-run-fields .checkline {
   display: flex;
   align-items: flex-start;
@@ -908,6 +915,7 @@ select:disabled {
   white-space: normal;
 }
 
+.preset-assist-fields .checkline input,
 .preset-run-fields .checkline input {
   flex: none;
   margin: 3px 0 0;

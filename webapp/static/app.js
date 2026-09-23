@@ -1,4 +1,5 @@
 import { createPresetTeamEditor } from "./preset-team.js";
+import { createPresetAssistEditor } from "./preset-assist.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
 const ACTIVE_JOB_STATES = new Set(["queued", "running", "paused", "cancelling"]);
@@ -259,6 +260,16 @@ const presetTeam = createPresetTeamEditor({
   getEditor: () => state.presetEditor,
   source: els.presetJson,
   request: api,
+  onChange: () => {
+    renderPresetScriptStrategy();
+    setPresetError("");
+  },
+  onError: setPresetError,
+});
+
+const presetAssist = createPresetAssistEditor({
+  getEditor: () => state.presetEditor,
+  source: els.presetJson,
   onChange: () => {
     renderPresetScriptStrategy();
     setPresetError("");
@@ -1951,6 +1962,7 @@ function changeScriptWaves(action, round) {
 
 function renderPresetScriptStrategy() {
   presetTeam.render();
+  presetAssist.render();
   renderPresetWaves();
   renderPresetRunOptions();
   const editor = state.presetEditor;
