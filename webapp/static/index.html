@@ -369,6 +369,19 @@
           <span>Name</span>
           <input id="preset-name" class="field" type="text" autocomplete="off" required>
         </label>
+        <details id="preset-team" class="preset-team" hidden>
+          <summary>Team</summary>
+          <fieldset id="preset-team-controls" class="preset-team-fields">
+            <label class="field-stack"><span>Slot 1</span><select class="field" data-team-slot="0"></select></label>
+            <label class="field-stack"><span>Slot 2</span><select class="field" data-team-slot="1"></select></label>
+            <label class="field-stack"><span>Slot 3</span><select class="field" data-team-slot="2"></select></label>
+            <label class="field-stack"><span>Slot 4</span><select class="field" data-team-slot="3"></select></label>
+            <label class="field-stack"><span>Slot 5</span><select class="field" data-team-slot="4"></select></label>
+            <label class="field-stack"><span>Slot 6</span><select class="field" data-team-slot="5"></select></label>
+            <label class="field-stack"><span>Assist slot</span><select id="preset-assist-slot" class="field"></select></label>
+            <div class="preset-team-status"><span id="preset-team-status" role="status"></span><button id="retry-team-catalog" class="ghost-button" type="button" hidden>Retry</button></div>
+          </fieldset>
+        </details>
         <details id="preset-waves" class="preset-waves" hidden>
           <summary>Waves <span id="preset-wave-count"></span></summary>
           <fieldset id="preset-wave-controls">

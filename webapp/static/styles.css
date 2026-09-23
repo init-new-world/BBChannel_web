@@ -807,12 +807,14 @@ select:disabled {
   flex-shrink: 0;
 }
 
+.preset-team,
 .preset-waves,
 .preset-run-options {
   border-bottom: 1px solid var(--line);
   padding: 0 0 12px;
 }
 
+.preset-team summary,
 .preset-waves summary,
 .preset-run-options summary {
   cursor: pointer;
@@ -863,6 +865,7 @@ select:disabled {
   margin-top: 8px;
 }
 
+.preset-team-fields,
 .preset-run-fields {
   min-width: 0;
   border: 0;
@@ -874,8 +877,28 @@ select:disabled {
   align-items: center;
 }
 
+.preset-team-fields > *,
+.preset-team-fields .field,
 .preset-run-fields > * {
   min-width: 0;
+}
+
+.preset-team-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.preset-team-fields select {
+  padding-right: 28px;
+  text-overflow: ellipsis;
+}
+
+.preset-team-status button {
+  flex-shrink: 0;
 }
 
 .preset-run-fields .checkline {
