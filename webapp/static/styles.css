@@ -809,6 +809,7 @@ select:disabled {
 
 .preset-team,
 .preset-assist-options,
+.preset-assist-equips,
 .preset-waves,
 .preset-run-options {
   border-bottom: 1px solid var(--line);
@@ -817,6 +818,7 @@ select:disabled {
 
 .preset-team summary,
 .preset-assist-options summary,
+.preset-assist-equips summary,
 .preset-waves summary,
 .preset-run-options summary {
   cursor: pointer;
@@ -830,6 +832,7 @@ select:disabled {
   font-weight: 400;
 }
 
+#preset-assist-equip-controls,
 #preset-wave-controls {
   min-width: 0;
   border: 0;
@@ -854,6 +857,8 @@ select:disabled {
   color: var(--muted);
 }
 
+.preset-equip-toolbar .icon-button,
+.preset-equip-row .icon-button,
 .preset-wave-row .icon-button {
   width: 34px;
   height: 34px;
@@ -898,12 +903,59 @@ select:disabled {
 }
 
 .preset-team-fields select,
+.preset-equip-toolbar select,
 .preset-assist-fields select {
+  min-width: 0;
   padding-right: 28px;
   text-overflow: ellipsis;
 }
 
 .preset-team-status button {
+  flex-shrink: 0;
+}
+
+.preset-equip-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px 34px;
+  gap: 8px;
+}
+
+.preset-equip-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.preset-equip-thumbnail,
+.preset-equip-thumbnail img {
+  width: 88px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.preset-equip-row small {
+  color: var(--muted);
+}
+
+.preset-equip-row small:not([hidden]) {
+  display: block;
+}
+
+.preset-equip-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.preset-equip-status button {
   flex-shrink: 0;
 }
 

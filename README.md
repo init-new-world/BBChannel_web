@@ -42,6 +42,9 @@ For a MuMu instance exposed to WSL through the Windows host, `/api/devices` shou
 ```bash
 python -m pytest -q
 node --check webapp/static/app.js
+node --check webapp/static/preset-team.js
+node --check webapp/static/preset-assist.js
+node --check webapp/static/preset-equips.js
 ```
 
 If optional runtime dependencies are missing, dependency-specific tests skip instead of failing. Install `requirements.txt` before running the server smoke test:
@@ -54,7 +57,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_team_editor_browser.py tests/test_assist_options_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_team_editor_browser.py tests/test_assist_options_browser.py tests/test_assist_equips_browser.py
 ```
 
 Manual smoke steps:
@@ -120,3 +123,5 @@ Run Options exposes the script's single-NP no-chain preference (`noChain`), cras
 Team exposes six servant slots using the script server's local servant catalog, plus the assist slot. Selecting None clears only that servant name; selecting Not set removes only `assistIdx`, without moving servants or changing `usedServant`. Existing aliases, unknown names, and malformed fields remain unchanged until explicitly replaced. Catalog loading never changes the JSON draft, and responses from an older server selection or closed editor are ignored. A failed catalog load can be retried and does not block unrelated editing or Save. Team controls lock during a preset application or save; all team changes stay in the draft until Save.
 
 Assist Filters exposes the six existing recognition modes and the saved minimum NP level, friends-only, max-limit-break CE, grand bond CE, and grand-boundary refresh settings. The NP Any option writes level 1, which does not require NP-level recognition. CE-only modes disable servant filters; servant-only mode disables the limit-break filter; selecting the first support bypasses recognition filters. Grand bond and boundary-refresh options are enabled only for grand modes. Switching modes never clears the stored filter values or changes CE names, skill levels, tags, and other script fields. Unknown or malformed selections remain visible as current values until explicitly replaced, and changes are saved only with the rest of the script. Non-boolean checkbox values display their backend truth value and remain unchanged until toggled. The grand-boundary refresh control uses the legacy `noGrandRefresh` field: it requests a refresh when scrolling reaches a non-grand section, not a ban on refreshing.
+
+Assist CEs adds active templates to `assistEquip`, previews configured candidates, removes candidates, and clears the list after confirmation. Archived templates cannot be added, and these controls never activate, archive, or otherwise modify template inventory. Legacy strings and nested arrays remain unchanged on load; adding appends a name, while removal deletes every occurrence of that name and preserves the other array structure. Missing templates remain visible and removable. Null values are retained until edited. Unsupported values and structures exceeding 1,000 JSON values disable structural edits but can be explicitly cleared. The section is inactive when the recognition mode does not use CEs. Catalog refreshes preserve the current draft, ignore closed editors, and do not block saving; unavailable images do not prevent list editing. All candidate changes stay in the draft until Save.

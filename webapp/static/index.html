@@ -417,6 +417,18 @@
             <label class="checkline"><input data-assist-option="noGrandRefresh" data-assist-requires="grand" type="checkbox"><span>Refresh at grand boundary</span></label>
           </fieldset>
         </details>
+        <details id="preset-assist-equips" class="preset-assist-equips" hidden>
+          <summary>Assist CEs</summary>
+          <fieldset id="preset-assist-equip-controls">
+            <div class="preset-equip-toolbar">
+              <select id="preset-assist-equip-source" class="field" aria-label="Active CE template"></select>
+              <button id="add-assist-equip" class="icon-button" type="button" title="Add CE" aria-label="Add CE"><img src="/icons/plus.svg" width="16" height="16" alt=""></button>
+              <button id="clear-assist-equips" class="icon-button" type="button" title="Clear all CEs" aria-label="Clear all CEs"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+            </div>
+            <div id="preset-assist-equip-list"></div>
+            <div class="preset-equip-status"><span id="preset-assist-equip-status" role="status"></span><button id="refresh-assist-equips" class="ghost-button" type="button">Refresh</button></div>
+          </fieldset>
+        </details>
         <fieldset id="preset-assist-skills" class="preset-assist-skills" hidden>
           <legend>Assist Skill Levels</legend>
           <div class="preset-skill-groups">

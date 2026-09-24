@@ -41,7 +41,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
     const editor = getEditor();
     section.hidden = editor?.kind !== "settings";
     controls.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy);
-    if (editor?.kind !== "settings") return;
+    if (editor?.kind !== "settings") return false;
     if (!editor.assistOptionsInitialized) {
       section.open = false;
       editor.assistOptionsInitialized = true;
@@ -51,7 +51,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
       config = readConfig();
     } catch {
       controls.disabled = true;
-      return;
+      return false;
     }
     inputs.forEach((input) => {
       const value = config[input.dataset.assistOption];
@@ -64,6 +64,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
       const requirement = input.dataset.assistRequires;
       input.disabled = Boolean(requirement) && !modeOption?.hasAttribute(`data-${requirement}`);
     });
+    return Boolean(modeOption?.hasAttribute("data-equip"));
   }
 
   inputs.forEach((input) => input.addEventListener("change", () => {
