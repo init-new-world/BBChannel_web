@@ -75,6 +75,14 @@ select:disabled {
   white-space: nowrap;
 }
 
+.topbar-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .brand-mark {
   width: 30px;
   height: 30px;
@@ -798,7 +806,7 @@ select:disabled {
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   padding: var(--preset-padding);
   overflow: auto;
 }
@@ -813,7 +821,7 @@ select:disabled {
 .preset-waves,
 .preset-run-options {
   border-bottom: 1px solid var(--line);
-  padding: 0 0 12px;
+  padding: 0 0 8px;
 }
 
 .preset-team summary,
@@ -883,6 +891,16 @@ select:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-items: center;
+}
+
+.preset-run-fields {
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.preset-run-fields .checkline {
+  align-items: center;
+  line-height: 1.25;
 }
 
 .preset-team-fields > *,
@@ -1664,12 +1682,19 @@ select:disabled {
   }
 
   .topbar {
-    grid-template-columns: 1fr;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
   }
 
   .connection-strip {
+    grid-column: 1 / -1;
+    grid-row: 2;
     flex-wrap: wrap;
+  }
+
+  .topbar-meta {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .compact,
@@ -1720,6 +1745,56 @@ select:disabled {
 }
 
 @media (max-width: 560px) {
+  .topbar {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .connection-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
+    grid-template-areas:
+      "backend device device"
+      "endpoint add refresh"
+      "connect disconnect disconnect";
+    gap: 6px;
+  }
+
+  .connection-strip > * {
+    min-width: 0;
+    width: 100%;
+  }
+
+  #backend-select {
+    grid-area: backend;
+  }
+
+  #device-list {
+    grid-area: device;
+  }
+
+  #manual-adb-endpoint {
+    grid-area: endpoint;
+  }
+
+  #add-adb-endpoint {
+    grid-area: add;
+  }
+
+  #refresh-devices {
+    grid-area: refresh;
+    width: 34px;
+    padding: 0;
+  }
+
+  #connect-device {
+    grid-area: connect;
+  }
+
+  #disconnect-device {
+    grid-area: disconnect;
+  }
+
   .tool-panel,
   .job-panel,
   .coordinate-grid,
@@ -1742,8 +1817,7 @@ select:disabled {
   }
 
   .screen-actions,
-  .screen-actions button,
-  .connection-strip button {
+  .screen-actions button {
     width: 100%;
   }
 

@@ -23,7 +23,7 @@
           <button id="connect-device" class="primary-button" type="button">Connect</button>
           <button id="disconnect-device" class="ghost-button" type="button">Disconnect</button>
         </div>
-        <div id="connection-state" class="status-pill">Disconnected</div>
+        <div class="topbar-meta"><div id="connection-state" class="status-pill">Disconnected</div></div>
       </header>
 
       <section class="workspace">
@@ -407,14 +407,14 @@
         <details id="preset-run-options" class="preset-run-options" hidden>
           <summary>Run Options</summary>
           <fieldset id="preset-run-controls" class="preset-run-fields">
-            <label class="checkline"><input data-run-option="noChain" type="checkbox"><span>Prefer no chain with single NP</span></label>
-            <label class="checkline"><input data-run-option="gameCrushRestart" type="checkbox"><span>Restart after game crash</span></label>
-            <label class="checkline"><input data-run-option="stuckRestart" type="checkbox"><span>Restart frozen screens</span></label>
-            <label class="field-stack"><span>Stall check interval (seconds)</span><input class="field" data-run-option="checkStuckInterval" type="number" min="1" max="600" step="any" required></label>
-            <label class="checkline"><input data-run-option="randomTouch" type="checkbox"><span>Randomize tap positions</span></label>
-            <label class="field-stack"><span>Random wait (seconds)</span><input class="field" data-run-option="randomTime" type="number" min="0" max="10" step="any" required></label>
-            <label class="checkline"><input data-run-option="firstBattleSet" type="checkbox"><span>Normalize first battle settings</span></label>
-            <label class="checkline"><input data-run-option="noSpeedupSkill" type="checkbox"><span>Disable skill animation speedup taps</span></label>
+            <label class="checkline" title="Prefer no chain when selecting one Noble Phantasm"><input data-run-option="noChain" type="checkbox"><span>Single NP: no chain</span></label>
+            <label class="checkline" title="Restart after a game crash"><input data-run-option="gameCrushRestart" type="checkbox"><span>Crash restart</span></label>
+            <label class="checkline" title="Restart when the screen stops changing"><input data-run-option="stuckRestart" type="checkbox"><span>Freeze restart</span></label>
+            <label class="field-stack" title="Interval between frozen-screen checks, in seconds"><span>Freeze check (s)</span><input class="field" data-run-option="checkStuckInterval" type="number" min="1" max="600" step="any" required></label>
+            <label class="checkline" title="Randomize positions within tap targets"><input data-run-option="randomTouch" type="checkbox"><span>Random tap</span></label>
+            <label class="field-stack" title="Additional random wait, in seconds"><span>Random wait (s)</span><input class="field" data-run-option="randomTime" type="number" min="0" max="10" step="any" required></label>
+            <label class="checkline" title="Normalize battle menu options at the start of the first battle"><input data-run-option="firstBattleSet" type="checkbox"><span>First battle setup</span></label>
+            <label class="checkline" title="Do not send extra taps to advance skill animations"><input data-run-option="noSpeedupSkill" type="checkbox"><span>No skill speedup</span></label>
           </fieldset>
         </details>
         <details id="preset-assist-options" class="preset-assist-options" hidden>
