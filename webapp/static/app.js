@@ -2060,10 +2060,11 @@ function renderPresetRunOptions() {
       if (input.type === "checkbox") {
         input.checked = Boolean(config[field]);
       } else {
-        const value = Object.hasOwn(config, field) ? config[field] : 30;
+        const defaultValue = field === "randomTime" ? 0 : 30;
+        const value = Object.hasOwn(config, field) ? config[field] : defaultValue;
         // Reassigning value would erase native partial numbers such as "1e".
         if (!draft) input.value = typeof value === "number" ? String(value) : "";
-        input.disabled = !config.stuckRestart && !draft;
+        input.disabled = field === "checkStuckInterval" && !config.stuckRestart && !draft;
       }
     });
   } catch {
@@ -2085,8 +2086,9 @@ function updatePresetRunOption(event, draftOnly = false) {
       config[field] = input.checked;
     } else {
       const value = input.valueAsNumber;
-      if (!Number.isFinite(value) || value < 1 || value > 600) {
-        const error = "Check interval must be between 1 and 600 seconds.";
+      if (!Number.isFinite(value) || value < Number(input.min) || value > Number(input.max)) {
+        const error = field === "randomTime" ? "Random wait must be between 0 and 10 seconds."
+          : "Check interval must be between 1 and 600 seconds.";
         editor.runOptionDrafts ||= {};
         editor.runOptionDrafts[field] = { error };
         input.setCustomValidity(error);

@@ -18,6 +18,121 @@ def _option(page, field):
 
 
 @pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_randomization_options_are_draft_only_and_update_execution_plan(tag_console, width, height):
+    browser, url, directory = tag_console
+    page = browser.new_page(viewport={"width": width, "height": height})
+    page.set_default_timeout(10000)
+    _entries, original = _seed(page, url)
+    original.update({"randomTouch": 1, "randomTime": 0.4})
+    assert page.request.put(f"{url}/api/settings/demo", data={"config": original, "overwrite": True}).ok
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    page.locator("#preset-run-options summary").click()
+    touch = _option(page, "randomTouch")
+    delay = _option(page, "randomTime")
+    playwright.expect(touch).to_be_checked()
+    playwright.expect(delay).to_have_value("0.4")
+    assert _config(page) == original
+    touch.uncheck()
+    delay.fill("2.25")
+    delay.press("Tab")
+    expected = {**original, "randomTouch": False, "randomTime": 2.25}
+    assert _config(page) == expected
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == original
+    page.locator("#preset-run-options summary").focus()
+    page.locator("#preset-run-options").scroll_into_view_if_needed()
+    page.screenshot(path=str(directory / f"run-randomization-{width}.png"))
+    assert page.locator(".preset-form").evaluate("e => e.scrollWidth <= e.clientWidth")
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == expected
+    run = page.request.get(f"{url}/api/settings/demo/plan").json()["run"]
+    assert run["random_touch"] is False
+    assert run["random_time"] == 2.25
+    page.close()
+
+
+def test_random_time_invalid_draft_survives_other_edits_and_blocks_save(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.set_default_timeout(10000)
+    _entries, original = _seed(page, url)
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    page.locator("#preset-run-options summary").click()
+    delay = _option(page, "randomTime")
+    playwright.expect(delay).to_have_value("0")
+    assert _config(page) == original
+    delay.fill("11")
+    delay.press("Tab")
+    _option(page, "randomTouch").check()
+    page.locator("#preset-team summary").click()
+    page.locator('[data-team-used="4"]').check()
+    playwright.expect(delay).to_have_value("11")
+    assert not delay.evaluate("e => e.checkValidity()")
+    page.locator("#preset-run-options summary").click()
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    assert page.locator("#preset-run-options").evaluate("e => e.open")
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == original
+    delay.fill("0")
+    delay.press("Tab")
+    assert _config(page)["randomTime"] == 0
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    page.close()
+
+
+def test_incomplete_random_wait_survives_unrelated_controls(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.goto(url)
+    page.locator("#new-setting").click()
+    page.locator("#preset-run-options summary").click()
+    delay = _option(page, "randomTime")
+    delay.fill("")
+    delay.press_sequentially("1e")
+    delay.press("Tab")
+    assert delay.evaluate("e => e.validity.badInput")
+    _option(page, "randomTouch").check()
+    assert delay.evaluate("e => e.validity.badInput")
+    assert "randomTime" not in _config(page)
+    delay.click()
+    delay.press("End")
+    delay.press_sequentially("1")
+    delay.press("Tab")
+    playwright.expect(delay).to_have_value("10")
+    assert _config(page)["randomTime"] == 10
+    page.close()
+
+
+@pytest.mark.parametrize("invalid", [None, "2", {"future": 1}])
+def test_malformed_random_time_requires_explicit_correction(tag_console, invalid):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.set_default_timeout(10000)
+    _entries, original = _seed(page, url)
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    raw = {**original, "randomTime": invalid}
+    page.locator("#preset-json").fill(json.dumps(raw))
+    page.locator("#preset-run-options summary").click()
+    delay = _option(page, "randomTime")
+    playwright.expect(delay).to_have_value("")
+    _option(page, "randomTouch").check()
+    assert _config(page) == {**raw, "randomTouch": True}
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == original
+    delay.fill("10")
+    delay.press("Tab")
+    assert _config(page)["randomTime"] == 10
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    page.close()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
 def test_edit_run_options_preserves_script_and_updates_execution_plan(tag_console, width, height):
     browser, url, directory = tag_console
     page = browser.new_page(viewport={"width": width, "height": height})
@@ -99,8 +214,12 @@ def test_run_options_are_locked_during_pending_preset_load(tag_console):
     response = page.request.get(f"{url}/api/strategies/Preset")
     page.locator("#apply-turn-strategy").click()
     playwright.expect(_option(page, "noChain")).to_be_disabled()
+    playwright.expect(_option(page, "randomTouch")).to_be_disabled()
+    playwright.expect(_option(page, "randomTime")).to_be_disabled()
     pending.pop().fulfill(response=response)
     playwright.expect(_option(page, "noChain")).to_be_enabled()
+    playwright.expect(_option(page, "randomTouch")).to_be_enabled()
+    playwright.expect(_option(page, "randomTime")).to_be_enabled()
     page.locator("#preset-json").fill("{")
     playwright.expect(_option(page, "noChain")).to_be_disabled()
     page.close()
