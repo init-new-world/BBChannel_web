@@ -52,6 +52,61 @@ def test_randomization_options_are_draft_only_and_update_execution_plan(tag_cons
     page.close()
 
 
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_battle_settings_and_skill_speedup_options_update_plan(tag_console, width, height):
+    browser, url, directory = tag_console
+    page = browser.new_page(viewport={"width": width, "height": height})
+    page.set_default_timeout(10000)
+    _entries, original = _seed(page, url)
+    original.update({"firstBattleSet": 1, "noSpeedupSkill": 0})
+    assert page.request.put(f"{url}/api/settings/demo", data={"config": original, "overwrite": True}).ok
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    page.locator("#preset-run-options summary").click()
+    setup = _option(page, "firstBattleSet")
+    speedup = _option(page, "noSpeedupSkill")
+    playwright.expect(setup).to_be_checked()
+    playwright.expect(speedup).not_to_be_checked()
+    assert _config(page) == original
+    setup.uncheck()
+    speedup.check()
+    expected = {**original, "firstBattleSet": False, "noSpeedupSkill": True}
+    assert _config(page) == expected
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == original
+    page.locator("#preset-run-options summary").focus()
+    page.locator("#preset-run-options").scroll_into_view_if_needed()
+    page.screenshot(path=str(directory / f"run-battle-settings-{width}.png"))
+    assert page.locator(".preset-form").evaluate("e => e.scrollWidth <= e.clientWidth")
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == expected
+    run = page.request.get(f"{url}/api/settings/demo/plan").json()["run"]
+    assert run["first_battle_set"] is False
+    assert run["no_speedup_skill"] is True
+    page.close()
+
+
+def test_new_battle_option_checkboxes_default_off_and_keep_keyboard_focus(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.goto(url)
+    page.locator("#new-setting").click()
+    page.locator("#preset-run-options summary").click()
+    setup = _option(page, "firstBattleSet")
+    speedup = _option(page, "noSpeedupSkill")
+    playwright.expect(setup).not_to_be_checked()
+    playwright.expect(speedup).not_to_be_checked()
+    assert "firstBattleSet" not in _config(page)
+    setup.click()
+    playwright.expect(setup).to_be_focused()
+    page.keyboard.press("Space")
+    playwright.expect(setup).not_to_be_checked()
+    assert _config(page)["firstBattleSet"] is False
+    speedup.check()
+    assert _config(page)["noSpeedupSkill"] is True
+    page.close()
+
+
 def test_random_time_invalid_draft_survives_other_edits_and_blocks_save(tag_console):
     browser, url, _directory = tag_console
     page = browser.new_page()
@@ -216,10 +271,14 @@ def test_run_options_are_locked_during_pending_preset_load(tag_console):
     playwright.expect(_option(page, "noChain")).to_be_disabled()
     playwright.expect(_option(page, "randomTouch")).to_be_disabled()
     playwright.expect(_option(page, "randomTime")).to_be_disabled()
+    playwright.expect(_option(page, "firstBattleSet")).to_be_disabled()
+    playwright.expect(_option(page, "noSpeedupSkill")).to_be_disabled()
     pending.pop().fulfill(response=response)
     playwright.expect(_option(page, "noChain")).to_be_enabled()
     playwright.expect(_option(page, "randomTouch")).to_be_enabled()
     playwright.expect(_option(page, "randomTime")).to_be_enabled()
+    playwright.expect(_option(page, "firstBattleSet")).to_be_enabled()
+    playwright.expect(_option(page, "noSpeedupSkill")).to_be_enabled()
     page.locator("#preset-json").fill("{")
     playwright.expect(_option(page, "noChain")).to_be_disabled()
     page.close()
