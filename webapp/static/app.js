@@ -1,6 +1,7 @@
 import { createPresetTeamEditor } from "./preset-team.js";
 import { createPresetAssistEditor } from "./preset-assist.js";
 import { createPresetEquipEditor } from "./preset-equips.js";
+import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
 const ACTIVE_JOB_STATES = new Set(["queued", "running", "paused", "cancelling"]);
@@ -47,6 +48,7 @@ const state = {
 };
 
 const els = {
+  languageSelect: document.querySelector("#language-select"),
   backendSelect: document.querySelector("#backend-select"),
   deviceList: document.querySelector("#device-list"),
   manualAdbEndpoint: document.querySelector("#manual-adb-endpoint"),
@@ -334,6 +336,20 @@ async function init() {
 }
 
 function bindEvents() {
+  els.languageSelect.addEventListener("change", () => setLocale(els.languageSelect.value));
+  document.addEventListener("bbchannel:localechange", () => {
+    renderSettingPlan(state.selectedSettingPlan);
+    renderBattleProgram(state.selectedSettingProgram);
+    renderStrategyDetail(state.selectedStrategy);
+    renderJob(state.activeJob);
+    renderJobEvents();
+    if (!state.connected) els.connectionState.textContent = t("Disconnected");
+    if (state.presetEditor) {
+      const action = state.presetEditor.originalName ? "Edit" : "New";
+      const subject = state.presetEditor.kind === "settings" ? "Script" : "Strategy";
+      els.presetDialogTitle.textContent = t(`${action} ${subject}`);
+    }
+  });
   els.backendSelect.addEventListener("change", () => renderDevices());
   els.refreshDevices.addEventListener("click", () => loadDevices());
   els.addAdbEndpoint.addEventListener("click", addManualAdbEndpoint);
@@ -1644,7 +1660,7 @@ async function loadSettings(preferredName = "") {
     await loadSelectedSettingPlan();
     updateControls();
   } catch (error) {
-    els.settingValidation.textContent = "Settings unavailable";
+    els.settingValidation.textContent = t("Settings unavailable");
     els.settingValidation.classList.add("error");
     showError(error);
   }
@@ -1738,7 +1754,7 @@ async function openPresetEditor(kind, editing) {
       originalName: editing ? selectedName : "",
       strategyIndex: 0,
     };
-    els.presetDialogTitle.textContent = `${editing ? "Edit" : "New"} ${isSetting ? "Script" : "Strategy"}`;
+    els.presetDialogTitle.textContent = t(`${editing ? "Edit" : "New"} ${isSetting ? "Script" : "Strategy"}`);
     els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
     els.presetJson.value = JSON.stringify(value, null, 2);
@@ -1762,7 +1778,7 @@ async function handleSettingImport() {
     }
     const proposedName = file.name.replace(/\.json$/i, "") || "imported-script";
     state.presetEditor = { kind: "settings", originalName: "" };
-    els.presetDialogTitle.textContent = "Import Script";
+    els.presetDialogTitle.textContent = t("Import Script");
     els.presetName.value = proposedName;
     els.presetJson.value = JSON.stringify(value, null, 2);
     renderPresetFields();
@@ -1845,9 +1861,9 @@ function scriptStrategyTargets(config) {
   scriptWaveCounts(config).forEach(({ round, count }) => {
     if (!count) return;
     for (let turn = 0; turn < count; turn += 1) {
-      targets.push({ field: `round${round}_turn${turn}_strategy`, label: `Wave ${round} / Turn ${turn + 1}` });
+      targets.push({ field: `round${round}_turn${turn}_strategy`, label: t("Wave {round} / Turn {turn}", { round, turn: turn + 1 }) });
     }
-    targets.push({ field: `round${round}_extraStrategy`, label: `Wave ${round} / Extra turns` });
+    targets.push({ field: `round${round}_extraStrategy`, label: t("Wave {round} / Extra turns", { round }) });
   });
   return targets;
 }
@@ -1892,14 +1908,14 @@ function renderPresetWaves() {
       row.className = "preset-wave-row";
       row.dataset.scriptWave = String(round);
       const name = document.createElement("span");
-      name.textContent = `Wave ${round}`;
+      name.textContent = t("Wave {round}", { round });
       const turns = document.createElement("output");
-      turns.textContent = `${count} ${count === 1 ? "turn" : "turns"}`;
+      turns.textContent = `${count} ${t(count === 1 ? "turn" : "turns")}`;
       row.append(name, turns);
       [
-        ["add-turn", `Add turn to wave ${round}`, "plus", total + (count ? 1 : 2) > 1000],
-        ["remove-turn", `Remove last turn from wave ${round}`, "minus", !count],
-        ["delete-wave", `Delete wave ${round}`, "trash-2", round !== lastRound],
+        ["add-turn", t("Add turn to wave {round}", { round }), "plus", total + (count ? 1 : 2) > 1000],
+        ["remove-turn", t("Remove last turn from wave {round}", { round }), "minus", !count],
+        ["delete-wave", t("Delete wave {round}", { round }), "trash-2", round !== lastRound],
       ].forEach(([action, label, icon, disabled]) => {
         const button = document.createElement("button");
         button.type = "button";
@@ -1920,7 +1936,7 @@ function renderPresetWaves() {
     });
     els.presetWaveControls.disabled = Boolean(editor.saving || editor.strategyApplyBusy);
   } catch (error) {
-    els.presetWaveStatus.textContent = error instanceof SyntaxError ? "Invalid script JSON." : error.message;
+    els.presetWaveStatus.textContent = error instanceof SyntaxError ? t("Invalid script JSON.") : error.message;
     els.presetWaveStatus.hidden = false;
   }
 }
@@ -1944,12 +1960,12 @@ function changeScriptWaves(action, round) {
       config[`round${round}_turns`] = wave.count + 1;
       editor.strategyTarget = `round${round}_turn${wave.count}_strategy`;
     } else if (action === "remove-turn") {
-      if (!wave.count || !window.confirm(`Remove turn ${wave.count} from wave ${round} and all its fields?`)) return;
+      if (!wave.count || !window.confirm(t("Remove turn {turn} from wave {round} and all its fields?", { turn: wave.count, round }))) return;
       const prefix = `round${round}_turn${wave.count - 1}_`;
       Object.keys(config).filter((key) => key.startsWith(prefix)).forEach((key) => { delete config[key]; });
       config[`round${round}_turns`] = wave.count - 1;
     } else if (action === "delete-wave") {
-      if (round !== waves.at(-1)?.round || !window.confirm(`Delete wave ${round} and all its fields?`)) return;
+      if (round !== waves.at(-1)?.round || !window.confirm(t("Delete wave {round} and all its fields?", { round }))) return;
       const prefix = `round${round}_`;
       Object.keys(config).filter((key) => key.startsWith(prefix)).forEach((key) => { delete config[key]; });
     } else {
@@ -1991,7 +2007,7 @@ function renderPresetScriptStrategy() {
     if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid script JSON.");
     targets = scriptStrategyTargets(config);
   } catch (error) {
-    els.presetTurnStrategyStatus.textContent = error instanceof SyntaxError ? "Invalid script JSON." : error.message;
+    els.presetTurnStrategyStatus.textContent = error instanceof SyntaxError ? t("Invalid script JSON.") : error.message;
     return;
   }
   const target = targets.some((item) => item.field === editor.strategyTarget)
@@ -2000,7 +2016,7 @@ function renderPresetScriptStrategy() {
   const source = state.strategies.some((item) => item.name === editor.strategySource)
     ? editor.strategySource : state.strategies[0]?.name || "";
   editor.strategySource = source;
-  els.presetStrategyTarget.replaceChildren(...(targets.length ? targets : [{ field: "", label: "No turns configured" }]).map((item) => {
+  els.presetStrategyTarget.replaceChildren(...(targets.length ? targets : [{ field: "", label: t("No turns configured") }]).map((item) => {
     const option = document.createElement("option");
     option.value = item.field;
     option.textContent = item.label;
@@ -2012,7 +2028,7 @@ function renderPresetScriptStrategy() {
   els.presetStrategySource.replaceChildren(...(state.strategies.length ? state.strategies : [{ name: "" }]).map((item) => {
     const option = document.createElement("option");
     option.value = item.name;
-    option.textContent = item.name || "No presets available";
+    option.textContent = item.name || t("No presets available");
     return option;
   }));
   els.presetStrategySource.value = source;
@@ -2021,11 +2037,11 @@ function renderPresetScriptStrategy() {
   els.applyTurnStrategy.disabled = !target || !source;
   const strategies = config[target];
   els.clearTurnStrategy.disabled = !target || strategies == null || (Array.isArray(strategies) && !strategies.length);
-  els.presetTurnStrategyStatus.textContent = editor.strategyApplyBusy ? "Loading preset..."
-    : !target ? "No turn selected"
-      : Array.isArray(strategies) && strategies.length ? `${strategies.length} strategies configured`
-        : strategies !== undefined && strategies !== null && !Array.isArray(strategies) ? "Invalid strategy value"
-          : "No strategy configured";
+  els.presetTurnStrategyStatus.textContent = editor.strategyApplyBusy ? t("Loading preset...")
+    : !target ? t("No turn selected")
+      : Array.isArray(strategies) && strategies.length ? t("{count} strategies configured", { count: strategies.length })
+        : strategies !== undefined && strategies !== null && !Array.isArray(strategies) ? t("Invalid strategy value")
+          : t("No strategy configured");
 }
 
 function readScriptStrategyTarget() {
@@ -2740,8 +2756,8 @@ function clearScreenshot() {
   els.screenshot.removeAttribute("src");
   els.screenshot.classList.remove("visible", "actual-size");
   els.screenEmpty.hidden = false;
-  els.screenMeta.textContent = "No capture";
-  els.matchResult.textContent = "No match";
+  els.screenMeta.textContent = t("No capture");
+  els.matchResult.textContent = t("No match");
   clearMatchOverlay();
   setScreenMode("source");
   updateControls();
@@ -3213,10 +3229,10 @@ function mergeJob(job) {
 
 function renderJob(job) {
   const status = job?.status || "idle";
-  els.jobStatus.textContent = status[0].toUpperCase() + status.slice(1);
+  els.jobStatus.textContent = t(status[0].toUpperCase() + status.slice(1));
   els.jobStatus.className = `job-status ${status}`;
-  els.jobKind.textContent = job ? job.kind : "No job selected";
-  els.jobStep.textContent = job?.current_step || "Waiting";
+  els.jobKind.textContent = job ? job.kind : t("No job selected");
+  els.jobStep.textContent = job?.current_step || t("Waiting");
   if (typeof job?.progress === "number") {
     els.jobProgress.value = job.progress;
   } else {
@@ -3412,7 +3428,7 @@ function humanizeResultValue(value) {
 }
 
 function renderJobEvents() {
-  els.jobEventCount.textContent = `${state.jobEvents.length} ${state.jobEvents.length === 1 ? "event" : "events"}`;
+  els.jobEventCount.textContent = `${state.jobEvents.length} ${t(state.jobEvents.length === 1 ? "event" : "events")}`;
   els.jobEvents.replaceChildren(...state.jobEvents.map(renderJobEvent));
   els.jobEvents.scrollTop = els.jobEvents.scrollHeight;
 }
@@ -3434,11 +3450,11 @@ async function loadEvents() {
   try {
     const payload = await api("/api/events?limit=80");
     const events = payload.events || [];
-    els.logCount.textContent = `${events.length} ${events.length === 1 ? "event" : "events"}`;
+    els.logCount.textContent = `${events.length} ${t(events.length === 1 ? "event" : "events")}`;
     els.eventLog.replaceChildren(...events.map(renderEvent));
     els.eventLog.scrollTop = els.eventLog.scrollHeight;
   } catch {
-    els.logCount.textContent = "0 events";
+    els.logCount.textContent = t("0 events");
   }
 }
 
@@ -3460,9 +3476,9 @@ function renderEvent(event) {
 function renderSettingPlan(plan) {
   els.settingValidation.classList.remove("ok", "error");
   if (!plan) {
-    els.settingValidation.textContent = "No setting";
-    els.settingPlan.textContent = "No script selected";
-    els.battleScriptName.textContent = "No script selected";
+    els.settingValidation.textContent = t("No setting");
+    els.settingPlan.textContent = t("No script selected");
+    els.battleScriptName.textContent = t("No script selected");
     return;
   }
 
@@ -3470,8 +3486,8 @@ function renderSettingPlan(plan) {
   const warningCount = plan.validation?.warnings?.length || 0;
   const isValid = Boolean(plan.validation?.ok);
   els.settingValidation.textContent = isValid
-    ? `Valid · ${plan.summary.round_count} rounds · ${plan.summary.action_count} actions`
-    : `${errorCount} errors · ${warningCount} warnings`;
+    ? `${t("Valid")} · ${plan.summary.round_count} ${t("rounds")} · ${plan.summary.action_count} ${t("actions")}`
+    : `${errorCount} ${t("errors")} · ${warningCount} ${t("warnings")}`;
   els.settingValidation.classList.add(isValid ? "ok" : "error");
 
   const servantText = plan.servants
@@ -3479,14 +3495,14 @@ function renderSettingPlan(plan) {
     .map((servant) => `${servant.slot + 1}:${servant.name}${servant.active ? "*" : ""}`)
     .join(" / ");
   const lines = [
-    `${plan.server || "Unknown"} · ${plan.name}`,
-    `Servants: ${servantText || "None"}`,
-    `Master: ${plan.master.equip ?? "-"} · sex ${plan.master.sex ?? "-"}`,
+    `${plan.server || t("Unknown")} · ${plan.name}`,
+    `${t("Servants")}: ${servantText || t("None")}`,
+    `${t("Master")}: ${plan.master.equip ?? "-"} · ${t("sex")} ${plan.master.sex ?? "-"}`,
   ];
   for (const round of plan.rounds) {
-    lines.push(`R${round.round}: ${round.turns.length} turns`);
+    lines.push(`R${round.round}: ${round.turns.length} ${t("turns")}`);
     for (const turn of round.turns) {
-      const actions = turn.actions.map(formatPlanAction).join(", ") || "No actions";
+      const actions = turn.actions.map(formatPlanAction).join(", ") || t("No actions");
       lines.push(`  T${turn.turn}: ${actions}`);
     }
   }
@@ -3497,29 +3513,29 @@ function renderSettingPlan(plan) {
 function renderBattleProgram(program) {
   els.battleProgramStatus.classList.remove("ok", "warn", "error");
   if (!program) {
-    els.battleProgramStatus.textContent = "No program";
+    els.battleProgramStatus.textContent = t("No program");
     return;
   }
   const summary = program.summary;
   const execution = program.execution?.battle;
   if (execution?.ready) {
-    els.battleProgramStatus.textContent = `Ready · ${summary.supported_action_count} actions · ${summary.execution_tap_count} taps`;
+    els.battleProgramStatus.textContent = `${t("Ready")} · ${summary.supported_action_count} ${t("actions")} · ${summary.execution_tap_count} ${t("taps")}`;
     els.battleProgramStatus.classList.add("ok");
     return;
   }
-  els.battleProgramStatus.textContent = `${summary.supported_action_count}/${summary.action_count} supported · ${execution?.reason || "Not executable"}`;
+  els.battleProgramStatus.textContent = `${summary.supported_action_count}/${summary.action_count} ${t("supported")} · ${execution?.reason || t("Not executable")}`;
   els.battleProgramStatus.classList.add("warn");
 }
 
 function renderStrategyDetail(strategy) {
   if (!strategy) {
-    els.strategySummary.textContent = "No strategy selected";
+    els.strategySummary.textContent = t("No strategy selected");
     return;
   }
-  const status = strategy.validation?.ok ? "Valid" : `${strategy.validation?.errors?.length || 0} errors`;
+  const status = strategy.validation?.ok ? t("Valid") : `${strategy.validation?.errors?.length || 0} ${t("errors")}`;
   const tags = (strategy.entries || []).map((entry) => entry.tag).filter(Boolean);
   els.strategySummary.textContent = [
-    `${status} · ${strategy.summary.entry_count} entries`,
+    `${status} · ${strategy.summary.entry_count} ${t("entries")}`,
     tags.slice(0, 4).join("\n") || strategy.name,
   ].join("\n");
 }
@@ -3530,7 +3546,7 @@ function setConnectionLabel(payload) {
     els.connectionState.classList.add("connected");
     return;
   }
-  els.connectionState.textContent = "Disconnected";
+  els.connectionState.textContent = t("Disconnected");
   els.connectionState.classList.remove("connected");
 }
 

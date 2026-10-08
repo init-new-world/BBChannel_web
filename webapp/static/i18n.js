@@ -1,0 +1,427 @@
+const STORAGE_KEY = "bbchannel.locale";
+const SUPPORTED = new Set(["en", "zh-CN"]);
+
+const zh = {
+  "BBchannel Console": "BBchannel 控制台",
+  "0 events": "0 条事件",
+  "3 star": "3 星",
+  "4 star": "4 星",
+  "5 star": "5 星",
+  "AP item": "体力道具",
+  "Action delay": "操作间隔",
+  "Activate": "启用",
+  "Active CE template": "当前礼装模板",
+  "Add ADB": "添加 ADB",
+  "Add CE": "添加礼装",
+  "Add entry": "添加条目",
+  "Add turn to wave {round}": "向第 {round} 波添加回合",
+  "Add Wave": "添加波次",
+  "Any": "不限",
+  "Any Face": "任意卡面",
+  "Append 1": "附加技能 1",
+  "Append 2": "附加技能 2",
+  "Append 3": "附加技能 3",
+  "Append 4": "附加技能 4",
+  "Append 5": "附加技能 5",
+  "Apply Preset": "应用预设",
+  "Archive": "归档",
+  "Arts": "蓝卡",
+  "Assist": "助战",
+  "Assist CEs": "助战礼装",
+  "Assist Equip Templates": "助战礼装模板",
+  "Assist Filters": "助战筛选",
+  "Assist Skill Levels": "助战技能等级",
+  "Assist Tags": "助战标签",
+  "Assist equip template": "助战礼装模板",
+  "Assist filter": "助战筛选",
+  "Assist slot": "助战位置",
+  "Assist special filter": "助战特殊筛选",
+  "Assist tag": "助战标签",
+  "Assist tag crop canvas": "助战标签裁剪画布",
+  "At Least": "至少",
+  "At Most": "至多",
+  "Avg. AP": "平均体力",
+  "Backend": "后端",
+  "Battle Script": "战斗脚本",
+  "Battle entry mode": "战斗入口",
+  "Bind to Script": "绑定到脚本",
+  "Blue": "蓝苹果",
+  "Break after card 1": "第 1 张卡后断连锁",
+  "Break after card 2": "第 2 张卡后断连锁",
+  "Build Template": "创建模板",
+  "Buster": "红卡",
+  "CE enhance": "礼装强化",
+  "CE only": "仅礼装",
+  "Cancel": "取消",
+  "Capture": "截图",
+  "Capture & Match": "截图并匹配",
+  "Card 1": "指令卡 1",
+  "Card 2": "指令卡 2",
+  "Card 3": "指令卡 3",
+  "Card preference first": "优先选卡偏好",
+  "Chapter": "章节",
+  "Clear": "清除",
+  "Clear NP order": "清除宝具顺序",
+  "Clear all CEs": "清空礼装",
+  "Clear turn strategies": "清除回合策略",
+  "Close": "关闭",
+  "Command Cards": "指令卡",
+  "Connect": "连接",
+  "Cancelling": "取消中",
+  "Cancelled": "已取消",
+  "Copper": "铜苹果",
+  "Crash restart": "崩溃重启",
+  "Crop": "裁剪",
+  "Current Job": "当前任务",
+  "Current screen": "当前画面",
+  "Custom Tags": "自定义标签",
+  "Debug": "调试",
+  "Delete": "删除",
+  "Delete entry": "删除条目",
+  "Delete wave {round}": "删除第 {round} 波",
+  "Delete wave {round} and all its fields?": "删除第 {round} 波及其所有字段？",
+  "Destination": "目标位置",
+  "Device": "设备",
+  "Device screenshot": "设备截图",
+  "Diagnostic Job": "诊断任务",
+  "Disable skill animation speedup taps": "禁用技能动画加速点击",
+  "Disconnect": "断开",
+  "Disconnected": "未连接",
+  "Drop Query": "掉落查询",
+  "Drop rate": "掉落率",
+  "Dry Run Script": "试运行脚本",
+  "Duplicate entry": "复制条目",
+  "Duration": "持续时间",
+  "EXP Materials": "经验素材",
+  "EXP workflow destination": "经验素材目标位置",
+  "Edit": "编辑",
+  "Edit Preset": "编辑预设",
+  "Edit Script": "编辑脚本",
+  "Edit Strategy": "编辑策略",
+  "Error": "错误",
+  "Entry": "条目",
+  "Entry name": "条目名称",
+  "Event Log": "事件日志",
+  "Excavation Board": "挖掘棋盘",
+  "Execute Battle": "执行战斗",
+  "Execute Selection": "执行选择",
+  "Export": "导出",
+  "Extract Candidates": "提取候选项",
+  "Extracted equip candidate": "已提取的礼装候选项",
+  "FP batches": "友情点批次",
+  "First": "第一位",
+  "First Noble Phantasm": "第一宝具",
+  "First battle setup": "首次战斗设置",
+  "First support": "首位助战",
+  "Fit": "适应画面",
+  "Free quest": "自由关卡",
+  "Freeze check (s)": "冻结检查（秒）",
+  "Freeze restart": "冻结重启",
+  "Friends only": "仅好友",
+  "Full: not set": "满破：未设置",
+  "Gift box EXP rarity": "礼物箱经验素材星级",
+  "Gold": "金苹果",
+  "Grand + CE": "冠位与礼装",
+  "Grand CE only": "仅冠位礼装",
+  "Grand bond CE": "冠位羁绊礼装",
+  "Idle": "空闲",
+  "Import": "导入",
+  "Import PNG": "导入 PNG",
+  "Import Script": "导入脚本",
+  "Import Tag": "导入标签",
+  "Inspect Dig Board": "检查挖掘棋盘",
+  "Inspect EXP Flow": "检查经验素材流程",
+  "Inspect Lottery": "检查奖池",
+  "Inspect State": "检查状态",
+  "Inspect Storage Grid": "检查仓库网格",
+  "Invalid": "无效",
+  "Invalid script JSON.": "脚本 JSON 无效。",
+  "Invalid strategy value": "策略值无效",
+  "Job Events": "任务事件",
+  "Job history": "任务历史",
+  "Label": "标签",
+  "Language": "语言",
+  "Limit broken": "已满破",
+  "Loading preset...": "正在加载预设…",
+  "Limit to ROI": "限制识别区域",
+  "Lottery reward slot": "奖池奖励位置",
+  "Main 1": "主技能 1",
+  "Main 2": "主技能 2",
+  "Main 3": "主技能 3",
+  "Main story": "主线关卡",
+  "Manage strategy entries": "管理策略条目",
+  "Map swipes": "地图滑动次数",
+  "Master": "御主",
+  "Master outfit": "御主礼装",
+  "Material": "素材",
+  "Material Drops": "素材掉落",
+  "Matched support": "已匹配助战",
+  "Max limit break CE": "满破礼装",
+  "Minimum NP level": "最低宝具等级",
+  "Minimum level; 0 means any level": "最低等级；0 表示不限",
+  "Move entry down": "下移条目",
+  "Move entry up": "上移条目",
+  "NP": "宝具",
+  "NP 50%": "宝具 50%",
+  "NP Order": "宝具顺序",
+  "Name": "名称",
+  "Navigate": "导航",
+  "New": "新建",
+  "New Script": "新建脚本",
+  "New Strategy": "新建策略",
+  "No candidates": "无候选项",
+  "No capture": "尚未截图",
+  "No actions": "无动作",
+  "No job history": "无任务历史",
+  "No job selected": "未选择任务",
+  "No match": "未匹配",
+  "No program": "无执行计划",
+  "No presets available": "无可用预设",
+  "No query": "尚未查询",
+  "No screenshot": "无截图",
+  "No script selected": "未选择脚本",
+  "No setting": "未选择设置",
+  "No skill speedup": "不加速技能动画",
+  "No strategy selected": "未选择策略",
+  "No strategy configured": "未配置策略",
+  "None": "无",
+  "No tag selected": "未选择标签",
+  "No tags": "无标签",
+  "No templates": "无模板",
+  "No turn selected": "未选择回合",
+  "No turns configured": "未配置回合",
+  "Non-full: not set": "未满破：未设置",
+  "Notebook": "笔记本",
+  "Notes": "笔记",
+  "Not limit broken": "未满破",
+  "Not loaded": "未加载",
+  "Not executable": "不可执行",
+  "Not selected": "未选择",
+  "Not tested": "未测试",
+  "Off": "关闭",
+  "Open Drop Query": "打开掉落查询",
+  "Open Notebook": "打开笔记本",
+  "Open Tag Maker": "打开标签制作器",
+  "Original": "原图",
+  "Pause": "暂停",
+  "Paused": "已暂停",
+  "Preference Order": "偏好顺序",
+  "Preferred": "优先",
+  "Preferred AP recovery item": "首选体力回复道具",
+  "Preset": "预设",
+  "Preset Editor": "预设编辑器",
+  "Preview unavailable": "预览不可用",
+  "Quality": "品质",
+  "Query": "查询",
+  "Quick": "绿卡",
+  "Random tap": "随机点击",
+  "Random wait (s)": "随机等待（秒）",
+  "Ready": "就绪",
+  "Queued": "排队中",
+  "Recognition": "识别",
+  "Recognition mode": "识别模式",
+  "Refresh": "刷新",
+  "Refresh at grand boundary": "冠位边界刷新",
+  "Refresh devices": "刷新设备",
+  "Refresh Scripts": "刷新脚本",
+  "Refresh scripts": "刷新脚本",
+  "Reload scripts from disk": "从磁盘重新加载脚本",
+  "Restart & Recover": "重启并恢复",
+  "Restart limit": "重启上限",
+  "Remove last turn from wave {round}": "删除第 {round} 波最后一回合",
+  "Remove turn {turn} from wave {round} and all its fields?": "删除第 {round} 波第 {turn} 回合及其所有字段？",
+  "Resume": "继续",
+  "Retry": "重试",
+  "Reward 1": "奖励 1",
+  "Reward 2": "奖励 2",
+  "Reward 3": "奖励 3",
+  "Reward slot": "奖励位置",
+  "Run Auto Exchange": "自动兑换",
+  "Run FP Cycle": "运行友情点循环",
+  "Run Lottery Cycle": "运行奖池循环",
+  "Run Notes": "运行笔记",
+  "Run Options": "运行选项",
+  "Run count": "运行次数",
+  "Save": "保存",
+  "Save Tag": "保存标签",
+  "Save and close": "保存并关闭",
+  "Scales": "缩放比例",
+  "Screen": "画面",
+  "Screen mode": "画面模式",
+  "Screenshot": "截图",
+  "Script": "脚本",
+  "Script setting": "脚本设置",
+  "Settings unavailable": "设置不可用",
+  "Second": "第二位",
+  "Second Noble Phantasm": "第二宝具",
+  "Sell": "出售",
+  "Sell Current Selection": "出售当前选择",
+  "Servants": "从者",
+  "Servant + CE": "从者与礼装",
+  "Servant enhance": "从者强化",
+  "Servant only": "仅从者",
+  "Server": "服务器",
+  "Set Full": "设为满破",
+  "Set Non-full": "设为未满破",
+  "Silver": "银苹果",
+  "Single NP: no chain": "单宝具不连锁",
+  "Slot 1": "第 1 位",
+  "Slot 2": "第 2 位",
+  "Slot 3": "第 3 位",
+  "Slot 4": "第 4 位",
+  "Slot 5": "第 5 位",
+  "Slot 6": "第 6 位",
+  "Source": "原图",
+  "Stage": "关卡",
+  "Start Diagnostic": "开始诊断",
+  "Start Full Run": "开始完整运行",
+  "Start from": "起始画面",
+  "Succeeded": "已完成",
+  "Stop": "停止",
+  "Storage": "仓库",
+  "Store Current Selection": "存入当前选择",
+  "Strategy": "策略",
+  "Strategy Rules": "策略规则",
+  "Strategy entry": "策略条目",
+  "Strategy preset": "策略预设",
+  "Strategy preset source": "策略预设来源",
+  "Strategy target turn": "目标回合",
+  "{count} strategies configured": "已配置 {count} 条策略",
+  "Strict": "严格",
+  "Summon": "召唤",
+  "Swipe": "滑动",
+  "Tag Library": "标签库",
+  "Tag Maker": "标签制作器",
+  "Tag type": "标签类型",
+  "Tap": "点击",
+  "Tap matched center": "点击匹配中心",
+  "Target": "目标",
+  "Team": "队伍",
+  "Team check": "队伍核验",
+  "Team verification mode": "队伍核验模式",
+  "Template": "模板",
+  "Test Recognition": "测试识别",
+  "Third": "第三位",
+  "Third Noble Phantasm": "第三宝具",
+  "Threshold": "阈值",
+  "Timeout": "超时",
+  "Turn Strategy": "回合策略",
+  "Wave {round}": "第 {round} 波",
+  "Wave {round} / Turn {turn}": "第 {round} 波 / 第 {turn} 回合",
+  "Wave {round} / Extra turns": "第 {round} 波 / 额外回合",
+  "Type": "类型",
+  "Unknown": "未知",
+  "Unlimited Lottery": "无限池",
+  "Valid": "有效",
+  "Valentine Event": "情人节活动",
+  "Verification template": "核验模板",
+  "Verify after tap": "点击后核验",
+  "Verify servants": "核验从者",
+  "Visualize Match": "查看匹配",
+  "Waiting": "等待中",
+  "Running": "运行中",
+  "Failed": "失败",
+  "Warn": "警告",
+  "Waves": "波次",
+  "actions": "个动作",
+  "entries": "个条目",
+  "errors": "个错误",
+  "event": "条事件",
+  "events": "条事件",
+  "rounds": "波",
+  "sex": "性别",
+  "supported": "已支持",
+  "taps": "次点击",
+  "turn": "回合",
+  "turns": "回合",
+  "warnings": "个警告",
+  "Prefer no chain when selecting one Noble Phantasm": "选择单个宝具时尽量不连锁",
+  "Restart after a game crash": "游戏崩溃后重启",
+  "Restart when the screen stops changing": "画面长时间不变时重启",
+  "Interval between frozen-screen checks, in seconds": "检查画面是否冻结的间隔，单位秒",
+  "Randomize positions within tap targets": "在点击目标内随机选择位置",
+  "Additional random wait, in seconds": "额外随机等待时间，单位秒",
+  "Normalize battle menu options at the start of the first battle": "首次战斗开始时整理战斗菜单设置",
+  "Do not send extra taps to advance skill animations": "不发送额外点击以加快技能动画",
+};
+
+let locale = preferredLocale();
+const staticText = [];
+const staticAttributes = [];
+
+function preferredLocale() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (SUPPORTED.has(saved)) return saved;
+  } catch {
+    // A blocked storage API should not prevent the console from loading.
+  }
+  return /^zh(?:-|$)/i.test(navigator.language) ? "zh-CN" : "en";
+}
+
+function captureStaticText() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.parentElement?.closest("script, style")) continue;
+    const original = node.nodeValue;
+    const key = original.trim();
+    if (!Object.hasOwn(zh, key)) continue;
+    const start = original.indexOf(key);
+    staticText.push({
+      node, key, prefix: original.slice(0, start), suffix: original.slice(start + key.length),
+      current: original,
+    });
+  }
+  for (const element of document.querySelectorAll("[title], [aria-label], [placeholder], [alt]")) {
+    for (const attribute of ["title", "aria-label", "placeholder", "alt"]) {
+      const key = element.getAttribute(attribute);
+      if (key && Object.hasOwn(zh, key)) {
+        staticAttributes.push({ element, attribute, key, current: key });
+      }
+    }
+  }
+}
+
+function applyLocale() {
+  document.documentElement.lang = locale;
+  document.title = t("BBchannel Console");
+  const selector = document.querySelector("#language-select");
+  if (selector) selector.value = locale;
+  for (const entry of staticText) {
+    if (!entry.node.isConnected || entry.node.nodeValue !== entry.current) continue;
+    entry.current = `${entry.prefix}${t(entry.key)}${entry.suffix}`;
+    entry.node.nodeValue = entry.current;
+  }
+  for (const entry of staticAttributes) {
+    if (!entry.element.isConnected || entry.element.getAttribute(entry.attribute) !== entry.current) continue;
+    entry.current = t(entry.key);
+    entry.element.setAttribute(entry.attribute, entry.current);
+  }
+}
+
+export function t(key, values = {}) {
+  const template = locale === "zh-CN" ? zh[key] || key : key;
+  return template.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (match, name) =>
+    Object.hasOwn(values, name) ? String(values[name]) : match);
+}
+
+export function getLocale() {
+  return locale;
+}
+
+export function setLocale(next) {
+  if (!SUPPORTED.has(next)) return locale;
+  locale = next;
+  try {
+    localStorage.setItem(STORAGE_KEY, locale);
+  } catch {
+    // The current page can still switch languages when storage is unavailable.
+  }
+  applyLocale();
+  document.dispatchEvent(new CustomEvent("bbchannel:localechange", { detail: { locale } }));
+  return locale;
+}
+
+captureStaticText();
+applyLocale();

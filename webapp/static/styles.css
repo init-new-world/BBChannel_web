@@ -83,6 +83,15 @@ select:disabled {
   gap: 8px;
 }
 
+.language-select {
+  width: 96px;
+  min-width: 96px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
 .brand-mark {
   width: 30px;
   height: 30px;
@@ -1654,6 +1663,24 @@ select:disabled {
   }
 }
 
+@media (max-width: 1250px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .connection-strip {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-wrap: wrap;
+  }
+
+  .topbar-meta {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
 @media (max-width: 900px) {
   .assist-tag-form {
     overflow: auto;
@@ -1679,22 +1706,6 @@ select:disabled {
 
   .app-shell {
     grid-template-rows: auto auto auto;
-  }
-
-  .topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
-
-  .connection-strip {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    flex-wrap: wrap;
-  }
-
-  .topbar-meta {
-    grid-column: 2;
-    grid-row: 1;
   }
 
   .compact,
@@ -1757,6 +1768,10 @@ select:disabled {
       "backend device device"
       "endpoint add refresh"
       "connect disconnect disconnect";
+    gap: 6px;
+  }
+
+  .topbar-meta {
     gap: 6px;
   }
 
@@ -1867,5 +1882,11 @@ select:disabled {
   .preset-dialog-actions button {
     min-width: 0;
     flex: 1;
+  }
+}
+
+@media (max-width: 360px) {
+  .brand > span:last-child {
+    display: none;
   }
 }

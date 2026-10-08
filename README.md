@@ -42,6 +42,7 @@ For a MuMu instance exposed to WSL through the Windows host, `/api/devices` shou
 ```bash
 python -m pytest -q
 node --check webapp/static/app.js
+node --check webapp/static/i18n.js
 node --check webapp/static/preset-team.js
 node --check webapp/static/preset-assist.js
 node --check webapp/static/preset-equips.js
@@ -57,7 +58,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_team_editor_browser.py tests/test_master_editor_browser.py tests/test_assist_options_browser.py tests/test_assist_equips_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_compact_layout_browser.py tests/test_i18n_browser.py tests/test_team_editor_browser.py tests/test_master_editor_browser.py tests/test_assist_options_browser.py tests/test_assist_equips_browser.py
 ```
 
 Manual smoke steps:
@@ -81,6 +82,8 @@ Implemented workflows include:
 - CE template creation and inventory management, plus a visual custom-tag crop/import/binding tool.
 - Lottery, Valentine exchange, excavation, and supported EXP-material workflows, with job history, progress events, pause/resume, and cancellation.
 - Material drop queries from the bundled data and a local notebook.
+
+The console's top-bar language selector supports English and Simplified Chinese. It saves the choice in browser local storage and otherwise follows the browser language. Static interface controls and common live status text are translated; script JSON, device identifiers, names, and backend-provided messages remain unchanged.
 
 Execution is rejected when a script fails validation or contains unsupported compiled actions. Recognition-dependent behavior still requires suitable assets and a compatible device layout; this project does not claim complete parity with every original-client function or every live game screen.
 
