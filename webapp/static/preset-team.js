@@ -8,6 +8,8 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   const master = document.querySelector("#preset-master-equip");
   const masterStatus = document.querySelector("#preset-master-status");
   const masterRetry = document.querySelector("#retry-master-catalog");
+  const usedSlots = [...document.querySelectorAll("[data-team-used]")];
+  const usedStatus = document.querySelector("#preset-used-status");
 
   function readConfig() {
     const config = JSON.parse(source.value);
@@ -120,6 +122,19 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
         : masters.length ? `${masters.length} outfits` : "No outfits available";
   }
 
+  function renderUsed(config) {
+    const configured = config.usedServant === undefined ? [0, 1, 2] : config.usedServant;
+    const valid = Array.isArray(configured);
+    usedSlots.forEach((input) => {
+      input.checked = valid && configured.includes(Number(input.dataset.teamUsed));
+      input.disabled = !valid;
+    });
+    usedStatus.textContent = !valid ? "Invalid usedServant value."
+      : configured.some((slot) => !Number.isInteger(slot) || slot < 0 || slot > 5)
+        ? "Unrecognized entries retained." : "";
+    usedStatus.hidden = !usedStatus.textContent;
+  }
+
   function render() {
     const editor = getEditor();
     section.hidden = editor?.kind !== "settings";
@@ -138,10 +153,13 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
       controls.disabled = true;
       status.textContent = "Invalid script JSON.";
       masterStatus.textContent = "Invalid script JSON.";
+      usedStatus.textContent = "Invalid script JSON.";
+      usedStatus.hidden = false;
       masterRetry.hidden = true;
       return;
     }
     renderMasters(config, editor);
+    renderUsed(config);
     const server = typeof config.server === "string" ? config.server.toUpperCase() : "";
     if (!["CH", "CNTW", "JP"].includes(server)) {
       editor.teamCatalog = null;
@@ -189,7 +207,28 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     }
   }
 
+  function updateUsed(event) {
+    const editor = getEditor();
+    const input = event.currentTarget;
+    if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy
+        || controls.disabled || input.disabled) return;
+    try {
+      const config = readConfig();
+      const configured = config.usedServant === undefined ? [0, 1, 2] : config.usedServant;
+      if (!Array.isArray(configured)) return;
+      const slot = Number(input.dataset.teamUsed);
+      const next = configured.filter((value) => value !== slot);
+      if (input.checked) next.push(slot);
+      config.usedServant = next;
+      source.value = JSON.stringify(config, null, 2);
+      onChange();
+    } catch (error) {
+      onError(error.message);
+    }
+  }
+
   slots.forEach((select) => select.addEventListener("change", update));
+  usedSlots.forEach((input) => input.addEventListener("change", updateUsed));
   assistSlot.addEventListener("change", update);
   master.addEventListener("change", update);
   masterRetry.addEventListener("click", () => {

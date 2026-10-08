@@ -380,6 +380,18 @@
             <label class="field-stack"><span>Slot 6</span><select class="field" data-team-slot="5"></select></label>
             <label class="field-stack"><span>Assist slot</span><select id="preset-assist-slot" class="field"></select></label>
             <label class="field-stack"><span>Master outfit</span><select id="preset-master-equip" class="field"></select></label>
+            <fieldset class="preset-team-used">
+              <legend>Verify servants</legend>
+              <div class="preset-team-used-grid">
+                <label class="checkline"><input data-team-used="0" type="checkbox"><span>Slot 1</span></label>
+                <label class="checkline"><input data-team-used="1" type="checkbox"><span>Slot 2</span></label>
+                <label class="checkline"><input data-team-used="2" type="checkbox"><span>Slot 3</span></label>
+                <label class="checkline"><input data-team-used="3" type="checkbox"><span>Slot 4</span></label>
+                <label class="checkline"><input data-team-used="4" type="checkbox"><span>Slot 5</span></label>
+                <label class="checkline"><input data-team-used="5" type="checkbox"><span>Slot 6</span></label>
+              </div>
+              <span id="preset-used-status" role="status" hidden></span>
+            </fieldset>
             <div class="preset-team-status"><span id="preset-team-status" role="status"></span><button id="retry-team-catalog" class="ghost-button" type="button" hidden>Retry</button></div>
             <div class="preset-team-status"><span id="preset-master-status" role="status"></span><button id="retry-master-catalog" class="ghost-button" type="button" hidden>Retry</button></div>
           </fieldset>
