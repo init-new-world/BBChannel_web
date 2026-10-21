@@ -111,6 +111,10 @@ select:disabled {
   gap: 8px;
 }
 
+.connection-strip > button {
+  white-space: nowrap;
+}
+
 .field {
   width: 100%;
   min-height: 34px;
