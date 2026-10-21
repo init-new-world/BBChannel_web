@@ -628,6 +628,15 @@ class AssistRecognizer:
             scales=ASSIST_EQUIP_SCALES,
         )
 
+    def match_friend_marker(self, screenshot: bytes, server: str):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/friend.png",
+            threshold=0.8,
+            roi=(1087, 157, 120, 563),
+            scales=(NORMALIZED_FRAME_SCALE,),
+        )
+
     def match_no_assist(
         self,
         screenshot: bytes,

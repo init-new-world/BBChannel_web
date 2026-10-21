@@ -344,6 +344,7 @@ def create_assist_handler(
         empty_lists = 0
         scroll_limit_hits = 0
         grand_boundary_hits = 0
+        friend_boundary_hits = 0
         while True:
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
@@ -495,6 +496,7 @@ def create_assist_handler(
                     "empty_lists": empty_lists,
                     "scroll_limit_hits": scroll_limit_hits,
                     "grand_boundary_hits": grand_boundary_hits,
+                    "friend_boundary_hits": friend_boundary_hits,
                     "scroll_limit": scroll_limit,
                     "class_selection": class_selection,
                     "ap_actions": ap_actions,
@@ -519,8 +521,21 @@ def create_assist_handler(
                     data={"role": "assist_empty", "empty_list": empty_lists},
                 )
             elif scrolls_since_refresh < max_scrolls:
+                if plan["assist"].get("friend_only") and scrolls_since_refresh >= 2:
+                    friend_marker = _optional_assist_match(
+                        assist_recognizer, "match_friend_marker", screenshot, plan["server"],
+                    )
+                    if friend_marker is not None and not friend_marker.matched:
+                        friend_boundary_hits += 1
+                        scrolls_since_refresh = max_scrolls
+                        context.emit(
+                            "recognition",
+                            "No friends remain after scrolling; refresh will be attempted.",
+                            data={"role": "assist_friend_boundary", "friend_boundary_hit": friend_boundary_hits},
+                        )
                 if (
-                    plan["assist"].get("mode") in GRAND_ASSIST_MODES
+                    scrolls_since_refresh < max_scrolls
+                    and plan["assist"].get("mode") in GRAND_ASSIST_MODES
                     and plan["assist"].get("no_grand_refresh")
                     and not assist_recognizer.match_grand_marker(
                         screenshot,

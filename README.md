@@ -94,6 +94,10 @@ Execution is rejected when a script fails validation or contains unsupported com
 
 Assist class switching follows the bundled original client's `FGObattle.Battle.chooseRightClass` and `checkChoosedClass`: an already-selected target class or the friends tab is retained. `allNotSkip` preserves only the ALL/recommended tab (indices 0 and -1); it does not suppress correcting another class or an unrecognized selection. CE-only and first-support modes do not switch classes. Selection detection uses the original masked border templates, header search region, and separate ordinary/recommended-tab spacing, normalized to 1280x720. Class changes must be recognized before support selection proceeds, with at most three double-tap attempts and cancellation checkpoints between attempts. Retries recheck the recommended layout instead of reusing stale coordinates; an unrecognized or incorrect selection at the limit fails the job.
 
+### Assist List Refresh
+
+With `onlyFriendAssist` enabled, the runner follows the original `FGObattle.Battle.swipeFindAssist` early-refresh condition: after at least two scrolls in the current list, no matching candidate and no `friend.png` marker in the original right-hand region trigger a refresh instead of scrolling to the configured limit. Recognized friends keep scrolling eligible, and each refresh resets the two-scroll guard. A missing marker template disables this optimization rather than being treated as proof that there are no friends. Existing scroll and refresh limits still apply; results and recognition events record `friend_boundary_hits`.
+
 ### Assist Skills
 
 `skillsLevel` stores three main skills followed by up to five append skills. Each entry is an integer from `0` to `10`; `0` means no requirement and positive values are minimum levels. The current CNTW layout supports three append slots. Nonzero requirements for its fourth or fifth append slot are rejected rather than ignored.
