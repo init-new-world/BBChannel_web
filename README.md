@@ -101,6 +101,10 @@ Command-card strategies exclude face cards with recognized action-blocking statu
 
 The runner does not infer NP availability from an unrecognized gauge. It also does not retry when the back button has disappeared or when no selected NP has a recognized blocking status. Returning to battle must be confirmed before another attack tap is sent.
 
+### Bond Stop Exclusions
+
+`ignoreFriendship` follows the bundled original client's `FGObattle.Battle.dealIgnoreFriendShip` and `checkBattleEnd` behavior: string characters or list entries convertible to integers from 1 through 5 identify reward-panel positions excluded from the existing-full-bond check. Other entries are ignored. With `fullFriendshipStop` enabled, the runner masks only those positions before rechecking `jbMax`; full-bond markers elsewhere still stop the run. The separate `jblevel10` level-up dialog still stops the run even when every reward position is excluded. The original 1920x1080 mask coordinates are scaled to the normalized capture, and other recognition uses the unmodified capture.
+
 ## Resources
 
 Recognition resources are expected under `assets/`, and data files under `data/`. Populate them from the BBchannel package when setting up a fresh checkout. Scripts live in `data/settings/` and strategies in `data/strategy/`.

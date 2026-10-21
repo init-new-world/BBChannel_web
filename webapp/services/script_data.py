@@ -729,6 +729,20 @@ class ScriptDataService:
         return tags
 
     @staticmethod
+    def _plan_ignored_friendship(value: Any) -> list[int]:
+        if not isinstance(value, (str, list)):
+            return []
+        positions = []
+        for item in value:
+            try:
+                position = int(item)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if 1 <= position <= 5:
+                positions.append(position)
+        return positions
+
+    @staticmethod
     def _plan_run(config: dict[str, Any]) -> dict[str, Any]:
         return {
             "clear_ap": bool(config.get("clearAP")),
@@ -742,6 +756,7 @@ class ScriptDataService:
             "no_chain": bool(config.get("noChain")),
             "no_speedup_skill": bool(config.get("noSpeedupSkill")),
             "full_friendship_stop": bool(config.get("fullFriendshipStop")),
+            "ignored_friendship_slots": ScriptDataService._plan_ignored_friendship(config.get("ignoreFriendship", "")),
             "drop_stop_num": config.get("dropStopNum", 0),
             "drop_image": config.get("dropImage"),
             "game_crash_restart": bool(config.get("gameCrushRestart")),

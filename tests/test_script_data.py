@@ -457,6 +457,7 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
             "noChain": 1,
             "noSpeedupSkill": 1,
             "fullFriendshipStop": 1,
+            "ignoreFriendship": "1x35",
             "dropStopNum": 2,
             "dropImage": "assets/drop/item.png",
             "gameCrushRestart": 1,
@@ -480,6 +481,7 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
         "no_chain": True,
         "no_speedup_skill": True,
         "full_friendship_stop": True,
+        "ignored_friendship_slots": [1, 3, 5],
         "drop_stop_num": 2,
         "drop_image": "assets/drop/item.png",
         "game_crash_restart": True,
@@ -487,6 +489,18 @@ def test_get_setting_plan_normalizes_run_options(tmp_path: Path):
         "check_stuck_interval": 45,
         "add_friend": True,
     }
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("", []), ("x1035-6", [1, 3, 5]), (["2", None, "5", 6], [2, 5]),
+    (["1", 3.8, True, False], [1, 3, 1]),
+    (None, []), (False, []), ({"1": True}, []),
+])
+def test_ignored_friendship_positions_follow_original_client_parsing(tmp_path: Path, value, expected):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    _write_json(tmp_path / "settings" / "demo.json", {"server": "CH", "ignoreFriendship": value})
+    plan = ScriptDataService(tmp_path).get_setting_plan("demo")
+    assert plan["run"]["ignored_friendship_slots"] == expected
 
 
 def test_get_setting_rejects_invalid_stuck_watchdog_interval(tmp_path: Path):

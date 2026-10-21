@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
 from time import monotonic
 from typing import Any
+
+from PIL import Image, ImageDraw
 
 from webapp.automation.interaction import (
     configured_random_time,
@@ -119,18 +122,25 @@ def create_completion_handler(
                         "attempts": attempts,
                     }
             if plan["run"]["full_friendship_stop"]:
-                friendship_markers = (
-                    _match_optional(
+                friendship_marker = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/jblevel10.png",
+                )
+                if friendship_marker is None or not friendship_marker.matched:
+                    friendship_marker = _match_optional(
                         recognition,
                         screenshot,
-                        f"battle/{server}/{template_name}.png",
+                        f"battle/{server}/jbMax.png",
                     )
-                    for template_name in ("jblevel10", "jbMax")
-                )
-                if any(
-                    marker is not None and marker.matched
-                    for marker in friendship_markers
-                ):
+                    ignored_positions = plan["run"].get("ignored_friendship_slots", [])
+                    if friendship_marker is not None and friendship_marker.matched and ignored_positions:
+                        friendship_marker = _match_optional(
+                            recognition,
+                            _mask_ignored_friendship(screenshot, ignored_positions),
+                            f"battle/{server}/jbMax.png",
+                        )
+                if friendship_marker is not None and friendship_marker.matched:
                     context.checkpoint(
                         "complete",
                         progress=1.0,
@@ -379,6 +389,27 @@ def register_completion_job(
         ),
         requires_device=True,
     )
+
+
+def _mask_ignored_friendship(screenshot: bytes, positions: list[int]) -> bytes:
+    with Image.open(BytesIO(screenshot)) as source:
+        frame = source.convert("RGB")
+    scale = min(frame.width / 1920, frame.height / 1080)
+    dx = (frame.width - 1920 * scale) / 2
+    dy = (frame.height - 1080 * scale) / 2
+    draw = ImageDraw.Draw(frame)
+    # Original FGObattle.checkBattleEnd masks these five reward-panel regions.
+    for position in positions:
+        left = 177 + 334 * (position - 1)
+        right = 420 + 334 * (position - 1)
+        draw.rectangle(
+            (round(left * scale + dx), round(730 * scale + dy),
+             round(right * scale + dx), round(785 * scale + dy)),
+            fill=(0, 0, 0),
+        )
+    output = BytesIO()
+    frame.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _match_optional(

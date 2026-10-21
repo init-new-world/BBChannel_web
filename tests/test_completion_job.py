@@ -253,6 +253,52 @@ def test_completion_stops_when_friendship_maximum_marker_is_reached(tmp_path: Pa
     assert result.result["actions"] == []
 
 
+@pytest.mark.parametrize("slot", range(1, 6))
+def test_completion_ignores_only_configured_full_friendship_reward_positions(tmp_path: Path, slot: int):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    marker = _pattern((121, 46), (35, 155, 95)).resize((81, 31))
+    x = round((177 + 334 * (slot - 1)) * 2 / 3) + 20
+    frame.paste(marker, (x, 490))
+    frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+    result = _run_completion(
+        tmp_path,
+        [(frame, None)],
+        config={"fullFriendshipStop": True, "ignoreFriendship": f"x{slot}06"},
+    )
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["complete"] is True
+    assert result.result["actions"] == []
+
+
+def test_completion_still_stops_for_another_full_friendship_position(tmp_path: Path):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    marker = _pattern((121, 46), (35, 155, 95)).resize((81, 31))
+    frame.paste(marker, (140, 490))
+    frame.paste(marker, (585, 490))
+    result = _run_completion(
+        tmp_path,
+        [(frame, None)],
+        config={"fullFriendshipStop": True, "ignoreFriendship": "1"},
+    )
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["reason"] == "full_friendship"
+
+
+def test_completion_does_not_ignore_friendship_level_ten_dialog(tmp_path: Path):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern((90, 45), (145, 75, 105)), (140, 485))
+    result = _run_completion(
+        tmp_path,
+        [(frame, None)],
+        config={"fullFriendshipStop": True, "ignoreFriendship": "12345"},
+    )
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["reason"] == "full_friendship"
+
+
 def test_completion_advances_friendship_level_dialog(tmp_path: Path):
     pytest.importorskip("cv2")
     base = Image.new("RGB", (1280, 720), (18, 24, 32))
