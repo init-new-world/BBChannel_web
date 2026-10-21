@@ -82,3 +82,63 @@ def test_browser_language_is_used_without_saved_preference_and_invalid_saved_val
     page.reload()
     playwright.expect(page.locator("#language-select")).to_have_value("zh-CN")
     page.close()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_team_editor_translates_generated_ui_without_translating_catalog_names(tag_console, width, height):
+    browser, url, directory = tag_console
+    (directory / "data" / "servant_info_CH.json").write_text(json.dumps({
+        "Support": {"SN": "314"}, "None": {"SN": "999"},
+    }))
+    (directory / "data" / "master_info.json").write_text(json.dumps({"None": {"SN": 7}}))
+    page = browser.new_page(viewport={"width": width, "height": height})
+    original = {"server": "CH", "round1_turns": 0, "custom": {"keep": True}}
+    assert page.request.put(f"{url}/api/settings/demo", data={"config": original, "overwrite": True}).ok
+    page.goto(url)
+    page.locator("#language-select").select_option("zh-CN")
+    page.locator("#edit-setting").click()
+    draft = {**original, "servant_0_name": "Legacy", "master_equip": 42,
+             "usedServant": [0, "legacy"]}
+    page.locator("#preset-json").fill(json.dumps(draft))
+    page.locator("#preset-team summary").click()
+    playwright.expect(page.locator("#preset-team-status")).to_have_text("2 位从者 (CH)")
+    playwright.expect(page.locator("#preset-master-status")).to_have_text("1 套御主礼装")
+    playwright.expect(page.locator('[data-team-slot="0"] option').first).to_have_text("无")
+    playwright.expect(page.locator('[data-team-slot="0"] option[value="None"]')).to_have_text("None")
+    playwright.expect(page.locator('[data-team-slot="0"] option:checked')).to_have_text("Legacy（当前）")
+    playwright.expect(page.locator("#preset-master-equip option[value='']").first).to_have_text("无")
+    playwright.expect(page.locator("#preset-master-equip option[value='7']")).to_have_text("None")
+    playwright.expect(page.locator("#preset-master-equip option:checked")).to_have_text("42（当前）")
+    playwright.expect(page.locator("#preset-assist-slot option").first).to_have_text("未设置")
+    playwright.expect(page.locator("#preset-assist-slot option[value='0']")).to_have_text("第 1 位")
+    playwright.expect(page.locator("#preset-used-status")).to_have_text("已保留无法识别的条目。")
+    assert json.loads(page.locator("#preset-json").input_value()) == draft
+    page.locator('[data-team-slot="0"]').select_option("None")
+    page.locator("#preset-master-equip").select_option("7")
+    assert json.loads(page.locator("#preset-json").input_value()) == {
+        **draft, "servant_0_name": "None", "master_equip": 7,
+    }
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == original
+    page.locator("#preset-team").scroll_into_view_if_needed()
+    page.screenshot(path=str(directory / f"i18n-team-{width}.png"))
+    assert page.locator(".preset-form").evaluate("e => e.scrollWidth <= e.clientWidth")
+    page.close()
+
+
+def test_team_editor_translates_local_validation_but_keeps_backend_errors_verbatim(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page(locale="zh-CN")
+    page.route("**/api/servants?*", lambda route: route.fulfill(
+        status=503, json={"error": {"message": "Catalog offline"}},
+    ))
+    page.goto(url)
+    page.locator("#new-setting").click()
+    page.locator("#preset-team summary").click()
+    playwright.expect(page.locator("#preset-team-status")).to_have_text("Catalog offline")
+    page.locator("#preset-json").fill(json.dumps({"server": "unsupported", "usedServant": {"future": 1}}))
+    playwright.expect(page.locator("#preset-team-status")).to_have_text("不支持的服务器。")
+    playwright.expect(page.locator("#preset-used-status")).to_have_text("usedServant 值无效。")
+    page.locator("#preset-json").fill("{")
+    playwright.expect(page.locator("#preset-team-status")).to_have_text("脚本 JSON 无效。")
+    playwright.expect(page.locator("#preset-master-status")).to_have_text("脚本 JSON 无效。")
+    page.close()
