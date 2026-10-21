@@ -134,6 +134,7 @@ const zh = {
   "Idle": "空闲",
   "Ignore bond positions": "忽略羁绊位置",
   "Inactive for this recognition mode.": "当前识别模式不使用礼装。",
+  "Keep ALL tab": "ALL阶不跳转",
   "Import": "导入",
   "Import PNG": "导入 PNG",
   "Import Script": "导入脚本",

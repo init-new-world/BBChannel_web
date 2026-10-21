@@ -57,7 +57,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
     }
     inputs.forEach((input) => {
       const value = config[input.dataset.assistOption];
-      if (input.type === "checkbox") input.checked = runtimeFlag(value);
+      if (input.type === "checkbox") input.checked = runtimeFlag(value === undefined ? input.dataset.default === "true" : value);
       else renderSelect(input, value);
     });
     const effectiveMode = config.assistMode || mode.options[0].value;

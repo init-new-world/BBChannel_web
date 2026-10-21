@@ -22,6 +22,7 @@ ASSIST_SCROLL_START_Y = 620
 ASSIST_SCROLL_END_Y = 380
 ASSIST_SCROLL_DURATION_MS = 700
 ASSIST_SKILL_TOGGLE_POINT = (847, 130)
+MAX_ASSIST_CLASS_ATTEMPTS = 3
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -283,35 +284,58 @@ def create_assist_handler(
             context.sleep(randomized_wait_seconds(tap_wait_seconds, random_time))
 
         class_selection = None
-        if not plan["assist"].get("all_not_skip"):
-            servant_class = plan["assist"].get("servant_class")
-            if isinstance(servant_class, str) and servant_class:
-                screenshot = snapshot_without_reconnect()
-                recommended = assist_recognizer.match_recommended_header(
-                    screenshot,
-                    plan["server"],
-                ).matched
-                point = _assist_class_point(servant_class, recommended=recommended)
-                for _ in range(2):
-                    touch_point = randomized_touch_point(
-                        point,
-                        enabled=random_touch,
+        servant_class = plan["assist"].get("servant_class")
+        if (
+            isinstance(servant_class, str) and servant_class
+            and plan["assist"].get("mode") not in {"不识别", "仅礼装", "冠位助战仅礼装"}
+        ):
+            screenshot = snapshot_without_reconnect()
+            recommended = assist_recognizer.match_recommended_header(
+                screenshot,
+                plan["server"],
+            ).matched
+            point = _assist_class_point(servant_class, recommended=recommended)
+            selected_class = assist_recognizer.selected_class_index(screenshot, recommended=recommended)
+            keep_current = (
+                selected_class in {9, ASSIST_CLASS_INDEX[servant_class]}
+                or selected_class in {0, -1} and plan["assist"].get("all_not_skip", True)
+            )
+            if not keep_current:
+                for attempt in range(1, MAX_ASSIST_CLASS_ATTEMPTS + 1):
+                    context.checkpoint("select_assist_class", progress=0)
+                    point = _assist_class_point(servant_class, recommended=recommended)
+                    for _ in range(2):
+                        touch_point = randomized_touch_point(
+                            point,
+                            enabled=random_touch,
+                        )
+                        operation = device_service.tap(*touch_point)
+                    class_selection = {
+                        "class": servant_class,
+                        "recommended": recommended,
+                        "point": list(point),
+                        "operation": operation.to_dict(),
+                    }
+                    context.emit(
+                        "device_action",
+                        "Tapped the configured assist class.",
+                        data={"role": "assist_class", "attempt": attempt, **class_selection},
                     )
-                    operation = device_service.tap(*touch_point)
-                class_selection = {
-                    "class": servant_class,
-                    "recommended": recommended,
-                    "point": list(point),
-                    "operation": operation.to_dict(),
-                }
-                context.emit(
-                    "device_action",
-                    "Selected the configured assist class.",
-                    data={"role": "assist_class", **class_selection},
-                )
-                context.sleep(
-                    randomized_wait_seconds(refresh_wait_seconds, random_time)
-                )
+                    context.sleep(
+                        randomized_wait_seconds(refresh_wait_seconds, random_time)
+                    )
+                    screenshot = snapshot_without_reconnect()
+                    recommended = assist_recognizer.match_recommended_header(screenshot, plan["server"]).matched
+                    selected_class = assist_recognizer.selected_class_index(screenshot, recommended=recommended)
+                    if selected_class == ASSIST_CLASS_INDEX[servant_class]:
+                        context.emit(
+                            "recognition",
+                            "Confirmed the configured assist class.",
+                            data={"role": "assist_class_confirmed", "class": servant_class, "attempts": attempt},
+                        )
+                        break
+                else:
+                    raise RuntimeError("Assist class selection was not confirmed after three attempts.")
         attempts = 0
         scrolls = 0
         scrolls_since_refresh = 0

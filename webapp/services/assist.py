@@ -583,6 +583,23 @@ class AssistRecognizer:
             scales=ASSIST_EQUIP_SCALES,
         )
 
+    def selected_class_index(self, screenshot: bytes, *, recommended: bool) -> int | None:
+        suffix = "_s" if recommended else ""
+        match = self._recognition.match_template(
+            screenshot,
+            f"battle/public/choosedClass{suffix}.png",
+            mask_path=f"battle/public/choosedClassMask{suffix}.png",
+            threshold=0.5,
+            roi=(57, 80, 683, 100),
+            scales=(NORMALIZED_FRAME_SCALE,),
+        )
+        if not match.matched or not (57 <= match.center[0] < 740 and 80 <= match.center[1] < 180):
+            return None
+        # Original checkChoosedClass offsets and spacing, normalized from 1920x1080.
+        origin, spacing = (183, 91) if recommended else (93, 101)
+        index = int((match.center[0] - origin * NORMALIZED_FRAME_SCALE) // (spacing * NORMALIZED_FRAME_SCALE))
+        return index if -1 <= index <= 9 else None
+
     def match_reconnect(
         self,
         screenshot: bytes,

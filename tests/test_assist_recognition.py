@@ -36,6 +36,67 @@ def _match_result(
     )
 
 
+@pytest.mark.parametrize("recommended", [False, True])
+@pytest.mark.parametrize("selected_index,marker_y", [
+    *((index, 128) for index in range(10)), (None, 128), (5, 350),
+])
+def test_assist_selected_class_uses_original_header_geometry(tmp_path, recommended, selected_index, marker_y):
+    cv = pytest.importorskip("cv2")
+    numpy = pytest.importorskip("numpy")
+    public = tmp_path / "assets" / "battle" / "public"
+    public.mkdir(parents=True)
+    width, height = (97, 98) if recommended else (107, 110)
+    template = Image.new("RGB", (width, height), "black")
+    draw = ImageDraw.Draw(template)
+    diamond = [(width // 2, 2), (width - 3, height // 2),
+               (width // 2, height - 3), (2, height // 2), (width // 2, 2)]
+    draw.line(diamond, fill=(80, 180, 240), width=5)
+    draw.line(diamond[:3], fill=(245, 240, 215), width=2)
+    mask = template.convert("L").point(lambda value: 255 if value else 0)
+    suffix = "_s" if recommended else ""
+    template.save(public / f"choosedClass{suffix}.png")
+    mask.save(public / f"choosedClassMask{suffix}.png")
+    size = (round(width * 2 / 3), round(height * 2 / 3))
+    scaled = Image.fromarray(cv.resize(numpy.array(template), size, interpolation=cv.INTER_AREA))
+    scaled_mask = Image.fromarray(cv.resize(numpy.array(mask), size, interpolation=cv.INTER_NEAREST))
+    screen = Image.new("RGB", (1280, 720), (30, 45, 65))
+    if selected_index is not None:
+        center_x = round(((225 + 91 * selected_index) if recommended else (140 + 101 * selected_index)) * 2 / 3)
+        screen.paste(scaled, (center_x - size[0] // 2, marker_y - size[1] // 2), scaled_mask)
+    resources = ResourceService(tmp_path / "assets", tmp_path / "data")
+
+    result = AssistRecognizer(resources, RecognitionService(resources)).selected_class_index(
+        _png_bytes(screen), recommended=recommended,
+    )
+
+    assert result == (selected_index if marker_y == 128 else None)
+
+
+@pytest.mark.parametrize("recommended", [False, True])
+@pytest.mark.parametrize("center_x,center_y,matched,expected", [
+    (90, 128, True, -1),
+    (430, 350, True, None),
+    (1250, 128, True, None),
+    (430, 128, False, None),
+])
+def test_assist_selected_class_rejects_unrecognized_or_outside_header(
+    tmp_path, recommended, center_x, center_y, matched, expected,
+):
+    class Recognition:
+        def match_template(self, screenshot, path, **options):
+            suffix = "_s" if recommended else ""
+            assert path == f"battle/public/choosedClass{suffix}.png"
+            assert options == {"threshold": 0.5, "roi": (57, 80, 683, 100),
+                               "scales": (2 / 3,), "mask_path": f"battle/public/choosedClassMask{suffix}.png"}
+            result = _match_result(path, [center_x, center_y])
+            return MatchResult(**{**result.to_dict(), "matched": matched})
+
+    resources = ResourceService(tmp_path / "assets", tmp_path / "data")
+    result = AssistRecognizer(resources, Recognition()).selected_class_index(b"frame", recommended=recommended)
+
+    assert result == (0 if not recommended and expected == -1 else expected)
+
+
 @pytest.mark.parametrize("mode", ["仅从者", "冠位助战"])
 @pytest.mark.parametrize("special_filter,expected", [
     ("arts", "A"), ("buster", "B"), ("quick", "Q"),

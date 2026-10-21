@@ -595,7 +595,27 @@ def test_assist_handler_refreshes_when_grand_boundary_disappears():
     assert result["grand_boundary_hits"] == 1
 
 
-def test_assist_handler_selects_configured_class_before_recognition():
+@pytest.mark.parametrize("recommended", [False, True])
+@pytest.mark.parametrize("selected_class,all_not_skip,mode,should_switch", [
+    (1, True, "从者礼装", True),
+    (1, False, "仅从者", True),
+    (None, True, "冠位助战", True),
+    (None, False, "从者礼装", True),
+    (0, True, "从者礼装", False),
+    (-1, True, "从者礼装", False),
+    (0, False, "从者礼装", True),
+    (-1, False, "从者礼装", True),
+    (5, True, "从者礼装", False),
+    (5, False, "从者礼装", False),
+    (9, True, "从者礼装", False),
+    (9, False, "从者礼装", False),
+    (1, False, "不识别", False),
+    (1, False, "仅礼装", False),
+    (1, False, "冠位助战仅礼装", False),
+])
+def test_assist_handler_selects_configured_class_before_recognition(
+    selected_class, all_not_skip, mode, should_switch, recommended,
+):
     taps = []
 
     class Operation:
@@ -621,7 +641,13 @@ def test_assist_handler_selects_configured_class_before_recognition():
             return Match()
 
         def match_recommended_header(self, _screenshot, _server):
-            return Match()
+            match = Match()
+            match.matched = recommended
+            return match
+
+        def selected_class_index(self, _screenshot, *, recommended):
+            assert mode not in {"不识别", "仅礼装", "冠位助战仅礼装"}
+            return 5 if len(taps) >= 2 else selected_class
 
         def recognize(self, _screenshot, _assist, *, server):
             return {
@@ -637,8 +663,9 @@ def test_assist_handler_selects_configured_class_before_recognition():
             return {
                 "server": "CH",
                 "assist": {
+                    "mode": mode,
                     "servant_class": "Caster",
-                    "all_not_skip": False,
+                    "all_not_skip": all_not_skip,
                 },
                 "run": {"random_time": 0, "random_touch": False},
             }
@@ -658,13 +685,14 @@ def test_assist_handler_selects_configured_class_before_recognition():
         {"setting_name": "demo"},
     )
 
-    assert taps == [(430, 128), (430, 128), (340, 165)]
-    assert result["class_selection"] == {
+    point = (453, 128) if recommended else (430, 128)
+    assert taps == ([point, point] if should_switch else []) + [(340, 165)]
+    assert result["class_selection"] == ({
         "class": "Caster",
-        "recommended": False,
-        "point": [430, 128],
+        "recommended": recommended,
+        "point": list(point),
         "operation": {"ok": True},
-    }
+    } if should_switch else None)
 
 
 def test_assist_select_job_taps_first_matching_candidate(tmp_path: Path):
