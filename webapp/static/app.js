@@ -41,6 +41,7 @@ const state = {
   selectedSettingProgram: null,
   selectedStrategy: null,
   presetEditor: null,
+  presetOpenSequence: 0,
   jobs: [],
   activeJob: null,
   jobEvents: [],
@@ -62,6 +63,7 @@ const els = {
   settingPlan: document.querySelector("#setting-plan"),
   newSetting: document.querySelector("#new-setting"),
   editSetting: document.querySelector("#edit-setting"),
+  duplicateSetting: document.querySelector("#duplicate-setting"),
   deleteSetting: document.querySelector("#delete-setting"),
   refreshSettings: document.querySelector("#refresh-settings"),
   importSetting: document.querySelector("#import-setting"),
@@ -71,6 +73,7 @@ const els = {
   strategySummary: document.querySelector("#strategy-summary"),
   newStrategy: document.querySelector("#new-strategy"),
   editStrategy: document.querySelector("#edit-strategy"),
+  duplicateStrategy: document.querySelector("#duplicate-strategy"),
   deleteStrategy: document.querySelector("#delete-strategy"),
   presetDialog: document.querySelector("#preset-dialog"),
   presetForm: document.querySelector("#preset-form"),
@@ -346,9 +349,7 @@ function bindEvents() {
     renderJobEvents();
     if (!state.connected) els.connectionState.textContent = t("Disconnected");
     if (state.presetEditor) {
-      const action = state.presetEditor.originalName ? "Edit" : "New";
-      const subject = state.presetEditor.kind === "settings" ? "Script" : "Strategy";
-      els.presetDialogTitle.textContent = t(`${action} ${subject}`);
+      els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
     }
   });
   els.backendSelect.addEventListener("change", () => renderDevices());
@@ -365,15 +366,17 @@ function bindEvents() {
   els.disconnectDevice.addEventListener("click", disconnect);
   els.settingSelect.addEventListener("change", loadSelectedSettingPlan);
   els.strategySelect.addEventListener("change", loadSelectedStrategy);
-  els.newSetting.addEventListener("click", () => openPresetEditor("settings", false));
-  els.editSetting.addEventListener("click", () => openPresetEditor("settings", true));
+  els.newSetting.addEventListener("click", () => openPresetEditor("settings", "new"));
+  els.editSetting.addEventListener("click", () => openPresetEditor("settings", "edit"));
+  els.duplicateSetting.addEventListener("click", () => openPresetEditor("settings", "duplicate"));
   els.deleteSetting.addEventListener("click", () => deletePreset("settings"));
   els.refreshSettings.addEventListener("click", () => loadSettings());
   els.importSetting.addEventListener("click", () => els.settingFileInput.click());
   els.settingFileInput.addEventListener("change", handleSettingImport);
   els.exportSetting.addEventListener("click", exportSelectedSetting);
-  els.newStrategy.addEventListener("click", () => openPresetEditor("strategies", false));
-  els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", true));
+  els.newStrategy.addEventListener("click", () => openPresetEditor("strategies", "new"));
+  els.editStrategy.addEventListener("click", () => openPresetEditor("strategies", "edit"));
+  els.duplicateStrategy.addEventListener("click", () => openPresetEditor("strategies", "duplicate"));
   els.deleteStrategy.addEventListener("click", () => deletePreset("strategies"));
   els.presetForm.addEventListener("submit", savePreset);
   els.presetDialog.addEventListener("cancel", (event) => {
@@ -1738,24 +1741,30 @@ async function loadSelectedStrategy() {
   }
 }
 
-async function openPresetEditor(kind, editing) {
+async function openPresetEditor(kind, mode) {
   const isSetting = kind === "settings";
+  const editing = mode === "edit";
+  const usesSource = mode !== "new";
   const selectedName = isSetting ? els.settingSelect.value : els.strategySelect.value;
-  if (editing && !selectedName) {
+  if (usesSource && !selectedName) {
     return;
   }
+  const opening = ++state.presetOpenSequence;
   try {
     let value = isSetting ? { server: "CH", round1_turns: 0 } : [newStrategyEntry("Entry 1")];
-    if (editing) {
+    if (usesSource) {
       const detail = await api(`/api/${kind}/${encodeURIComponent(selectedName)}`);
       value = isSetting ? detail.config : detail.entries;
     }
+    if (opening !== state.presetOpenSequence) return;
+    const action = editing ? "Edit" : mode === "duplicate" ? "Duplicate" : "New";
     state.presetEditor = {
       kind,
       originalName: editing ? selectedName : "",
       strategyIndex: 0,
+      titleKey: `${action} ${isSetting ? "Script" : "Strategy"}`,
     };
-    els.presetDialogTitle.textContent = t(`${editing ? "Edit" : "New"} ${isSetting ? "Script" : "Strategy"}`);
+    els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
     els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
     els.presetJson.value = JSON.stringify(value, null, 2);
@@ -1763,7 +1772,7 @@ async function openPresetEditor(kind, editing) {
     setPresetError("");
     els.presetName.focus();
   } catch (error) {
-    showError(error);
+    if (opening === state.presetOpenSequence) showError(error);
   }
 }
 
@@ -1772,13 +1781,15 @@ async function handleSettingImport() {
   if (!file) {
     return;
   }
+  const opening = ++state.presetOpenSequence;
   try {
     const value = JSON.parse(await file.text());
+    if (opening !== state.presetOpenSequence) return;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("Script JSON must contain an object.");
     }
     const proposedName = file.name.replace(/\.json$/i, "") || "imported-script";
-    state.presetEditor = { kind: "settings", originalName: "" };
+    state.presetEditor = { kind: "settings", originalName: "", titleKey: "Import Script" };
     els.presetDialogTitle.textContent = t("Import Script");
     els.presetName.value = proposedName;
     els.presetJson.value = JSON.stringify(value, null, 2);
@@ -1787,7 +1798,7 @@ async function handleSettingImport() {
     els.presetDialog.showModal();
     els.presetName.focus();
   } catch (error) {
-    showError(error);
+    if (opening === state.presetOpenSequence) showError(error);
   } finally {
     els.settingFileInput.value = "";
   }
@@ -1817,6 +1828,7 @@ async function exportSelectedSetting() {
 }
 
 function closePresetEditor() {
+  state.presetOpenSequence += 1;
   els.presetDialog.close();
   state.presetEditor = null;
   updatePresetSaveState();
@@ -3688,9 +3700,11 @@ function updateControls() {
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)
     || selectedJobStatus === "cancelling";
   els.editSetting.disabled = !els.settingSelect.value;
+  els.duplicateSetting.disabled = !els.settingSelect.value;
   els.deleteSetting.disabled = !els.settingSelect.value;
   els.exportSetting.disabled = !els.settingSelect.value;
   els.editStrategy.disabled = !els.strategySelect.value;
+  els.duplicateStrategy.disabled = !els.strategySelect.value;
   els.deleteStrategy.disabled = !els.strategySelect.value;
   els.equipTemplateName.disabled = state.equipTemplateBusy;
   els.captureEquipCandidates.disabled = state.equipTemplateBusy

@@ -94,6 +94,8 @@ const zh = {
   "Drop rate": "掉落率",
   "Dry Run Script": "试运行脚本",
   "Duplicate entry": "复制条目",
+  "Duplicate Script": "复制脚本",
+  "Duplicate Strategy": "复制策略",
   "Duration": "持续时间",
   "EXP Materials": "经验素材",
   "EXP workflow destination": "经验素材目标位置",

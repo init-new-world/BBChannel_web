@@ -58,7 +58,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_compact_layout_browser.py tests/test_i18n_browser.py tests/test_team_editor_browser.py tests/test_master_editor_browser.py tests/test_assist_options_browser.py tests/test_assist_equips_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_compact_layout_browser.py tests/test_i18n_browser.py tests/test_team_editor_browser.py tests/test_master_editor_browser.py tests/test_assist_options_browser.py tests/test_assist_equips_browser.py tests/test_preset_copy_browser.py
 ```
 
 Manual smoke steps:
@@ -76,7 +76,7 @@ Manual smoke steps:
 Implemented workflows include:
 
 - Device discovery and connection, normalized screenshots, manual taps/swipes, template matching, and diagnostic jobs.
-- Script and strategy editing, JSON import/export, validation, compiled-program inspection, and dry runs.
+- Script and strategy editing, independent copies, JSON import/export, validation, compiled-program inspection, and dry runs.
 - Battle entry, support selection, team checks, skills, command-card strategies, result handling, repeated runs, and bounded crash or frozen-screen recovery.
 - Assist filters for servant/CE identity, limit break, friendship, NP and servant level, main and append skill levels, custom tags, NP color, and Olga form.
 - CE template creation and inventory management, plus a visual custom-tag crop/import/binding tool.
@@ -84,6 +84,8 @@ Implemented workflows include:
 - Material drop queries from the bundled data and a local notebook.
 
 The console's top-bar language selector supports English and Simplified Chinese. It saves the choice in browser local storage and otherwise follows the browser language. Static interface controls and common live status text are translated; script JSON, device identifiers, names, and backend-provided messages remain unchanged.
+
+The copy icons beside the script and strategy selectors load the selected preset into a new draft with an empty required name. Copies retain the complete JSON, including extension fields, and use the backend's existing-name protection. Canceling discards the draft; Save creates a separate file. A source-load response arriving after another editor was opened or closed is ignored.
 
 Execution is rejected when a script fails validation or contains unsupported compiled actions. Recognition-dependent behavior still requires suitable assets and a compatible device layout; this project does not claim complete parity with every original-client function or every live game screen.
 

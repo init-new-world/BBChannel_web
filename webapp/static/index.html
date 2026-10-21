@@ -36,7 +36,10 @@
         <aside class="tool-panel">
           <section class="panel-section">
             <div class="section-label">Script</div>
-            <select id="setting-select" class="field" aria-label="Script setting"></select>
+            <div class="preset-picker">
+              <select id="setting-select" class="field" aria-label="Script setting"></select>
+              <button id="duplicate-setting" class="icon-button" type="button" title="Duplicate Script" aria-label="Duplicate Script" disabled><img src="/icons/copy.svg" width="16" height="16" alt=""></button>
+            </div>
             <div class="preset-actions">
               <button id="new-setting" class="ghost-button" type="button">New</button>
               <button id="edit-setting" class="ghost-button" type="button">Edit</button>
@@ -54,7 +57,10 @@
 
           <section class="panel-section">
             <div class="section-label">Strategy</div>
-            <select id="strategy-select" class="field" aria-label="Strategy preset"></select>
+            <div class="preset-picker">
+              <select id="strategy-select" class="field" aria-label="Strategy preset"></select>
+              <button id="duplicate-strategy" class="icon-button" type="button" title="Duplicate Strategy" aria-label="Duplicate Strategy" disabled><img src="/icons/copy.svg" width="16" height="16" alt=""></button>
+            </div>
             <div class="preset-actions">
               <button id="new-strategy" class="ghost-button" type="button">New</button>
               <button id="edit-strategy" class="ghost-button" type="button">Edit</button>

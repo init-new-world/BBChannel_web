@@ -442,6 +442,23 @@ select:disabled {
   white-space: pre-wrap;
 }
 
+.preset-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+}
+
+.preset-picker select {
+  min-width: 0;
+}
+
+.preset-picker .icon-button {
+  width: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
 .preset-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
