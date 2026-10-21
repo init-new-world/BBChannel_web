@@ -263,7 +263,8 @@ const presetTeam = createPresetTeamEditor({
   getEditor: () => state.presetEditor,
   source: els.presetJson,
   request: api,
-  onChange: () => {
+  onChange: (field) => {
+    if (field === "server") updatePresetSkillAvailability(JSON.parse(els.presetJson.value));
     renderPresetScriptStrategy();
     setPresetError("");
   },
@@ -2514,15 +2515,21 @@ function renderPresetSkills() {
     return;
   }
   const levels = Array.isArray(config.skillsLevel) ? config.skillsLevel : [];
-  const isCntw = String(config.server).toUpperCase() === "CNTW";
   els.presetAssistSkills.disabled = false;
   els.presetSkillInputs.forEach((input, index) => {
     const level = levels[index] ?? 0;
-    const unsupported = isCntw && index >= 6;
     input.value = Number.isInteger(level) && level >= 0 && level <= 10 ? String(level) : "";
+  });
+  updatePresetSkillAvailability(config);
+}
+
+function updatePresetSkillAvailability(config) {
+  const isCntw = String(config.server).toUpperCase() === "CNTW";
+  els.presetSkillInputs.forEach((input, index) => {
+    const unsupported = isCntw && index >= 6;
     input.max = unsupported ? "0" : "10";
-    input.disabled = unsupported && level === 0;
-    input.title = unsupported ? "Not available on CNTW" : "Minimum level; 0 means any level";
+    input.disabled = unsupported && input.valueAsNumber === 0;
+    input.title = t(unsupported ? "Not available on CNTW" : "Minimum level; 0 means any level");
   });
 }
 

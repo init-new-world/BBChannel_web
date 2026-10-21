@@ -30,6 +30,109 @@ def _verify_slot(page, index):
 
 
 @pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_server_selector_updates_catalog_and_saved_plan_without_replacing_team(tag_console, width, height):
+    browser, url, directory = tag_console
+    for server in ("CNTW", "JP"):
+        (directory / "data" / f"servant_info_{server}.json").write_text(json.dumps({
+            "Support": {"SN": "314"}, f"{server} servant": {"SN": "999"},
+        }))
+    page = browser.new_page(viewport={"width": width, "height": height})
+    original = page.request.get(f"{url}/api/settings/demo").json()["config"]
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    page.locator("#preset-team summary").click()
+    server = page.locator("#preset-server")
+    playwright.expect(server).to_have_value("CH")
+    assert _config(page) == original
+    server.select_option("CNTW")
+    playwright.expect(page.locator("#preset-team-status")).to_have_text("2 servants (CNTW)")
+    playwright.expect(page.locator('[data-assist-skill-index="6"]')).to_be_disabled()
+    playwright.expect(page.locator('[data-assist-skill-index="7"]')).to_be_disabled()
+    server.select_option("JP")
+    playwright.expect(page.locator("#preset-team-status")).to_have_text("2 servants (JP)")
+    playwright.expect(page.locator('[data-assist-skill-index="6"]')).to_be_enabled()
+    assert "JP servant" in _slot(page, 0).locator("option").all_text_contents()
+    playwright.expect(_slot(page, 3)).to_have_value("Support")
+    expected = {**original, "server": "JP"}
+    assert _config(page) == expected
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == original
+    server.scroll_into_view_if_needed()
+    page.screenshot(path=str(directory / f"script-server-{width}.png"))
+    assert page.locator(".preset-form").evaluate("e => e.scrollWidth <= e.clientWidth")
+    page.locator("#save-preset").click()
+    playwright.expect(page.locator("#preset-dialog")).not_to_be_visible()
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == expected
+    assert page.request.get(f"{url}/api/settings/demo/plan").json()["server"] == "JP"
+    page.close()
+
+
+@pytest.mark.parametrize("value", ["ch", "Future", None, {"future": 1}])
+def test_server_selector_preserves_legacy_values_until_explicitly_replaced(tag_console, value):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    page.goto(url)
+    page.locator("#new-setting").click()
+    raw = {"server": value, "custom": [1, 2], "servant_0_name": "Support"}
+    page.locator("#preset-json").fill(json.dumps(raw))
+    page.locator("#preset-team summary").click()
+    server = page.locator("#preset-server")
+    if value == "ch":
+        playwright.expect(server).to_have_value("CH")
+    else:
+        playwright.expect(server.locator("option:checked")).to_contain_text("current")
+    assert _config(page) == raw
+    server.select_option("JP")
+    assert _config(page) == {**raw, "server": "JP"}
+    server.select_option("")
+    assert _config(page) == {"custom": [1, 2], "servant_0_name": "Support"}
+    playwright.expect(server.locator("option:checked")).to_have_text("Not set")
+    page.locator("#preset-json").fill("{")
+    playwright.expect(server).to_be_disabled()
+    page.close()
+
+
+def test_server_selector_keeps_invalid_drafts_and_ignores_stale_catalogs(tag_console):
+    browser, url, _directory = tag_console
+    page = browser.new_page()
+    pending = []
+    page.route("**/api/servants?*", lambda route: pending.append(route))
+    page.goto(url)
+    page.locator("#new-setting").click()
+    skill = page.locator('[data-assist-skill-index="0"]')
+    skill.fill("11")
+    skill.press("Tab")
+    append = page.locator('[data-assist-skill-index="6"]')
+    append.fill("7")
+    append.press("Tab")
+    page.locator("#preset-run-options summary").click()
+    page.locator('[data-run-option="stuckRestart"]').check()
+    interval = page.locator('[data-run-option="checkStuckInterval"]')
+    interval.fill("")
+    interval.press_sequentially("1e")
+    interval.press("Tab")
+    page.locator("#preset-team summary").click()
+    server = page.locator("#preset-server")
+    server.select_option("CNTW")
+    playwright.expect(append).to_be_enabled()
+    playwright.expect(append).to_have_attribute("max", "0")
+    playwright.expect(append).to_have_value("7")
+    server.select_option("CH")
+    playwright.expect(append).to_have_attribute("max", "10")
+    assert len(pending) == 3
+    pending.pop(0).fulfill(json={"server": "CH", "servants": [{"name": "Stale CH"}]})
+    pending.pop(0).fulfill(json={"server": "CNTW", "servants": [{"name": "Stale CNTW"}]})
+    playwright.expect(_slot(page, 0)).to_be_disabled()
+    pending.pop(0).fulfill(json={"server": "CH", "servants": [{"name": "Current"}]})
+    playwright.expect(_slot(page, 0)).to_be_enabled()
+    assert _slot(page, 0).locator("option").all_text_contents() == ["None", "Current"]
+    playwright.expect(skill).to_have_value("11")
+    playwright.expect(append).to_have_value("7")
+    assert interval.evaluate("e => e.validity.badInput")
+    assert _config(page) == {"server": "CH", "round1_turns": 0, "stuckRestart": True}
+    page.close()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
 def test_team_verification_defaults_and_saved_plan(tag_console, width, height):
     browser, url, directory = tag_console
     page = browser.new_page(viewport={"width": width, "height": height})
@@ -252,17 +355,21 @@ def test_team_locks_during_preset_load_and_save_and_keeps_focus(tag_console):
     response = page.request.get(f"{url}/api/strategies/Preset")
     page.locator("#apply-turn-strategy").click()
     playwright.expect(_slot(page, 0)).to_be_disabled()
+    playwright.expect(page.locator("#preset-server")).to_be_disabled()
     playwright.expect(page.locator("#preset-assist-slot")).to_be_disabled()
     playwright.expect(_verify_slot(page, 0)).to_be_disabled()
     pending.pop(0).fulfill(response=response)
     playwright.expect(_slot(page, 0)).to_be_enabled()
+    playwright.expect(page.locator("#preset-server")).to_be_enabled()
     playwright.expect(_verify_slot(page, 0)).to_be_enabled()
     page.route("**/api/settings/demo", lambda route: pending.append(route))
     page.locator("#save-preset").click()
     playwright.expect(_slot(page, 0)).to_be_disabled()
+    playwright.expect(page.locator("#preset-server")).to_be_disabled()
     playwright.expect(_verify_slot(page, 0)).to_be_disabled()
     pending.pop(0).fulfill(status=500, json={"error": {"message": "Save failed"}})
     playwright.expect(_slot(page, 0)).to_be_enabled()
+    playwright.expect(page.locator("#preset-server")).to_be_enabled()
     playwright.expect(_verify_slot(page, 0)).to_be_enabled()
     page.close()
 

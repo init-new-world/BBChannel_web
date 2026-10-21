@@ -3,6 +3,7 @@ import { t } from "./i18n.js";
 export function createPresetTeamEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-team");
   const controls = document.querySelector("#preset-team-controls");
+  const serverSelect = document.querySelector("#preset-server");
   const slots = [...document.querySelectorAll("[data-team-slot]")];
   const assistSlot = document.querySelector("#preset-assist-slot");
   const status = document.querySelector("#preset-team-status");
@@ -25,6 +26,23 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     item.textContent = label;
     item.disabled = disabled;
     return item;
+  }
+
+  function renderServer(config) {
+    serverSelect.querySelector("option[data-current]")?.remove();
+    const value = config.server;
+    const normalized = typeof value === "string" ? value.toUpperCase() : "";
+    if (value === undefined) {
+      serverSelect.value = "";
+    } else if (["CH", "CNTW", "JP"].includes(normalized)) {
+      serverSelect.value = normalized;
+    } else {
+      const current = option("", t("{name} (current)", { name: JSON.stringify(value) }), true);
+      current.dataset.current = "";
+      serverSelect.append(current);
+      serverSelect.selectedIndex = serverSelect.options.length - 1;
+    }
+    serverSelect.title = serverSelect.selectedOptions[0]?.textContent || "";
   }
 
   function renderSlots(config, catalog) {
@@ -160,6 +178,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
       masterRetry.hidden = true;
       return;
     }
+    renderServer(config);
     renderMasters(config, editor);
     renderUsed(config);
     const server = typeof config.server === "string" ? config.server.toUpperCase() : "";
@@ -189,7 +208,10 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
         || controls.disabled || select.disabled || select.selectedOptions[0]?.disabled) return;
     try {
       const config = readConfig();
-      if (select === master) {
+      if (select === serverSelect) {
+        if (select.value === "") delete config.server;
+        else config.server = select.value;
+      } else if (select === master) {
         if (select.value === "") delete config.master_equip;
         else {
           const selected = editor.masterCatalog?.masters?.find((item) => String(item.sn) === select.value);
@@ -203,7 +225,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
         config[`servant_${select.dataset.teamSlot}_name`] = select.value;
       }
       source.value = JSON.stringify(config, null, 2);
-      onChange();
+      onChange(select === serverSelect ? "server" : undefined);
     } catch (error) {
       onError(error.message);
     }
@@ -230,6 +252,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   }
 
   slots.forEach((select) => select.addEventListener("change", update));
+  serverSelect.addEventListener("change", update);
   usedSlots.forEach((input) => input.addEventListener("change", updateUsed));
   assistSlot.addEventListener("change", update);
   master.addEventListener("change", update);

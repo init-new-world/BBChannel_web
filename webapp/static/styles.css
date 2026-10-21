@@ -929,6 +929,10 @@ select:disabled {
   overflow-wrap: anywhere;
 }
 
+.preset-team-server {
+  grid-column: 1 / -1;
+}
+
 .preset-team-fields select,
 .preset-equip-toolbar select,
 .preset-assist-fields select {
