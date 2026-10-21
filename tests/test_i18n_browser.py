@@ -5,6 +5,7 @@ import pytest
 
 playwright = pytest.importorskip("playwright.sync_api")
 from tests.test_assist_tags_browser import tag_console
+from tests.test_assist_equips_browser import _equips, _row
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("BBCHANNEL_TEST_CHROMIUM"),
@@ -141,4 +142,46 @@ def test_team_editor_translates_local_validation_but_keeps_backend_errors_verbat
     page.locator("#preset-json").fill("{")
     playwright.expect(page.locator("#preset-team-status")).to_have_text("脚本 JSON 无效。")
     playwright.expect(page.locator("#preset-master-status")).to_have_text("脚本 JSON 无效。")
+    page.close()
+
+
+@pytest.mark.parametrize("width,height", [(1440, 1000), (390, 844)])
+def test_localized_assist_controls_edit_nested_candidates_and_confirm_clear(tag_console, width, height):
+    browser, url, directory = tag_console
+    _equips(directory)
+    page = browser.new_page(viewport={"width": width, "height": height}, locale="zh-CN")
+    page.goto(url)
+    saved = page.request.get(f"{url}/api/settings/demo").json()["config"]
+    page.locator("#new-setting").click()
+    draft = {"server": "CH", "assistMode": "从者礼装", "NPlevel": "3",
+             "assistEquip": [["First CE", "Missing CE"], ["First CE"]], "custom": 1}
+    page.locator("#preset-json").fill(json.dumps(draft))
+    page.locator("#preset-assist-options summary").click()
+    playwright.expect(page.locator('[data-assist-option="NPlevel"] option:checked')).to_have_text('"3"（当前）')
+    page.locator("#preset-assist-equips summary").click()
+    playwright.expect(page.locator("#preset-assist-equip-status")).to_have_text("已选择 2 件礼装")
+    playwright.expect(_row(page, "Missing CE").locator("small")).to_have_text("不可用")
+    page.wait_for_function("document.querySelector('[data-assist-equip-name] img').naturalWidth === 237")
+    page.locator("#preset-assist-equips").scroll_into_view_if_needed()
+    page.screenshot(path=str(directory / f"i18n-equips-{width}.png"))
+    assert page.locator(".preset-form").evaluate("e => e.scrollWidth <= e.clientWidth")
+    assert json.loads(page.locator("#preset-json").input_value()) == draft
+    _row(page, "First CE").get_by_role("button", name="移除礼装").click()
+    page.locator("#preset-assist-equip-source").select_option("Second CE")
+    page.locator("#add-assist-equip").click()
+    expected = {**draft, "assistEquip": [["Missing CE"], [], "Second CE"]}
+    assert json.loads(page.locator("#preset-json").input_value()) == expected
+    prompts = []
+    page.once("dialog", lambda dialog: (prompts.append(dialog.message), dialog.dismiss()))
+    page.locator("#clear-assist-equips").click()
+    assert prompts == ["清空所有助战礼装？"]
+    assert json.loads(page.locator("#preset-json").input_value()) == expected
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("#clear-assist-equips").click()
+    page.locator('[data-assist-option="assistMode"]').select_option("仅从者")
+    playwright.expect(page.locator("#preset-assist-equip-status")).to_have_text("当前识别模式不使用礼装。")
+    assert json.loads(page.locator("#preset-json").input_value()) == {
+        **draft, "assistMode": "仅从者", "assistEquip": [],
+    }
+    assert page.request.get(f"{url}/api/settings/demo").json()["config"] == saved
     page.close()

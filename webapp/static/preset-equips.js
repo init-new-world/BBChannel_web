@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 export function createPresetEquipEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-assist-equips");
   const controls = document.querySelector("#preset-assist-equip-controls");
@@ -11,7 +13,7 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
 
   function readConfig() {
     const config = JSON.parse(source.value);
-    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid script JSON.");
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error(t("Invalid script JSON."));
     return config;
   }
 
@@ -20,16 +22,16 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     const pending = [value];
     let visited = 0;
     while (pending.length) {
-      if (++visited > 1000) throw new Error("CE list exceeds 1,000 values.");
+      if (++visited > 1000) throw new Error(t("CE list exceeds 1,000 values."));
       const item = pending.pop();
       if (item == null) continue;
       if (typeof item === "string") {
         if (item) names.add(item);
       } else if (Array.isArray(item)) {
-        if (visited + pending.length + item.length > 1000) throw new Error("CE list exceeds 1,000 values.");
+        if (visited + pending.length + item.length > 1000) throw new Error(t("CE list exceeds 1,000 values."));
         for (let index = item.length - 1; index >= 0; index--) pending.push(item[index]);
       } else {
-        throw new Error("Unsupported CE value.");
+        throw new Error(t("Unsupported CE value."));
       }
     }
     return [...names];
@@ -44,13 +46,13 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     try {
       const payload = await request("/api/equip-templates");
       if (!Array.isArray(payload.templates) || payload.templates.some((item) => !item || typeof item.name !== "string")) {
-        throw new Error("Invalid CE catalog.");
+        throw new Error(t("Invalid CE catalog."));
       }
       catalog.names = [...new Set(payload.templates.filter((item) => item.location === "active" && item.name).map((item) => item.name))];
       catalog.state = "ready";
     } catch (error) {
       catalog.state = "error";
-      catalog.error = error.message || "CE catalog unavailable.";
+      catalog.error = error.message || t("CE catalog unavailable.");
     }
     if (getEditor() === editor && editor.equipCatalog === catalog) {
       const restoreFocus = catalog.restoreRefreshFocus && document.activeElement === document.body;
@@ -69,7 +71,7 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     const label = document.createElement("span");
     label.textContent = name;
     const note = document.createElement("small");
-    note.textContent = available === false ? "Unavailable" : "";
+    note.textContent = available === false ? t("Unavailable") : "";
     note.hidden = available !== false;
     caption.append(label, note);
     if (available) {
@@ -81,15 +83,15 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
       image.addEventListener("error", () => {
         image.hidden = true;
         note.hidden = false;
-        note.textContent = "Preview unavailable";
+        note.textContent = t("Preview unavailable");
       });
       thumbnail.append(image);
     }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "icon-button";
-    button.title = "Remove CE";
-    button.setAttribute("aria-label", "Remove CE");
+    button.title = t("Remove CE");
+    button.setAttribute("aria-label", t("Remove CE"));
     const icon = document.createElement("img");
     icon.src = "/icons/trash-2.svg";
     icon.alt = "";
@@ -116,7 +118,7 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
       config = readConfig();
     } catch {
       controls.disabled = true;
-      status.textContent = "Invalid script JSON.";
+      status.textContent = t("Invalid script JSON.");
       return;
     }
     let catalog = editor.equipCatalog;
@@ -142,7 +144,7 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     picker.replaceChildren(...(choices.length ? choices : [""]).map((name) => {
       const option = document.createElement("option");
       option.value = name;
-      option.textContent = name || "No unused active CEs";
+      option.textContent = name || t("No unused active CEs");
       return option;
     }));
     if (choices.includes(selected)) picker.value = selected;
@@ -151,9 +153,9 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     add.disabled = picker.disabled;
     clear.disabled = !Object.hasOwn(config, "assistEquip") || (Array.isArray(config.assistEquip) && !config.assistEquip.length);
     refresh.disabled = catalog.state === "loading";
-    status.textContent = error || (!usesEquip ? "Inactive for this recognition mode."
-      : catalog.state === "loading" ? "Loading CE catalog..."
-        : catalog.state === "error" ? catalog.error : `${names.length} CEs selected`);
+    status.textContent = error || (!usesEquip ? t("Inactive for this recognition mode.")
+      : catalog.state === "loading" ? t("Loading CE catalog...")
+        : catalog.state === "error" ? catalog.error : t("{count} CEs selected", { count: names.length }));
     if (focusedRow && !controls.disabled) {
       const rows = [...list.children];
       const replacement = rows.find((row) => row.dataset.assistEquipName === focusedRow.dataset.assistEquipName)
@@ -171,7 +173,7 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     try {
       const config = readConfig();
       if (action === "clear") {
-        if (clear.disabled || !window.confirm("Clear all assist CEs?")) return;
+        if (clear.disabled || !window.confirm(t("Clear all assist CEs?"))) return;
         config.assistEquip = [];
       } else {
         const names = equipNames(config.assistEquip);

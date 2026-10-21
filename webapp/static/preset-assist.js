@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 export function createPresetAssistEditor({ getEditor, source, onChange, onError }) {
   const section = document.querySelector("#preset-assist-options");
   const controls = document.querySelector("#preset-assist-controls");
@@ -6,7 +8,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
 
   function readConfig() {
     const config = JSON.parse(source.value);
-    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid script JSON.");
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error(t("Invalid script JSON."));
     return config;
   }
 
@@ -28,7 +30,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
     } else {
       const current = document.createElement("option");
       current.value = "";
-      current.textContent = `${JSON.stringify(value)} (current)`;
+      current.textContent = t("{name} (current)", { name: JSON.stringify(value) });
       current.dataset.current = "";
       current.disabled = true;
       select.append(current);
