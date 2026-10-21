@@ -846,6 +846,7 @@ select:disabled {
 }
 
 .preset-team,
+.preset-settlement,
 .preset-assist-options,
 .preset-assist-equips,
 .preset-waves,
@@ -855,6 +856,7 @@ select:disabled {
 }
 
 .preset-team summary,
+.preset-settlement summary,
 .preset-assist-options summary,
 .preset-assist-equips summary,
 .preset-waves summary,
@@ -911,6 +913,7 @@ select:disabled {
 }
 
 .preset-team-fields,
+.preset-settlement-fields,
 .preset-assist-fields,
 .preset-run-fields {
   min-width: 0;
@@ -934,6 +937,7 @@ select:disabled {
 }
 
 .preset-team-fields > *,
+.preset-settlement-fields > *,
 .preset-team-fields .field,
 .preset-assist-fields > *,
 .preset-assist-fields .field,
