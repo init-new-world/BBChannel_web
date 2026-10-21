@@ -39,7 +39,7 @@ export function createPresetSettlementEditor({ getEditor, source, onChange, onEr
     });
   }
 
-  inputs.forEach((input) => input.addEventListener("change", () => {
+  inputs.forEach((input) => input.addEventListener(input.type === "checkbox" ? "change" : "input", () => {
     const editor = getEditor();
     if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy || controls.disabled) return;
     try {

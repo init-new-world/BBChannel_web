@@ -59,7 +59,7 @@ Browser regression tests are optional and use isolated temporary data plus a sim
 
 ```bash
 python -m pip install playwright
-BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_assist_tags_browser.py tests/test_command_tags_browser.py tests/test_strategy_entries_browser.py tests/test_strategy_assignment_browser.py tests/test_turn_np_browser.py tests/test_script_waves_browser.py tests/test_run_options_browser.py tests/test_compact_layout_browser.py tests/test_i18n_browser.py tests/test_team_editor_browser.py tests/test_master_editor_browser.py tests/test_assist_options_browser.py tests/test_assist_equips_browser.py tests/test_preset_copy_browser.py tests/test_settlement_options_browser.py tests/test_assist_class_options_browser.py
+BBCHANNEL_TEST_CHROMIUM=/path/to/chromium python -m pytest -q tests/test_*_browser.py
 ```
 
 Manual smoke steps:
@@ -110,7 +110,7 @@ The runner does not infer NP availability from an unrecognized gauge. It also do
 
 `ignoreFriendship` follows the bundled original client's `FGObattle.Battle.dealIgnoreFriendShip` and `checkBattleEnd` behavior: string characters or list entries convertible to integers from 1 through 5 identify reward-panel positions excluded from the existing-full-bond check. Other entries are ignored. With `fullFriendshipStop` enabled, the runner masks only those positions before rechecking `jbMax`; full-bond markers elsewhere still stop the run. The separate `jblevel10` level-up dialog still stops the run even when every reward position is excluded. The original 1920x1080 mask coordinates are scaled to the normalized capture, and other recognition uses the unmodified capture.
 
-The editor's collapsible Settlement section exposes the original `fullFriendshipStop`, `ignoreFriendship`, and `addFriend` settings. The ignored-position text field keeps the original client's free-text behavior and refers to settlement positions 1 through 5 excluding the support servant. Existing non-string values are displayed as JSON and retained until the field is edited. Checkbox display follows the execution plan's truth value, including legacy empty arrays and objects. These changes stay in the draft until Save and lock during pending preset application or saving.
+The editor's collapsible Settlement section exposes the original `fullFriendshipStop`, `ignoreFriendship`, and `addFriend` settings. The ignored-position text field keeps the original client's free-text behavior and refers to settlement positions 1 through 5 excluding the support servant. Existing non-string values are displayed as JSON and retained until the field is edited. Text edits synchronize to the JSON draft on input, so a late strategy-list response cannot discard focused text. Checkbox display follows the execution plan's truth value, including legacy empty arrays and objects. These changes stay in the draft until Save and lock during pending preset application or saving.
 
 ## Resources
 
