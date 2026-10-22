@@ -2,6 +2,11 @@ const STORAGE_KEY = "bbchannel.locale";
 const SUPPORTED = new Set(["en", "zh-CN"]);
 
 const zh = {
+  "AP Management": "体力管理",
+  "Allow other apples": "允许其他苹果",
+  "Clear remaining AP": "清空剩余体力",
+  "Continue after the requested runs using remaining AP without recovery items": "完成设定次数后继续消耗剩余体力，不再补充体力",
+  "Use another apple if the selected type is unavailable, never Saint Quartz": "所选苹果不可用时改用其他苹果，不使用圣晶石",
   "BBchannel Console": "BBchannel 控制台",
   "0 events": "0 条事件",
   "3 star": "3 星",

@@ -150,6 +150,21 @@ def test_available_apple_only_falls_back_when_enabled():
     assert fallback.checked == ["gold", "silver"]
 
 
+@pytest.mark.parametrize("preferred", ["gold", "silver", "blue", "copper"])
+def test_apple_fallback_exhausts_only_apples_and_never_uses_saint_quartz(preferred):
+    recognition = _AppleRecognition("stone")
+    assert _available_apple(
+        recognition,
+        b"screen",
+        "CH",
+        preferred=preferred,
+        allow_other=True,
+    ) is None
+    assert recognition.checked == [
+        preferred, *[name for name in ("gold", "silver", "blue", "copper") if name != preferred],
+    ]
+
+
 def test_battle_prepare_uses_crawl_tower_auto_formation():
     class ScriptDataStub:
         def get_setting_plan(self, _name):

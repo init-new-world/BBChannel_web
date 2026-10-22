@@ -328,6 +328,39 @@ def test_full_run_stops_clear_ap_when_assist_reports_ap_empty():
     assert result["reason"] == "ap_cleared"
 
 
+@pytest.mark.parametrize("max_clear_runs", [1, 2])
+def test_clear_ap_obeys_additional_run_bound_without_recovery(max_clear_runs):
+    assist_payloads = []
+    prepare_payloads = []
+    completion_payloads = []
+
+    def assist(_context, payload):
+        assist_payloads.append(dict(payload))
+        return {"ready": True}
+
+    def prepare(_context, payload):
+        prepare_payloads.append(dict(payload))
+        return {"ready": True}
+
+    def complete(_context, payload):
+        completion_payloads.append(dict(payload))
+        return {"complete": True}
+
+    handler = create_full_run_handler(
+        _ScriptData(clear_ap=True), assist, prepare,
+        lambda _context, _payload: {"executed": True}, complete,
+    )
+    result = handler(_Context(), {"setting_name": "demo", "max_runs": 1, "max_clear_runs": max_clear_runs})
+
+    assert result["runs_completed"] == max_clear_runs + 1
+    assert result["stopped"] is True
+    assert result["cleared_ap"] is False
+    assert result["reason"] == "clear_ap_limit"
+    assert [payload["recover_ap"] for payload in assist_payloads] == [True, *[False] * max_clear_runs]
+    assert [payload["recover_ap"] for payload in prepare_payloads] == [True, *[False] * max_clear_runs]
+    assert [payload["repeat"] for payload in completion_payloads] == [*[True] * max_clear_runs, False]
+
+
 def test_full_run_resumes_from_an_active_battle(tmp_path: Path):
     calls: list[str] = []
 

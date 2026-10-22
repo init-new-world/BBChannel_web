@@ -91,6 +91,8 @@ const els = {
   presetRunControls: document.querySelector("#preset-run-controls"),
   presetTimingOptions: document.querySelector("#preset-operation-timing"),
   presetTimingControls: document.querySelector("#preset-operation-timing-controls"),
+  presetApOptions: document.querySelector("#preset-ap-options"),
+  presetApControls: document.querySelector("#preset-ap-controls"),
   presetRunInputs: [...document.querySelectorAll("[data-run-option]")],
   presetAssistSkills: document.querySelector("#preset-assist-skills"),
   presetScriptStrategy: document.querySelector("#preset-script-strategy"),
@@ -2086,8 +2088,9 @@ function readScriptStrategyTarget() {
 
 function renderPresetRunOptions() {
   const editor = state.presetEditor;
-  const sections = [els.presetRunOptions, els.presetTimingOptions];
-  const controls = [els.presetRunControls, els.presetTimingControls];
+  const sections = [els.presetRunOptions, els.presetTimingOptions, els.presetApOptions];
+  const controls = [els.presetRunControls, els.presetTimingControls, els.presetApControls];
+  const enabled = (value) => value && typeof value === "object" ? Object.keys(value).length > 0 : Boolean(value);
   sections.forEach((section) => { section.hidden = editor?.kind !== "settings"; });
   controls.forEach((group) => { group.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy); });
   if (editor?.kind !== "settings") return;
@@ -2106,7 +2109,7 @@ function renderPresetRunOptions() {
       const draft = editor.runOptionDrafts?.[field];
       input.setCustomValidity(draft?.error ? t(draft.error) : "");
       if (input.type === "checkbox") {
-        input.checked = Boolean(config[field]);
+        input.checked = enabled(config[field]);
       } else {
         const defaultValue = input.hasAttribute("data-default") ? Number(input.dataset.default) : field === "randomTime" ? 0 : 30;
         const value = Object.hasOwn(config, field) ? config[field] : defaultValue;
@@ -2120,7 +2123,7 @@ function renderPresetRunOptions() {
             input.title = input.placeholder;
           }
         }
-        input.disabled = field === "checkStuckInterval" && !config.stuckRestart && !draft;
+        input.disabled = field === "checkStuckInterval" && !enabled(config.stuckRestart) && !draft;
       }
     });
   } catch {

@@ -438,6 +438,13 @@
             <label class="field-stack"><span>Before card recognition (s)</span><input class="field" data-run-option="intervalBFchooseCard" data-run-live data-default="0.5" data-number-error="Card recognition wait must be between 0 and 10 seconds." type="number" min="0" max="10" step="any"></label>
           </fieldset>
         </details>
+        <details id="preset-ap-options" class="preset-run-options" hidden>
+          <summary>AP Management</summary>
+          <fieldset id="preset-ap-controls" class="preset-run-fields">
+            <label class="checkline" title="Continue after the requested runs using remaining AP without recovery items"><input data-run-option="clearAP" type="checkbox"><span>Clear remaining AP</span></label>
+            <label class="checkline" title="Use another apple if the selected type is unavailable, never Saint Quartz"><input data-run-option="allowOtherApple" type="checkbox"><span>Allow other apples</span></label>
+          </fieldset>
+        </details>
         <details id="preset-settlement" class="preset-settlement" hidden>
           <summary>Settlement</summary>
           <fieldset id="preset-settlement-controls" class="preset-settlement-fields">
