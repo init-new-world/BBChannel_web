@@ -2,6 +2,7 @@ import { createPresetTeamEditor } from "./preset-team.js";
 import { createPresetAssistEditor } from "./preset-assist.js";
 import { createPresetEquipEditor } from "./preset-equips.js";
 import { createPresetSettlementEditor } from "./preset-settlement.js";
+import { createPresetDropEditor } from "./preset-drops.js";
 import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
@@ -303,6 +304,17 @@ const presetEquips = createPresetEquipEditor({
 const presetSettlement = createPresetSettlementEditor({
   getEditor: () => state.presetEditor,
   source: els.presetJson,
+  onChange: () => {
+    renderPresetScriptStrategy();
+    setPresetError("");
+  },
+  onError: setPresetError,
+});
+
+const presetDrops = createPresetDropEditor({
+  getEditor: () => state.presetEditor,
+  source: els.presetJson,
+  request: api,
   onChange: () => {
     renderPresetScriptStrategy();
     setPresetError("");
@@ -2025,6 +2037,7 @@ function renderPresetScriptStrategy() {
   presetEquips.render(presetAssist.render());
   renderPresetWaves();
   renderPresetRunOptions();
+  presetDrops.render();
   const editor = state.presetEditor;
   const isSetting = editor?.kind === "settings";
   els.presetScriptStrategy.hidden = !isSetting;
@@ -2116,7 +2129,7 @@ function renderPresetRunOptions() {
         // Reassigning value would erase native partial numbers such as "1e".
         if (!draft) {
           const legacy = input.hasAttribute("data-run-live") && (typeof value !== "number" || !Number.isFinite(value)
-            || value < Number(input.min) || value > Number(input.max));
+            || value < Number(input.min) || value > Number(input.max) || (input.step === "1" && !Number.isSafeInteger(value)));
           input.value = typeof value === "number" && !legacy ? String(value) : "";
           if (input.hasAttribute("data-run-live")) {
             input.placeholder = legacy ? t("{name} (current)", { name: JSON.stringify(value) }) : "";
@@ -2145,7 +2158,8 @@ function updatePresetRunOption(event, draftOnly = false) {
       config[field] = input.checked;
     } else {
       const value = input.valueAsNumber;
-      if (!Number.isFinite(value) || value < Number(input.min) || value > Number(input.max)) {
+      if (!Number.isFinite(value) || value < Number(input.min) || value > Number(input.max)
+          || (input.step === "1" && !Number.isSafeInteger(value))) {
         const error = input.dataset.numberError || (field === "randomTime" ? "Random wait must be between 0 and 10 seconds."
           : "Check interval must be between 1 and 600 seconds.");
         editor.runOptionDrafts ||= {};

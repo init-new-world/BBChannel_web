@@ -936,6 +936,36 @@ select:disabled {
   line-height: 1.25;
 }
 
+.preset-drop-media {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.preset-drop-preview {
+  flex: 0 0 88px;
+  width: 88px;
+  height: 96px;
+}
+
+.preset-drop-preview img {
+  width: 88px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.preset-drop-notes {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .preset-team-fields > *,
 .preset-settlement-fields > *,
 .preset-team-fields .field,

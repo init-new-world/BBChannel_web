@@ -445,6 +445,18 @@
             <label class="checkline" title="Use another apple if the selected type is unavailable, never Saint Quartz"><input data-run-option="allowOtherApple" type="checkbox"><span>Allow other apples</span></label>
           </fieldset>
         </details>
+        <details id="preset-drop-options" class="preset-run-options" hidden>
+          <summary>Drop Stop</summary>
+          <fieldset id="preset-drop-controls" class="preset-run-fields">
+            <label class="field-stack" title="0 disables drop monitoring"><span>Stop after drops</span><input class="field" data-run-option="dropStopNum" data-run-live data-default="0" data-number-error="Drop count must be a non-negative safe integer." type="number" min="0" max="9007199254740991" step="1"></label>
+            <label class="field-stack"><span>Drop image</span><select id="preset-drop-image" class="field"></select></label>
+            <div class="preset-drop-media">
+              <div id="preset-drop-preview" class="preset-drop-preview" hidden></div>
+              <div class="preset-drop-notes"><span id="preset-drop-status" role="status"></span><span id="preset-drop-preview-status" role="status"></span></div>
+              <button id="refresh-drop-templates" class="ghost-button" type="button">Refresh</button>
+            </div>
+          </fieldset>
+        </details>
         <details id="preset-settlement" class="preset-settlement" hidden>
           <summary>Settlement</summary>
           <fieldset id="preset-settlement-controls" class="preset-settlement-fields">

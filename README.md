@@ -47,6 +47,7 @@ node --check webapp/static/preset-team.js
 node --check webapp/static/preset-assist.js
 node --check webapp/static/preset-equips.js
 node --check webapp/static/preset-settlement.js
+node --check webapp/static/preset-drops.js
 ```
 
 If optional runtime dependencies are missing, dependency-specific tests skip instead of failing. Install `requirements.txt` before running the server smoke test:
@@ -125,6 +126,8 @@ The editor's collapsible Settlement section exposes the original `fullFriendship
 ### Drop Templates
 
 Drop-stop recognition resolves the complete configured path inside `assets/drop/` before considering a filename fallback. Original Windows paths containing `assets/drop/` retain their directory choice; older external paths and bare filenames resolve only when exactly one indexed drop image has that filename. Missing explicit paths and ambiguous filenames never select another image. Resolution examines the full catalog rather than a 200-result substring page, and verifies that the file still exists within the asset root. The drop catalog and PNG preview endpoints share this resolver; previews are restricted to drop images and reject traversal and links escaping the asset root. This does not yet replace the existing matching algorithm with the original client's two-stage center verification.
+
+The editor's initially collapsed Drop Stop section exposes `dropStopNum` and `dropImage`. A zero count disables monitoring; new count edits must be non-negative JavaScript-safe integers, while legacy types and values remain unchanged until explicitly corrected. Selecting a catalog image writes its full `drop/` path, and choosing None removes only `dropImage`, without resetting the count. Original paths resolve to their preview without rewriting the saved path. Missing or ambiguous selections stay visible as current values. Catalog and preview failures never block unrelated edits or Save; Refresh retries the index and image. Delayed responses cannot replace a newer raw-JSON selection or a closed editor. Numeric drafts survive catalog refreshes and unrelated controls, invalid drafts block Save, and the section locks during preset application, saving, and invalid JSON.
 
 ## Resources
 

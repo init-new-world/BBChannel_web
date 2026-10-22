@@ -2,6 +2,16 @@ const STORAGE_KEY = "bbchannel.locale";
 const SUPPORTED = new Set(["en", "zh-CN"]);
 
 const zh = {
+  "0 disables drop monitoring": "0 表示不监测掉落",
+  "Drop Stop": "掉落停止",
+  "Stop after drops": "掉落停止数量",
+  "Drop image": "监测图片",
+  "Drop count must be a non-negative safe integer.": "掉落数量必须是非负安全整数。",
+  "Invalid drop catalog.": "掉落图片目录无效。",
+  "Drop catalog unavailable.": "掉落图片目录不可用。",
+  "Loading drop catalog...": "正在加载掉落图片...",
+  "Drop image unavailable or ambiguous.": "掉落图片不存在或名称不唯一。",
+  "{count} drop templates": "{count} 个掉落模板",
   "AP Management": "体力管理",
   "Allow other apples": "允许其他苹果",
   "Clear remaining AP": "清空剩余体力",
