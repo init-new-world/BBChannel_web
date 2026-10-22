@@ -197,6 +197,13 @@ class JobManager:
     def registered_kinds(self) -> list[str]:
         return sorted(self._handlers)
 
+    def wrap_handler(self, kind: str, wrapper: Callable[[JobHandler], JobHandler]) -> None:
+        """Apply a startup-time wrapper while retaining device lease metadata."""
+        definition = self._handlers.get(kind)
+        if definition is None:
+            raise UnknownJobKindError(kind)
+        self._handlers[kind] = _RegisteredJob(wrapper(definition.handler), definition.requires_device)
+
     def has_kind(self, kind: str) -> bool:
         return kind in self._handlers
 

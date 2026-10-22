@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import (
@@ -37,6 +39,33 @@ class DeviceService:
         self._endpoint_locks_guard = threading.Lock()
         self._endpoint_locks: dict[str, threading.RLock] = {}
         self._closed = False
+        self._operation_timing: ContextVar[tuple[Callable[[float], None], object, object] | None] = ContextVar(
+            "device_operation_timing", default=None,
+        )
+
+    @contextmanager
+    def operation_timing(
+        self, sleep: Callable[[float], None], *, before: object = 0, after: object = 0.1,
+    ) -> Iterator[None]:
+        token = self._operation_timing.set((sleep, before, after))
+        try:
+            yield
+        finally:
+            self._operation_timing.reset(token)
+
+    def operation_timing_active(self) -> bool:
+        return self._operation_timing.get() is not None
+
+    def _validated_operation_timing(self) -> tuple[Callable[[float], None], float, float] | None:
+        timing = self._operation_timing.get()
+        if timing is None:
+            return None
+        sleep, before, after = timing
+        # Read-only inspection must not depend on unused legacy timing values.
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 600
+               for value in (before, after)):
+            raise ValueError("Device operation delays must be numbers between 0 and 600 seconds.")
+        return sleep, float(before), max(float(after), 0.1)
 
     def state(self) -> ConnectionState:
         with self._state_lock:
@@ -220,6 +249,9 @@ class DeviceService:
         return self._frame_watchdog.is_stuck(minimum_seconds)
 
     def tap(self, x: int, y: int) -> OperationResult:
+        timing = self._validated_operation_timing()
+        if timing is not None:
+            timing[0](timing[1])
         backend, endpoint = self._require_control()
         mapped_x, mapped_y = self._map_point(x, y)
         with self._lock_for(endpoint):
@@ -238,9 +270,14 @@ class DeviceService:
                 "mapped": [mapped_x, mapped_y],
             },
         )
+        if timing is not None:
+            timing[0](timing[2])
         return _operation_with_mapping(result, [x, y], [mapped_x, mapped_y])
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> OperationResult:
+        timing = self._validated_operation_timing()
+        if timing is not None:
+            timing[0](timing[1])
         backend, endpoint = self._require_control()
         mapped_start = self._map_point(x1, y1)
         mapped_end = self._map_point(x2, y2)
@@ -268,6 +305,8 @@ class DeviceService:
                 "duration_ms": duration_ms,
             },
         )
+        if timing is not None:
+            timing[0](timing[2])
         return _operation_with_mapping(
             result,
             [[x1, y1], [x2, y2]],

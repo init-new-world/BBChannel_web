@@ -104,6 +104,12 @@ With `onlyFriendAssist` enabled, the runner follows the original `FGObattle.Batt
 
 The script editor's numeric controls stay synchronized with its JSON editor. Append filtering verifies the skill display, checks each requested slot, restores the main view, and rechecks the candidate before selection. The full-run NP color/Olga filter is a per-run option and does not change the saved script.
 
+### Operation Timing
+
+The original `intervalBF` and `intervalAF` settings apply before and after each device tap or swipe, not before and after a battle. Profile-backed device jobs use a task-local timing scope, including all stages within a full run, and wait through the cancel-aware run context. The defaults are 0 seconds before and 0.1 seconds after; post-operation waiting has the original minimum of 0.1 seconds even when a lower value is stored. Existing 0-through-600-second execution bounds remain in place. Screenshots, manual device calls, and diagnostic jobs do not inherit another task's timing. Nested stages apply timing once, and completion, failure, and cancellation always restore the prior scope.
+
+Execution plans now expose `interval_before_operation` and `interval_after_operation`. The older `interval_before_fight` and `interval_after_fight` keys remain for API compatibility but no longer cause per-battle waits. Recognition-specific settling waits, including `intervalAFswipeAssist` and `intervalBFchooseCard`, remain separate. Both operation delays are validated before the first actuation wait or backend action; capture-only inspections remain usable when a legacy profile contains invalid, unused timing values.
+
 ### Card Recovery
 
 Command-card strategies exclude face cards with recognized action-blocking status text. If a selection containing Noble Phantasms leaves the command-card back button visible, the runner checks the selected NP cards for sealing or immobilization. Confirmed unavailable NPs are excluded when the runner returns to battle and reopens card selection. This applies to direct selection, strategies, no-chain selection, and extra turns; unavailable positions are tracked only for that turn and allow at most three recovery cycles.

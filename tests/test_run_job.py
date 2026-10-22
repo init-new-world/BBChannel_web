@@ -207,7 +207,7 @@ def test_full_run_stops_when_completion_requests_it(tmp_path: Path):
     ]
 
 
-def test_full_run_applies_configured_before_and_after_fight_intervals():
+def test_full_run_does_not_apply_operation_delays_at_battle_boundaries():
     context = _Context()
 
     def stage(name: str):
@@ -231,10 +231,8 @@ def test_full_run_applies_configured_before_and_after_fight_intervals():
         "assist",
         "run.prepare_battle",
         "prepare",
-        ("sleep", 0.2),
         "run.execute_battle",
         "battle",
-        ("sleep", 0.3),
         "run.complete_battle",
         "complete",
         "complete",

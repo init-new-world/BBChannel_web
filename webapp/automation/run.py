@@ -62,13 +62,13 @@ def create_full_run_handler(
         if not plan.get("validation", {"ok": True})["ok"]:
             raise ValueError(f"Setting {normalized_name} has validation errors.")
         run_options = plan["run"]
-        interval_before_fight = _configured_interval(
-            run_options.get("interval_before_fight", 0),
-            "interval_before_fight",
+        _configured_interval(
+            run_options.get("interval_before_operation", run_options.get("interval_before_fight", 0)),
+            "interval_before_operation",
         )
-        interval_after_fight = _configured_interval(
-            run_options.get("interval_after_fight", 0),
-            "interval_after_fight",
+        _configured_interval(
+            run_options.get("interval_after_operation", run_options.get("interval_after_fight", 0.1)),
+            "interval_after_operation",
         )
         clear_ap = bool(run_options.get("clear_ap"))
         first_battle_set = bool(run_options.get("first_battle_set"))
@@ -346,8 +346,6 @@ def create_full_run_handler(
                 break
             battle_result = current_run_results["battle"]
             if current_stage != "completion":
-                if interval_before_fight:
-                    context.sleep(interval_before_fight)
                 context.checkpoint(
                     "run.execute_battle",
                     progress=progress,
@@ -372,8 +370,6 @@ def create_full_run_handler(
                 if resume_stage is not None:
                     continue
                 current_run_results["battle"] = battle_result
-                if interval_after_fight:
-                    context.sleep(interval_after_fight)
 
             context.checkpoint(
                 "run.complete_battle",
