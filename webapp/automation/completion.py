@@ -16,6 +16,7 @@ from webapp.automation.network import reconnect_if_present
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
+from webapp.services.drop_templates import DropTemplateService
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
@@ -450,18 +451,7 @@ def _resolve_drop_template(
     resources: ResourceService,
     configured_path: object,
 ) -> str | None:
-    if not isinstance(configured_path, str) or not configured_path.strip():
-        return None
-    filename = configured_path.strip().replace("\\", "/").rsplit("/", 1)[-1]
-    if not filename:
-        return None
-    index = resources.template_index(prefix="drop", query=filename, limit=200)
-    matches = [
-        str(entry["path"])
-        for entry in index["entries"]
-        if str(entry["path"]).rsplit("/", 1)[-1].casefold() == filename.casefold()
-    ]
-    return matches[0] if matches else None
+    return DropTemplateService(resources).resolve(configured_path)
 
 
 def _unseen_drop_matches(

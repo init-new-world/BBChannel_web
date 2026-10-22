@@ -63,6 +63,7 @@ from webapp.services.assist_tags import AssistTagService
 from webapp.services.command_tags import CommandTagService
 from webapp.services.devices import DeviceService
 from webapp.services.digdig import DigdigRecognizer
+from webapp.services.drop_templates import DropTemplateService
 from webapp.services.event_log import EventLog
 from webapp.services.expball import ExpBallRecognizer
 from webapp.services.equip_templates import EquipTemplateService
@@ -209,6 +210,7 @@ def create_app(
         assets_dir or PROJECT_ROOT / "assets",
         data_dir or PROJECT_ROOT / "data",
     )
+    drop_templates = DropTemplateService(resources)
     device_service = device_service or DeviceService(
         [
             MumuBackend(),
@@ -551,6 +553,14 @@ def create_app(
     @app.get("/api/templates")
     def templates() -> dict[str, list[str]]:
         return {"templates": resources.list_templates()}
+
+    @app.get("/api/drop-templates")
+    def drop_template_catalog(configured: str | None = None) -> dict[str, object]:
+        return drop_templates.catalog(configured)
+
+    @app.get("/api/drop-templates/image")
+    def drop_template_image(path: str) -> Response:
+        return Response(content=drop_templates.read_image(path), media_type="image/png")
 
     @app.get("/api/material-drops/catalog")
     def material_drop_catalog() -> dict[str, object]:

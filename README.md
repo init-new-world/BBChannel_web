@@ -122,6 +122,10 @@ The runner does not infer NP availability from an unrecognized gauge. It also do
 
 The editor's collapsible Settlement section exposes the original `fullFriendshipStop`, `ignoreFriendship`, and `addFriend` settings. The ignored-position text field keeps the original client's free-text behavior and refers to settlement positions 1 through 5 excluding the support servant. Existing non-string values are displayed as JSON and retained until the field is edited. Text edits synchronize to the JSON draft on input, so a late strategy-list response cannot discard focused text. Checkbox display follows the execution plan's truth value, including legacy empty arrays and objects. These changes stay in the draft until Save and lock during pending preset application or saving.
 
+### Drop Templates
+
+Drop-stop recognition resolves the complete configured path inside `assets/drop/` before considering a filename fallback. Original Windows paths containing `assets/drop/` retain their directory choice; older external paths and bare filenames resolve only when exactly one indexed drop image has that filename. Missing explicit paths and ambiguous filenames never select another image. Resolution examines the full catalog rather than a 200-result substring page, and verifies that the file still exists within the asset root. The drop catalog and PNG preview endpoints share this resolver; previews are restricted to drop images and reject traversal and links escaping the asset root. This does not yet replace the existing matching algorithm with the original client's two-stage center verification.
+
 ## Resources
 
 Recognition resources are expected under `assets/`, and data files under `data/`. Populate them from the BBchannel package when setting up a fresh checkout. Scripts live in `data/settings/` and strategies in `data/strategy/`.
