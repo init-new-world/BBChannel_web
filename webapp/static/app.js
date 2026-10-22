@@ -2583,6 +2583,7 @@ async function savePreset(event) {
   if (!editor || editor.saving || editor.strategyApplyBusy) {
     return;
   }
+  if (editor.kind === "settings" && !presetAssist.validate()) return;
   const invalidRunField = editor.kind === "settings" && Object.keys(editor.runOptionDrafts || {})[0];
   if (invalidRunField) {
     els.presetRunOptions.open = true;
