@@ -430,6 +430,14 @@
             <label class="checkline" title="Do not send extra taps to advance skill animations"><input data-run-option="noSpeedupSkill" type="checkbox"><span>No skill speedup</span></label>
           </fieldset>
         </details>
+        <details id="preset-operation-timing" class="preset-run-options" hidden>
+          <summary>Operation Timing</summary>
+          <fieldset id="preset-operation-timing-controls" class="preset-run-fields">
+            <label class="field-stack"><span>Before action (s)</span><input class="field" data-run-option="intervalBF" data-run-live data-default="0" data-number-error="Operation delay must be between 0 and 10 seconds." type="number" min="0" max="10" step="any"></label>
+            <label class="field-stack"><span>After action (s)</span><input class="field" data-run-option="intervalAF" data-run-live data-default="0.1" data-number-error="Post-operation delay must be between 0.1 and 10 seconds." type="number" min="0.1" max="10" step="any"></label>
+            <label class="field-stack"><span>Before card recognition (s)</span><input class="field" data-run-option="intervalBFchooseCard" data-run-live data-default="0.5" data-number-error="Card recognition wait must be between 0 and 10 seconds." type="number" min="0" max="10" step="any"></label>
+          </fieldset>
+        </details>
         <details id="preset-settlement" class="preset-settlement" hidden>
           <summary>Settlement</summary>
           <fieldset id="preset-settlement-controls" class="preset-settlement-fields">

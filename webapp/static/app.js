@@ -89,6 +89,8 @@ const els = {
   addScriptWave: document.querySelector("#add-script-wave"),
   presetRunOptions: document.querySelector("#preset-run-options"),
   presetRunControls: document.querySelector("#preset-run-controls"),
+  presetTimingOptions: document.querySelector("#preset-operation-timing"),
+  presetTimingControls: document.querySelector("#preset-operation-timing-controls"),
   presetRunInputs: [...document.querySelectorAll("[data-run-option]")],
   presetAssistSkills: document.querySelector("#preset-assist-skills"),
   presetScriptStrategy: document.querySelector("#preset-script-strategy"),
@@ -406,7 +408,10 @@ function bindEvents() {
   els.presetRunInputs.forEach((input) => {
     input.addEventListener("change", updatePresetRunOption);
     if (input.type === "number") input.addEventListener("input", (event) => updatePresetRunOption(event, true));
-    input.addEventListener("invalid", () => { els.presetRunOptions.open = true; });
+    if (input.hasAttribute("data-run-live")) input.addEventListener("blur", () => {
+      if (state.presetEditor?.runOptionDrafts?.[input.dataset.runOption]) updatePresetRunOption({ currentTarget: input });
+    });
+    input.addEventListener("invalid", () => { input.closest("details").open = true; });
   });
   els.addScriptWave.addEventListener("click", () => changeScriptWaves("add-wave"));
   els.presetWaveList.addEventListener("click", (event) => {
@@ -2081,36 +2086,46 @@ function readScriptStrategyTarget() {
 
 function renderPresetRunOptions() {
   const editor = state.presetEditor;
-  els.presetRunOptions.hidden = editor?.kind !== "settings";
-  els.presetRunControls.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy);
+  const sections = [els.presetRunOptions, els.presetTimingOptions];
+  const controls = [els.presetRunControls, els.presetTimingControls];
+  sections.forEach((section) => { section.hidden = editor?.kind !== "settings"; });
+  controls.forEach((group) => { group.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy); });
   if (editor?.kind !== "settings") return;
   if (!editor.runOptionsInitialized) {
-    els.presetRunOptions.open = false;
+    sections.forEach((section) => { section.open = false; });
     editor.runOptionsInitialized = true;
   }
   try {
     const config = JSON.parse(els.presetJson.value);
     if (!config || typeof config !== "object" || Array.isArray(config)) {
-      els.presetRunControls.disabled = true;
+      controls.forEach((group) => { group.disabled = true; });
       return;
     }
     els.presetRunInputs.forEach((input) => {
       const field = input.dataset.runOption;
       const draft = editor.runOptionDrafts?.[field];
-      input.setCustomValidity(draft?.error || "");
+      input.setCustomValidity(draft?.error ? t(draft.error) : "");
       if (input.type === "checkbox") {
         input.checked = Boolean(config[field]);
       } else {
-        const defaultValue = field === "randomTime" ? 0 : 30;
+        const defaultValue = input.hasAttribute("data-default") ? Number(input.dataset.default) : field === "randomTime" ? 0 : 30;
         const value = Object.hasOwn(config, field) ? config[field] : defaultValue;
         // Reassigning value would erase native partial numbers such as "1e".
-        if (!draft) input.value = typeof value === "number" ? String(value) : "";
+        if (!draft) {
+          const legacy = input.hasAttribute("data-run-live") && (typeof value !== "number" || !Number.isFinite(value)
+            || value < Number(input.min) || value > Number(input.max));
+          input.value = typeof value === "number" && !legacy ? String(value) : "";
+          if (input.hasAttribute("data-run-live")) {
+            input.placeholder = legacy ? t("{name} (current)", { name: JSON.stringify(value) }) : "";
+            input.title = input.placeholder;
+          }
+        }
         input.disabled = field === "checkStuckInterval" && !config.stuckRestart && !draft;
       }
     });
   } catch {
     // Raw JSON remains authoritative while its syntax is incomplete.
-    els.presetRunControls.disabled = true;
+    controls.forEach((group) => { group.disabled = true; });
   }
 }
 
@@ -2128,16 +2143,19 @@ function updatePresetRunOption(event, draftOnly = false) {
     } else {
       const value = input.valueAsNumber;
       if (!Number.isFinite(value) || value < Number(input.min) || value > Number(input.max)) {
-        const error = field === "randomTime" ? "Random wait must be between 0 and 10 seconds."
-          : "Check interval must be between 1 and 600 seconds.";
+        const error = input.dataset.numberError || (field === "randomTime" ? "Random wait must be between 0 and 10 seconds."
+          : "Check interval must be between 1 and 600 seconds.");
         editor.runOptionDrafts ||= {};
         editor.runOptionDrafts[field] = { error };
-        input.setCustomValidity(error);
+        input.setCustomValidity(t(error));
         return;
       }
-      if (editor.runOptionDrafts) delete editor.runOptionDrafts[field];
+      if (draftOnly && input.hasAttribute("data-run-live")) {
+        editor.runOptionDrafts ||= {};
+        editor.runOptionDrafts[field] = {};
+      } else if (editor.runOptionDrafts) delete editor.runOptionDrafts[field];
       input.setCustomValidity("");
-      if (draftOnly) return;
+      if (draftOnly && !input.hasAttribute("data-run-live")) return;
       config[field] = value;
     }
     els.presetJson.value = JSON.stringify(config, null, 2);
@@ -2584,11 +2602,12 @@ async function savePreset(event) {
     return;
   }
   if (editor.kind === "settings" && !presetAssist.validate()) return;
-  const invalidRunField = editor.kind === "settings" && Object.keys(editor.runOptionDrafts || {})[0];
+  const invalidRunField = editor.kind === "settings" && Object.keys(editor.runOptionDrafts || {}).find((field) => editor.runOptionDrafts[field]?.error);
   if (invalidRunField) {
-    els.presetRunOptions.open = true;
+    const input = els.presetRunInputs.find((input) => input.dataset.runOption === invalidRunField);
+    input?.closest("details").setAttribute("open", "");
     renderPresetRunOptions();
-    els.presetRunInputs.find((input) => input.dataset.runOption === invalidRunField)?.reportValidity();
+    input?.reportValidity();
     return;
   }
   const invalidDraft = editor.kind === "strategies" && Object.entries(editor.strategyDrafts || {})[0];
