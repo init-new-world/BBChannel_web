@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from numbers import Integral
 from typing import Any
 
 from webapp.core.errors import AppError, ErrorCode
@@ -32,6 +33,8 @@ class RecognitionService:
         scales: Sequence[float] | None = None,
         mask_path: str | None = None,
         template_size: Sequence[int] | None = None,
+        template_crop: Sequence[int] | None = None,
+        grayscale: bool = False,
     ) -> MatchResult:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
         return self._match_decoded(
@@ -42,6 +45,8 @@ class RecognitionService:
             scales=scales,
             mask_path=mask_path,
             template_size=template_size,
+            template_crop=template_crop,
+            grayscale=grayscale,
         )
 
     def image_size(self, screenshot: bytes) -> tuple[int, int]:
@@ -79,6 +84,8 @@ class RecognitionService:
                     scales=candidate.get("scales"),
                     mask_path=mask_path,
                     centered_mask=bool(candidate.get("centered_mask", False)),
+                    template_crop=candidate.get("template_crop"),
+                    grayscale=bool(candidate.get("grayscale", False)),
                     template_data=template_cache[cache_key],
                 )
             )
@@ -94,6 +101,7 @@ class RecognitionService:
         mask_path: str | None = None,
         template_crop: Sequence[int] | None = None,
         max_results: int = 20,
+        grayscale: bool = False,
     ) -> list[MatchResult]:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
         return self._match_all_decoded(
@@ -105,6 +113,7 @@ class RecognitionService:
             mask_path=mask_path,
             template_crop=template_crop,
             max_results=max_results,
+            grayscale=grayscale,
         )
 
     def match_template_debug(
@@ -208,6 +217,8 @@ class RecognitionService:
         scales: object = None,
         mask_path: str | None = None,
         template_size: object = None,
+        template_crop: object = None,
+        grayscale: bool = False,
         centered_mask: bool = False,
         template_data: tuple[Any, Any, bool] | None = None,
     ) -> MatchResult:
@@ -217,6 +228,7 @@ class RecognitionService:
             if template_data is not None
             else self._load_template(template_path, mask_path)
         )
+        template_image, template_mask = self._crop_template(template_image, template_mask, template_crop, template_path)
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
             roi,
@@ -226,6 +238,9 @@ class RecognitionService:
         )
         roi_x, roi_y, roi_width, roi_height = normalized_roi
         search_image = screenshot_image[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
+        if grayscale:
+            search_image = cv.cvtColor(search_image, cv.COLOR_BGR2GRAY)
+            template_image = cv.cvtColor(template_image, cv.COLOR_BGR2GRAY)
         normalized_scales = self._normalize_scales(scales, template_path)
 
         best: tuple[float, tuple[int, int], int, int, float] | None = None
@@ -252,6 +267,7 @@ class RecognitionService:
                 scaled_template,
                 scaled_mask,
                 explicit_mask or centered_mask,
+                require_contrast=grayscale or template_crop is not None,
             )
             _, confidence, _, max_location = cv.minMaxLoc(matches)
             candidate = (
@@ -301,23 +317,14 @@ class RecognitionService:
         mask_path: str | None = None,
         template_crop: object = None,
         max_results: int,
+        grayscale: bool = False,
     ) -> list[MatchResult]:
         cv, numpy = self._require_opencv()
         template_image, template_mask, explicit_mask = self._load_template(
             template_path,
             mask_path,
         )
-        if template_crop is not None:
-            template_height, template_width = template_image.shape[:2]
-            left, top, right, bottom = self._normalize_template_crop(
-                template_crop,
-                template_width,
-                template_height,
-                template_path,
-            )
-            template_image = template_image[top:bottom, left:right]
-            if template_mask is not None:
-                template_mask = template_mask[top:bottom, left:right]
+        template_image, template_mask = self._crop_template(template_image, template_mask, template_crop, template_path)
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
             roi,
@@ -327,6 +334,9 @@ class RecognitionService:
         )
         roi_x, roi_y, roi_width, roi_height = normalized_roi
         search_image = screenshot_image[roi_y : roi_y + roi_height, roi_x : roi_x + roi_width]
+        if grayscale:
+            search_image = cv.cvtColor(search_image, cv.COLOR_BGR2GRAY)
+            template_image = cv.cvtColor(template_image, cv.COLOR_BGR2GRAY)
         normalized_scales = self._normalize_scales(scales, template_path)
         result_roi = normalized_roi if roi is not None else None
         candidates: list[MatchResult] = []
@@ -348,6 +358,7 @@ class RecognitionService:
                 scaled_template,
                 scaled_mask,
                 explicit_mask,
+                require_contrast=grayscale or template_crop is not None,
             )
             local_maxima = matches == cv.dilate(matches, numpy.ones((3, 3), dtype=numpy.uint8))
             match_y, match_x = numpy.where((matches >= threshold) & local_maxima)
@@ -376,6 +387,13 @@ class RecognitionService:
                 break
         return sorted(selected, key=lambda result: (result.top_left[1], result.top_left[0]))
 
+    def _crop_template(self, image, mask, crop, template_path: str):
+        if crop is None:
+            return image, mask
+        height, width = image.shape[:2]
+        left, top, right, bottom = self._normalize_template_crop(crop, width, height, template_path)
+        return image[top:bottom, left:right], mask[top:bottom, left:right] if mask is not None else None
+
     @staticmethod
     def _normalize_template_crop(
         crop: object,
@@ -384,8 +402,11 @@ class RecognitionService:
         template_path: str,
     ) -> tuple[int, int, int, int]:
         try:
-            values = [int(value) for value in crop]  # type: ignore[union-attr]
-        except (TypeError, ValueError) as exc:
+            raw_values = list(crop)  # type: ignore[arg-type]
+            if any(isinstance(value, bool) or not isinstance(value, Integral) for value in raw_values):
+                raise ValueError("Crop coordinates must be integers.")
+            values = [int(value) for value in raw_values]
+        except (TypeError, ValueError, OverflowError) as exc:
             raise AppError(
                 ErrorCode.MATCH_FAILED,
                 "Template crop must contain four integer coordinates.",
@@ -486,8 +507,18 @@ class RecognitionService:
         )
         return scaled_template, scaled_mask
 
-    def _template_matches(self, search_image, template_image, template_mask, explicit_mask: bool):
+    def _template_matches(self, search_image, template_image, template_mask, explicit_mask: bool, *, require_contrast: bool = False):
         cv, numpy = self._require_opencv()
+        if require_contrast:
+            # Normalized correlation is undefined for a constant effective template.
+            channels = template_image.shape[2] if template_image.ndim == 3 else 1
+            pixels = template_image.reshape(-1, channels)
+            if template_mask is not None:
+                pixels = pixels[template_mask.reshape(-1) > 0]
+            if not pixels.size or not numpy.any(numpy.ptp(pixels, axis=0)):
+                height = search_image.shape[0] - template_image.shape[0] + 1
+                width = search_image.shape[1] - template_image.shape[1] + 1
+                return numpy.full((height, width), -1.0, dtype=numpy.float32)
         if template_mask is None:
             return cv.matchTemplate(search_image, template_image, cv.TM_CCOEFF_NORMED)
         matches = cv.matchTemplate(
