@@ -9,6 +9,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   const status = document.querySelector("#preset-team-status");
   const retry = document.querySelector("#retry-team-catalog");
   const master = document.querySelector("#preset-master-equip");
+  const masterSex = document.querySelector("#preset-master-sex");
   const masterStatus = document.querySelector("#preset-master-status");
   const masterRetry = document.querySelector("#retry-master-catalog");
   const usedSlots = [...document.querySelectorAll("[data-team-used]")];
@@ -155,6 +156,17 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     usedStatus.hidden = !usedStatus.textContent;
   }
 
+  function renderMasterSex(config) {
+    const value = config.master_sex;
+    const options = [option("0", t("Female")), option("1", t("Male"))];
+    const current = value !== undefined && value !== 0 && value !== 1;
+    if (current) options.push(option("", t("{name} (current)", { name: JSON.stringify(value) }), true));
+    masterSex.replaceChildren(...options);
+    if (current) masterSex.selectedIndex = options.length - 1;
+    else masterSex.value = String(value === undefined ? 0 : value);
+    masterSex.title = masterSex.selectedOptions[0]?.textContent || "";
+  }
+
   function render() {
     const editor = getEditor();
     section.hidden = editor?.kind !== "settings";
@@ -180,6 +192,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     }
     renderServer(config);
     renderMasters(config, editor);
+    renderMasterSex(config);
     renderUsed(config);
     const server = typeof config.server === "string" ? config.server.toUpperCase() : "";
     if (!["CH", "CNTW", "JP"].includes(server)) {
@@ -218,6 +231,9 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
           if (!selected) return;
           config.master_equip = selected.sn;
         }
+      } else if (select === masterSex) {
+        if (!["0", "1"].includes(select.value)) return;
+        config.master_sex = Number(select.value);
       } else if (select === assistSlot) {
         if (select.value === "") delete config.assistIdx;
         else config.assistIdx = Number(select.value);
@@ -256,6 +272,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   usedSlots.forEach((input) => input.addEventListener("change", updateUsed));
   assistSlot.addEventListener("change", update);
   master.addEventListener("change", update);
+  masterSex.addEventListener("change", update);
   masterRetry.addEventListener("click", () => {
     const editor = getEditor();
     if (editor?.kind !== "settings" || controls.disabled) return;
