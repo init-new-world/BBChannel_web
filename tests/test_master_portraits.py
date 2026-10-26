@@ -1,4 +1,5 @@
 from io import BytesIO
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 
@@ -150,3 +151,25 @@ def test_bundled_master_preview_uses_actual_portrait_not_outfit_thumbnail(sex):
         assert actual.size == (256, 256)
         assert actual.mode == "RGBA"
         assert actual.tobytes() == source.convert("RGBA").tobytes()
+
+
+def test_master_retry_icon_is_served_from_its_actual_static_url(tmp_path):
+    class Images(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.sources = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "img":
+                self.sources.append(dict(attrs).get("src", ""))
+
+    client = _client(tmp_path)
+    page = client.get("/")
+    assert page.status_code == 200
+    parser = Images()
+    parser.feed(page.text)
+    icons = [source for source in parser.sources if source.endswith("/refresh-cw.svg")]
+    assert len(icons) == 1
+    response = client.get(icons[0])
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")

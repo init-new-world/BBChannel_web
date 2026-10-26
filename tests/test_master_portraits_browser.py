@@ -80,6 +80,7 @@ def test_master_portrait_failure_does_not_block_save_and_can_retry(tag_console):
     _open(page, url)
     status = page.locator("#preset-master-portrait-status")
     playwright.expect(status).to_have_text("Preview unavailable")
+    playwright.expect(page.locator("#retry-master-portrait img")).to_have_js_property("naturalWidth", 24)
     playwright.expect(page.locator("#save-preset")).to_be_enabled()
     assert _config(page) == original
     page.locator("#save-preset").click()
