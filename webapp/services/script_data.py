@@ -7,6 +7,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from json import JSONDecodeError
+from math import isfinite
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -57,7 +58,7 @@ class ScriptDataService:
 
     def get_setting(self, name: str) -> dict[str, Any]:
         path = self._resolve_named_json(self.settings_dir, name, "settings")
-        config = self._load_json(path)
+        config, source = self._load_json_document(path)
         if not isinstance(config, dict):
             raise AppError(
                 ErrorCode.DATA_FILE_INVALID,
@@ -70,6 +71,7 @@ class ScriptDataService:
             "name": path.stem,
             "path": self._relative_path(path),
             "config": config,
+            "source": source,
             "summary": self._setting_summary(config),
             "validation": validation,
         }
@@ -83,6 +85,9 @@ class ScriptDataService:
     ) -> dict[str, Any]:
         with self._lock:
             return self._save_setting(name, config, overwrite=overwrite)
+
+    def save_setting_source(self, name: str, source: str, *, overwrite: bool = False) -> dict[str, Any]:
+        return self.save_setting(name, self._preset_source_value(source, dict), overwrite=overwrite)
 
     def _save_setting(
         self, name: str, config: dict[str, Any], *, overwrite: bool,
@@ -221,12 +226,13 @@ class ScriptDataService:
 
     def get_strategy(self, name: str) -> dict[str, Any]:
         path = self._resolve_named_json(self.strategy_dir, name, "strategy")
-        entries = self._load_json(path)
+        entries, source = self._load_json_document(path)
         validation = self._validate_strategy_file(entries)
         return {
             "name": path.stem,
             "path": self._relative_path(path),
             "entries": entries if isinstance(entries, list) else [],
+            "source": source,
             "summary": {"entry_count": len(entries) if isinstance(entries, list) else 0},
             "validation": validation,
         }
@@ -256,6 +262,9 @@ class ScriptDataService:
 
     def delete_strategy(self, name: str) -> dict[str, Any]:
         return self._delete_named_json(self.strategy_dir, name, "strategy")
+
+    def save_strategy_source(self, name: str, source: str, *, overwrite: bool = False) -> dict[str, Any]:
+        return self.save_strategy(name, self._preset_source_value(source, list), overwrite=overwrite)
 
     def list_servants(self, server: str) -> dict[str, Any]:
         server = self._normalize_server(server)
@@ -377,14 +386,37 @@ class ScriptDataService:
         return result
 
     def _load_json(self, path: Path) -> Any:
+        return self._load_json_document(path)[0]
+
+    def _load_json_document(self, path: Path) -> tuple[Any, str]:
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            return json.loads(source), source
         except JSONDecodeError as exc:
             raise AppError(
                 ErrorCode.DATA_FILE_INVALID,
                 f"Invalid JSON data file: {path.name}",
                 {"path": self._relative_path(path), "line": exc.lineno, "column": exc.colno},
             ) from exc
+
+    @staticmethod
+    def _preset_source_value(source: str, expected_type: type) -> Any:
+        def reject_constant(_token: str) -> None:
+            raise ValueError("Non-finite JSON number.")
+
+        def finite_float(token: str) -> float:
+            value = float(token)
+            if not isfinite(value):
+                raise ValueError("Non-finite JSON number.")
+            return value
+
+        try:
+            value = json.loads(source, parse_constant=reject_constant, parse_float=finite_float)
+        except (ValueError, RecursionError) as exc:
+            raise AppError(ErrorCode.DATA_FILE_INVALID, "Invalid preset JSON source.") from exc
+        if not isinstance(value, expected_type):
+            raise AppError(ErrorCode.DATA_FILE_INVALID, "Preset JSON source has the wrong top-level type.")
+        return value
 
     def _validate_setting(self, config: dict[str, Any]) -> dict[str, Any]:
         errors: list[dict[str, str]] = []

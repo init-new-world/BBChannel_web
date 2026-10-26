@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, StrictBool, StrictInt
+from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from webapp.api import create_job_router
 from webapp.automation import (
@@ -131,13 +131,27 @@ class BatchMatchRequest(BaseModel):
 
 
 class SaveSettingRequest(BaseModel):
-    config: dict
+    config: dict | None = None
+    source: StrictStr | None = Field(default=None, min_length=1)
     overwrite: bool = False
+
+    @model_validator(mode="after")
+    def require_one_payload(self) -> SaveSettingRequest:
+        if (self.config is None) == (self.source is None):
+            raise ValueError("Supply exactly one of config or source.")
+        return self
 
 
 class SaveStrategyRequest(BaseModel):
-    entries: list[dict]
+    entries: list[dict] | None = None
+    source: StrictStr | None = Field(default=None, min_length=1)
     overwrite: bool = False
+
+    @model_validator(mode="after")
+    def require_one_payload(self) -> SaveStrategyRequest:
+        if (self.entries is None) == (self.source is None):
+            raise ValueError("Supply exactly one of entries or source.")
+        return self
 
 
 class BuildEquipTemplateRequest(BaseModel):
@@ -831,6 +845,8 @@ def create_app(
 
     @app.put("/api/settings/{name}")
     def save_setting(name: str, request: SaveSettingRequest) -> dict:
+        if request.source is not None:
+            return script_data.save_setting_source(name, request.source, overwrite=request.overwrite)
         return script_data.save_setting(
             name,
             request.config,
@@ -851,6 +867,8 @@ def create_app(
 
     @app.put("/api/strategies/{name}")
     def save_strategy(name: str, request: SaveStrategyRequest) -> dict:
+        if request.source is not None:
+            return script_data.save_strategy_source(name, request.source, overwrite=request.overwrite)
         return script_data.save_strategy(
             name,
             request.entries,

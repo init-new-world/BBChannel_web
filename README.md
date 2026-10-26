@@ -89,6 +89,8 @@ The console's top-bar language selector supports English and Simplified Chinese.
 
 The copy icons beside the script and strategy selectors load the selected preset into a new draft with an empty required name. Copies retain the complete JSON, including extension fields, and use the backend's existing-name protection. Canceling discards the draft; Save creates a separate file. A source-load response arriving after another editor was opened or closed is ignored.
 
+Preset details include JSON `source` text from the same read as their parsed data. The save APIs accept exactly one of the original structured payload (`config` for scripts, `entries` for strategies) or a `source` string, with the same validation and overwrite protection. Source requests reject malformed JSON, the wrong top-level type, non-finite constants, and floating-point overflow before writing. Opening, copying, importing, exporting, and saving an unchanged preset now avoid a JavaScript numeric round trip, retaining Python floating-point types and integers beyond JavaScript's safe range. Files still use the server's existing save formatting. Other structured controls retain their existing JSON serialization behavior and can still canonicalize numbers when explicitly edited; this is not a claim that every editing workflow is source-preserving.
+
 Execution is rejected when a script fails validation or contains unsupported compiled actions. Recognition-dependent behavior still requires suitable assets and a compatible device layout; this project does not claim complete parity with every original-client function or every live game screen.
 
 ### Assist Class Tabs

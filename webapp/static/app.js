@@ -1782,9 +1782,11 @@ async function openPresetEditor(kind, mode) {
   const opening = ++state.presetOpenSequence;
   try {
     let value = isSetting ? { server: "CH", round1_turns: 0 } : [newStrategyEntry("Entry 1")];
+    let source = null;
     if (usesSource) {
       const detail = await api(`/api/${kind}/${encodeURIComponent(selectedName)}`);
       value = isSetting ? detail.config : detail.entries;
+      source = typeof detail.source === "string" ? detail.source : null;
     }
     if (opening !== state.presetOpenSequence) return;
     const action = editing ? "Edit" : mode === "duplicate" ? "Duplicate" : "New";
@@ -1797,7 +1799,7 @@ async function openPresetEditor(kind, mode) {
     els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
     els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
-    els.presetJson.value = JSON.stringify(value, null, 2);
+    els.presetJson.value = source ?? JSON.stringify(value, null, 2);
     renderPresetFields();
     setPresetError("");
     els.presetName.focus();
@@ -1813,7 +1815,8 @@ async function handleSettingImport() {
   }
   const opening = ++state.presetOpenSequence;
   try {
-    const value = JSON.parse(await file.text());
+    const source = await file.text();
+    const value = JSON.parse(source);
     if (opening !== state.presetOpenSequence) return;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("Script JSON must contain an object.");
@@ -1822,7 +1825,7 @@ async function handleSettingImport() {
     state.presetEditor = { kind: "settings", originalName: "", titleKey: "Import Script" };
     els.presetDialogTitle.textContent = t("Import Script");
     els.presetName.value = proposedName;
-    els.presetJson.value = JSON.stringify(value, null, 2);
+    els.presetJson.value = source;
     renderPresetFields();
     setPresetError("");
     els.presetDialog.showModal();
@@ -1841,7 +1844,8 @@ async function exportSelectedSetting() {
   }
   try {
     const detail = await api(`/api/settings/${encodeURIComponent(name)}`);
-    const blob = new Blob([`${JSON.stringify(detail.config, null, 2)}\n`], {
+    const source = typeof detail.source === "string" ? detail.source : JSON.stringify(detail.config, null, 2);
+    const blob = new Blob([source.endsWith("\n") ? source : `${source}\n`], {
       type: "application/json;charset=utf-8",
     });
     const url = URL.createObjectURL(blob);
@@ -2640,15 +2644,14 @@ async function savePreset(event) {
     setPresetError("Name is required.");
     return;
   }
-  let value;
   try {
-    value = JSON.parse(els.presetJson.value);
+    JSON.parse(els.presetJson.value);
   } catch (error) {
     setPresetError(`Invalid JSON: ${error.message}`);
     return;
   }
   const isSetting = editor.kind === "settings";
-  const request = isSetting ? { config: value } : { entries: value };
+  const request = { source: els.presetJson.value };
   request.overwrite = Boolean(editor.originalName && editor.originalName === name);
   editor.saving = true;
   renderPresetScriptStrategy();
