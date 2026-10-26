@@ -3,6 +3,7 @@ import { createPresetAssistEditor } from "./preset-assist.js";
 import { createPresetEquipEditor } from "./preset-equips.js";
 import { createPresetSettlementEditor } from "./preset-settlement.js";
 import { createPresetDropEditor } from "./preset-drops.js";
+import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
@@ -315,6 +316,18 @@ const presetDrops = createPresetDropEditor({
   getEditor: () => state.presetEditor,
   source: els.presetJson,
   request: api,
+  onChange: () => {
+    renderPresetScriptStrategy();
+    setPresetError("");
+  },
+  onError: setPresetError,
+});
+
+const presetTurnSkills = createPresetTurnSkillsEditor({
+  getEditor: () => state.presetEditor,
+  source: els.presetJson,
+  readTarget: readScriptStrategyTarget,
+  validateConfig: editableScriptWaves,
   onChange: () => {
     renderPresetScriptStrategy();
     setPresetError("");
@@ -2045,10 +2058,13 @@ function renderPresetScriptStrategy() {
   const editor = state.presetEditor;
   const isSetting = editor?.kind === "settings";
   els.presetScriptStrategy.hidden = !isSetting;
-  els.presetScriptStrategy.disabled = true;
   renderPresetTurnNps(null, "");
   updatePresetSaveState();
-  if (!isSetting) return;
+  if (!isSetting) {
+    els.presetScriptStrategy.disabled = true;
+    presetTurnSkills.render("");
+    return;
+  }
   let config;
   let targets;
   try {
@@ -2056,6 +2072,8 @@ function renderPresetScriptStrategy() {
     if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid script JSON.");
     targets = scriptStrategyTargets(config);
   } catch (error) {
+    els.presetScriptStrategy.disabled = true;
+    presetTurnSkills.render("");
     els.presetTurnStrategyStatus.textContent = error instanceof SyntaxError ? t("Invalid script JSON.") : error.message;
     return;
   }
@@ -2091,6 +2109,7 @@ function renderPresetScriptStrategy() {
       : Array.isArray(strategies) && strategies.length ? t("{count} strategies configured", { count: strategies.length })
         : strategies !== undefined && strategies !== null && !Array.isArray(strategies) ? t("Invalid strategy value")
           : t("No strategy configured");
+  presetTurnSkills.render(target);
 }
 
 function readScriptStrategyTarget() {

@@ -527,6 +527,17 @@
           <div class="turn-strategy-fields">
             <label class="field-stack"><span>Target</span><select id="preset-strategy-target" class="field" aria-label="Strategy target turn"></select></label>
             <label class="field-stack"><span>Preset</span><select id="preset-strategy-source" class="field" aria-label="Strategy preset source"></select></label>
+            <details id="preset-turn-skills" class="preset-turn-skills">
+              <summary>Skill Sequence <span id="preset-turn-skill-count"></span></summary>
+              <fieldset id="preset-turn-skill-controls">
+                <div class="turn-skill-toolbar">
+                  <button id="add-turn-skill" class="ghost-button" type="button"><img src="/icons/plus.svg" width="16" height="16" alt=""> Add Skill</button>
+                  <button id="clear-turn-skills" class="icon-button" type="button" title="Clear skill sequence" aria-label="Clear skill sequence"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+                </div>
+                <div id="preset-turn-skill-list" class="turn-skill-list"></div>
+                <span id="preset-turn-skill-status" class="turn-skill-status" role="status" hidden></span>
+              </fieldset>
+            </details>
             <div id="preset-turn-nps" class="turn-np-fields" hidden>
               <span class="turn-np-heading">NP Order</span>
               <label class="field-stack"><span>First</span><select class="field" data-turn-np-index="0" aria-label="First Noble Phantasm"></select></label>

@@ -1202,6 +1202,80 @@ select:disabled {
   display: none;
 }
 
+.preset-turn-skills {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.preset-turn-skills summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#preset-turn-skill-count {
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+#preset-turn-skill-controls {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 8px 0 0;
+}
+
+.turn-skill-toolbar,
+.turn-skill-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.turn-skill-toolbar {
+  margin-bottom: 8px;
+}
+
+.turn-skill-toolbar .icon-button,
+.turn-skill-tools .icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.turn-skill-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.turn-skill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, 130px) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.turn-skill-row .field {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.turn-skill-status {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
 .turn-np-heading,
 #preset-turn-np-status {
   grid-column: 1 / -1;
@@ -1224,6 +1298,15 @@ select:disabled {
 @media (max-width: 560px) {
   .turn-strategy-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .turn-skill-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .turn-skill-tools {
+    grid-column: 1 / -1;
+    justify-self: end;
   }
 }
 
