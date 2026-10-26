@@ -1000,6 +1000,44 @@ select:disabled {
   flex-shrink: 0;
 }
 
+.preset-master-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 50px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.preset-master-portrait,
+.preset-master-portrait img {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 50px;
+  object-fit: contain;
+}
+
+.preset-master-preview > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.preset-master-preview .icon-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+#preset-master-preview[hidden],
+#retry-master-portrait[hidden] {
+  display: none;
+}
+
 .preset-team-used {
   grid-column: 1 / -1;
   min-width: 0;

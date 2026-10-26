@@ -10,6 +10,10 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   const retry = document.querySelector("#retry-team-catalog");
   const master = document.querySelector("#preset-master-equip");
   const masterSex = document.querySelector("#preset-master-sex");
+  const masterPreview = document.querySelector("#preset-master-preview");
+  const masterPortrait = document.querySelector("#preset-master-portrait");
+  const portraitStatus = document.querySelector("#preset-master-portrait-status");
+  const portraitRetry = document.querySelector("#retry-master-portrait");
   const masterStatus = document.querySelector("#preset-master-status");
   const masterRetry = document.querySelector("#retry-master-catalog");
   const usedSlots = [...document.querySelectorAll("[data-team-used]")];
@@ -167,6 +171,38 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     masterSex.title = masterSex.selectedOptions[0]?.textContent || "";
   }
 
+  function renderMasterPortrait(config, editor, reload = false) {
+    const catalog = editor.masterCatalog;
+    const selected = catalog?.state === "ready" && validMasterId(config.master_equip)
+      ? catalog.masters.find((item) => String(item.sn) === String(config.master_equip)) : null;
+    const sex = config.master_sex === undefined ? 0 : config.master_sex;
+    const key = selected && (sex === 0 || sex === 1) ? JSON.stringify([selected.sn, selected.name, sex]) : null;
+    if (!reload && editor.masterPortrait?.key === key) return;
+    const view = { key };
+    editor.masterPortrait = view;
+    masterPreview.hidden = key === null;
+    masterPortrait.replaceChildren();
+    portraitStatus.textContent = "";
+    portraitRetry.hidden = true;
+    if (key === null) return;
+    const image = document.createElement("img");
+    image.width = image.height = 50;
+    image.alt = t("Master portrait");
+    portraitStatus.textContent = t("Loading portrait...");
+    const current = () => getEditor() === editor && editor.masterPortrait === view;
+    image.addEventListener("load", () => {
+      if (current()) portraitStatus.textContent = "";
+    });
+    image.addEventListener("error", () => {
+      if (!current()) return;
+      image.hidden = true;
+      portraitStatus.textContent = t("Preview unavailable");
+      portraitRetry.hidden = false;
+    });
+    image.src = `/api/masters/image?${new URLSearchParams({ equip: String(selected.sn), sex: String(sex) })}`;
+    masterPortrait.append(image);
+  }
+
   function render() {
     const editor = getEditor();
     section.hidden = editor?.kind !== "settings";
@@ -188,11 +224,15 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
       usedStatus.textContent = t("Invalid script JSON.");
       usedStatus.hidden = false;
       masterRetry.hidden = true;
+      editor.masterPortrait = null;
+      masterPreview.hidden = true;
+      masterPortrait.replaceChildren();
       return;
     }
     renderServer(config);
     renderMasters(config, editor);
     renderMasterSex(config);
+    renderMasterPortrait(config, editor);
     renderUsed(config);
     const server = typeof config.server === "string" ? config.server.toUpperCase() : "";
     if (!["CH", "CNTW", "JP"].includes(server)) {
@@ -273,6 +313,15 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   assistSlot.addEventListener("change", update);
   master.addEventListener("change", update);
   masterSex.addEventListener("change", update);
+  portraitRetry.addEventListener("click", () => {
+    const editor = getEditor();
+    if (editor?.kind !== "settings" || controls.disabled || editor.saving || editor.strategyApplyBusy) return;
+    try {
+      renderMasterPortrait(readConfig(), editor, true);
+    } catch (error) {
+      onError(error.message);
+    }
+  });
   masterRetry.addEventListener("click", () => {
     const editor = getEditor();
     if (editor?.kind !== "settings" || controls.disabled) return;

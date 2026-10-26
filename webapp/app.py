@@ -67,6 +67,7 @@ from webapp.services.drop_templates import DropTemplateService
 from webapp.services.event_log import EventLog
 from webapp.services.expball import ExpBallRecognizer
 from webapp.services.equip_templates import EquipTemplateService
+from webapp.services.master_portraits import MasterPortraitService
 from webapp.services.lottery import LotteryRecognizer
 from webapp.services.materials import MaterialDropService
 from webapp.services.notebook import NotebookService
@@ -235,6 +236,7 @@ def create_app(
     material_drops = MaterialDropService(resources.data_dir)
     notebook = NotebookService(resources.data_dir)
     script_data = ScriptDataService(resources.data_dir, resources=resources)
+    master_portraits = MasterPortraitService(resources, script_data)
     owns_job_manager = job_manager is None
     if job_manager is None:
         default_db_path = os.environ.get(
@@ -866,6 +868,10 @@ def create_app(
     @app.get("/api/masters")
     def masters() -> dict:
         return script_data.list_masters()
+
+    @app.get("/api/masters/image")
+    def master_portrait(equip: str, sex: int = Query(default=0, ge=0, le=1)) -> Response:
+        return Response(content=master_portraits.read_image(equip, sex), media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/match")
     def match_template(request: MatchRequest) -> dict:
