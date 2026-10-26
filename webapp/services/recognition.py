@@ -35,6 +35,7 @@ class RecognitionService:
         template_size: Sequence[int] | None = None,
         template_crop: Sequence[int] | None = None,
         grayscale: bool = False,
+        use_alpha_mask: bool = True,
     ) -> MatchResult:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
         return self._match_decoded(
@@ -47,6 +48,7 @@ class RecognitionService:
             template_size=template_size,
             template_crop=template_crop,
             grayscale=grayscale,
+            use_alpha_mask=use_alpha_mask,
         )
 
     def image_size(self, screenshot: bytes) -> tuple[int, int]:
@@ -86,6 +88,7 @@ class RecognitionService:
                     centered_mask=bool(candidate.get("centered_mask", False)),
                     template_crop=candidate.get("template_crop"),
                     grayscale=bool(candidate.get("grayscale", False)),
+                    use_alpha_mask=bool(candidate.get("use_alpha_mask", True)),
                     template_data=template_cache[cache_key],
                 )
             )
@@ -102,6 +105,7 @@ class RecognitionService:
         template_crop: Sequence[int] | None = None,
         max_results: int = 20,
         grayscale: bool = False,
+        use_alpha_mask: bool = True,
     ) -> list[MatchResult]:
         screenshot_image = self._decode_screenshot(screenshot, template_path)
         return self._match_all_decoded(
@@ -114,6 +118,7 @@ class RecognitionService:
             template_crop=template_crop,
             max_results=max_results,
             grayscale=grayscale,
+            use_alpha_mask=use_alpha_mask,
         )
 
     def match_template_debug(
@@ -219,6 +224,7 @@ class RecognitionService:
         template_size: object = None,
         template_crop: object = None,
         grayscale: bool = False,
+        use_alpha_mask: bool = True,
         centered_mask: bool = False,
         template_data: tuple[Any, Any, bool] | None = None,
     ) -> MatchResult:
@@ -228,6 +234,8 @@ class RecognitionService:
             if template_data is not None
             else self._load_template(template_path, mask_path)
         )
+        if not use_alpha_mask and not explicit_mask:
+            template_mask = None
         template_image, template_mask = self._crop_template(template_image, template_mask, template_crop, template_path)
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
@@ -318,12 +326,15 @@ class RecognitionService:
         template_crop: object = None,
         max_results: int,
         grayscale: bool = False,
+        use_alpha_mask: bool = True,
     ) -> list[MatchResult]:
         cv, numpy = self._require_opencv()
         template_image, template_mask, explicit_mask = self._load_template(
             template_path,
             mask_path,
         )
+        if not use_alpha_mask and not explicit_mask:
+            template_mask = None
         template_image, template_mask = self._crop_template(template_image, template_mask, template_crop, template_path)
         screenshot_height, screenshot_width = screenshot_image.shape[:2]
         normalized_roi = self._normalize_roi(
