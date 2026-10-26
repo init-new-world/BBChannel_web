@@ -23,6 +23,14 @@ def _pattern(size: tuple[int, int], color: tuple[int, int, int]) -> Image.Image:
     return image
 
 
+def _drop_template() -> Image.Image:
+    image = _pattern((176, 193), (165, 105, 45))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((52, 58, 76, 86), fill="white", outline="black", width=2)
+    draw.rectangle((98, 110, 124, 136), fill=(35, 85, 195), outline="black", width=2)
+    return image
+
+
 def _run_completion(
     tmp_path: Path,
     frames: list[tuple[Image.Image, dict | None]],
@@ -31,6 +39,7 @@ def _run_completion(
     payload: dict | None = None,
     wait_timeout: float = 3,
     story_candidates: list[list[dict[str, object]]] | None = None,
+    drop_template: Image.Image | None = None,
 ):
     assets = tmp_path / "assets"
     data = tmp_path / "data"
@@ -61,7 +70,7 @@ def _run_completion(
     goto_interlude = _pattern((180, 48), (95, 75, 165))
     goto_stage = _pattern((220, 52), (155, 105, 45))
     next_story = _pattern((161, 100), (105, 145, 65))
-    drop_item = _pattern((40, 40), (165, 105, 45))
+    drop_item = drop_template if drop_template is not None else _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
     friendship_level_10.save(battle_assets / "jblevel10.png")
@@ -415,7 +424,8 @@ def test_completion_recovers_from_network_reconnect_prompt(tmp_path: Path):
 def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
     pytest.importorskip("cv2")
     frame = Image.new("RGB", (1280, 720), (18, 24, 32))
-    drop_item = _pattern((40, 40), (165, 105, 45))
+    drop_template = _drop_template()
+    drop_item = drop_template.resize((117, 129), Image.Resampling.BILINEAR)
     frame.paste(drop_item, (300, 250))
     frame.paste(drop_item, (700, 450))
 
@@ -427,6 +437,7 @@ def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
             "dropImage": "E:/old/BBchannel/assets/drop/item.png",
         },
         payload={"initial_drop_count": 1},
+        drop_template=drop_template,
     )
 
     assert result.status == JobStatus.SUCCEEDED
@@ -439,7 +450,8 @@ def test_completion_counts_configured_drops_from_previous_runs(tmp_path: Path):
 def test_completion_counts_animated_drop_screen_only_once(tmp_path: Path):
     pytest.importorskip("cv2")
     base = Image.new("RGB", (1280, 720), (18, 24, 32))
-    drop_item = _pattern((40, 40), (165, 105, 45))
+    drop_template = _drop_template()
+    drop_item = drop_template.resize((117, 129), Image.Resampling.BILINEAR)
     first_drop_frame = base.copy()
     first_drop_frame.paste(drop_item, (300, 250))
     first_drop_frame.paste(drop_item, (700, 450))
@@ -458,6 +470,7 @@ def test_completion_counts_animated_drop_screen_only_once(tmp_path: Path):
             (animated_drop_frame, None),
         ],
         config={"dropStopNum": 3, "dropImage": "assets/drop/item.png"},
+        drop_template=drop_template,
     )
 
     assert result.status == JobStatus.SUCCEEDED

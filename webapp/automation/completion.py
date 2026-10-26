@@ -17,6 +17,7 @@ from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
 from webapp.services.drop_templates import DropTemplateService
+from webapp.services.drop_recognition import DropRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
@@ -59,6 +60,7 @@ def create_completion_handler(
             resources,
             plan["run"]["drop_image"],
         )
+        drop_recognizer = DropRecognizer(resources, recognition, drop_template) if drop_limit > 0 and drop_template else None
         started = monotonic()
         attempts = 0
         actions: list[str] = []
@@ -85,14 +87,9 @@ def create_completion_handler(
             ):
                 actions.append("reconnect")
                 continue
-            if drop_limit > 0 and drop_template is not None:
-                drop_matches = recognition.match_template_all(
-                    screenshot,
-                    drop_template,
-                    threshold=0.85,
-                    scales=(1.0, 0.75, 2 / 3, 0.5),
-                    max_results=100,
-                )
+            if drop_recognizer is not None:
+                drop_report = drop_recognizer.recognize(screenshot, check_cancelled=context.raise_if_cancelled)
+                drop_matches = drop_report["matches"]
                 new_drop_matches = _unseen_drop_matches(
                     drop_matches,
                     observed_drop_bounds,
@@ -105,6 +102,10 @@ def create_completion_handler(
                         "frame_drop_count": len(new_drop_matches),
                         "drop_count": drop_count,
                         "drop_limit": drop_limit,
+                        "candidate_drop_count": drop_report["candidate_count"],
+                        "verified_drop_count": len(drop_matches),
+                        "center_rejected_count": drop_report["center_rejected_count"],
+                        "offset_rejected_count": drop_report["offset_rejected_count"],
                     },
                 )
                 if drop_count >= drop_limit:
