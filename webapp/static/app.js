@@ -5,6 +5,7 @@ import { createPresetSettlementEditor } from "./preset-settlement.js";
 import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
+import { applyStrategySource, clearStrategySource, inspectStrategySource } from "./turn-strategies-source.js";
 import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
@@ -2111,6 +2112,16 @@ function renderPresetScriptStrategy() {
       : Array.isArray(strategies) && strategies.length ? t("{count} strategies configured", { count: strategies.length })
         : strategies !== undefined && strategies !== null && !Array.isArray(strategies) ? t("Invalid strategy value")
           : t("No strategy configured");
+  if (target) {
+    try {
+      editableScriptWaves(config);
+      const info = inspectStrategySource(els.presetJson.value, target);
+      els.clearTurnStrategy.disabled = !info.canClear;
+    } catch (error) {
+      els.applyTurnStrategy.disabled = els.clearTurnStrategy.disabled = true;
+      els.presetTurnStrategyStatus.textContent = t(error.message);
+    }
+  }
   presetTurnSkills.render(target);
 }
 
@@ -2276,9 +2287,9 @@ async function applyPresetToTurn() {
       || els.presetScriptStrategy.disabled) return;
   try {
     const { config, field } = readScriptStrategyTarget();
-    const existing = config[field];
-    if (existing != null && (!Array.isArray(existing) || existing.length)
-        && !window.confirm("Replace the current turn strategies?")) return;
+    editableScriptWaves(config);
+    if (inspectStrategySource(els.presetJson.value, field).canClear
+        && !window.confirm(t("Replace the current turn strategies?"))) return;
     const sourceName = els.presetStrategySource.value;
     const sourceJson = els.presetJson.value;
     editor.strategyApplyBusy = true;
@@ -2286,14 +2297,11 @@ async function applyPresetToTurn() {
     const preset = await api(`/api/strategies/${encodeURIComponent(sourceName)}`);
     if (state.presetEditor !== editor) return;
     if (els.presetJson.value !== sourceJson) throw new Error("Script changed while the preset was loading. Apply it again.");
-    if (!preset.validation?.ok || !Array.isArray(preset.entries) || !preset.entries.length) {
-      throw new Error("Selected strategy preset is invalid or empty.");
-    }
-    config[field] = preset.entries.map((entry) => structuredClone(entry.strategy));
-    els.presetJson.value = JSON.stringify(config, null, 2);
+    if (editor.strategyTarget !== field) throw new Error("Script turn changed while the preset was loading. Apply it again.");
+    els.presetJson.value = applyStrategySource(sourceJson, field, preset);
     setPresetError("");
   } catch (error) {
-    if (state.presetEditor === editor) setPresetError(error.message);
+    if (state.presetEditor === editor) setPresetError(t(error.message));
   } finally {
     editor.strategyApplyBusy = false;
     if (state.presetEditor === editor) renderPresetScriptStrategy();
@@ -2302,18 +2310,18 @@ async function applyPresetToTurn() {
 }
 
 function clearTurnStrategy() {
-  if (state.presetEditor?.kind !== "settings" || state.presetEditor.saving || els.clearTurnStrategy.disabled
+  if (state.presetEditor?.kind !== "settings" || state.presetEditor.saving || state.presetEditor.strategyApplyBusy || els.clearTurnStrategy.disabled
       || els.presetScriptStrategy.disabled) return;
   try {
     const { config, field } = readScriptStrategyTarget();
-    if (!window.confirm("Clear strategies for this turn?")) return;
+    editableScriptWaves(config);
+    if (!window.confirm(t("Clear strategies for this turn?"))) return;
     // The empty field preserves turn counts inferred from legacy script keys.
-    config[field] = [];
-    els.presetJson.value = JSON.stringify(config, null, 2);
+    els.presetJson.value = clearStrategySource(els.presetJson.value, field);
     renderPresetScriptStrategy();
     setPresetError("");
   } catch (error) {
-    setPresetError(error.message);
+    setPresetError(t(error.message));
   }
 }
 
