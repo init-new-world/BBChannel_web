@@ -839,6 +839,8 @@ select:disabled {
   gap: 10px;
   padding: var(--preset-padding);
   overflow: auto;
+  /* Keep automatically scrolled controls above the sticky action row. */
+  scroll-padding-bottom: calc(52px + var(--preset-padding));
 }
 
 .preset-form > * {
