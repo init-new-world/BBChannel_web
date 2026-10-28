@@ -1,4 +1,12 @@
 export const MAX_SKILL_COMMANDS = 1000;
+export const COMMAND_SPELLS = Object.freeze({
+  np: "\u4ee4\u5492\u00b7\u5b9d\u5177\u89e3\u653e",
+  heal: "\u4ee4\u5492\u00b7\u7075\u57fa\u4fee\u590d",
+});
+
+export function isCommandSpell(value) {
+  return Object.values(COMMAND_SPELLS).includes(value);
+}
 
 export function skillField(strategyField) {
   const match = typeof strategyField === "string"
@@ -26,6 +34,9 @@ export function decodeBasicSkill(value) {
   if (paired && value.length !== 2) return null;
   const skill = paired ? value[0] : value;
   const target = paired ? value[1] : null;
+  if (isCommandSpell(skill)) {
+    return Number.isInteger(target) && target >= 1 && target <= 3 ? { skill, target } : null;
+  }
   if (!Number.isInteger(skill) || skill < 1 || skill > 13
       || (skill === 13 && target === null)
       || (target !== null && (!Number.isInteger(target) || target < 1 || target > (skill === 13 ? 6 : 3)))) return null;
@@ -41,6 +52,12 @@ export function readBasicSkills(value) {
 }
 
 function command(skill, target = null, swap) {
+  if (isCommandSpell(skill)) {
+    if (swap !== undefined || !Number.isInteger(target) || target < 1 || target > 3) {
+      throw new Error("Select a valid command spell target.");
+    }
+    return [skill, target];
+  }
   if (!Number.isInteger(skill) || skill < 1 || skill > 13) throw new Error("Select a valid skill.");
   if (swap !== undefined) {
     if (target !== null || !validExchange(skill, swap)) throw new Error("Select a frontline and a reserve servant.");

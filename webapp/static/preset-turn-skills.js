@@ -1,5 +1,5 @@
 import { t } from "./i18n.js";
-import { decodeBasicSkill, MAX_SKILL_COMMANDS } from "./turn-skills-model.js";
+import { COMMAND_SPELLS, decodeBasicSkill, isCommandSpell, MAX_SKILL_COMMANDS } from "./turn-skills-model.js";
 import { changeSkillSource, inspectSkillSource } from "./turn-skills-source.js";
 
 export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, validateConfig, onChange, onError }) {
@@ -51,6 +51,9 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     for (let number = 10; number <= 12; number += 1) {
       skill.append(option(`swap:${number}`, t("Order change / Skill {skill}", { skill: number - 9 })));
     }
+    for (const [kind, spell] of Object.entries(COMMAND_SPELLS)) {
+      skill.append(option(spell, t(kind === "np" ? "Command Spell / NP Charge" : "Command Spell / Heal")));
+    }
     skill.value = value.swap ? `swap:${value.skill}` : String(value.skill);
     skill.title = skill.selectedOptions[0].textContent;
     let target;
@@ -73,8 +76,9 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       target.className = "field";
       target.dataset.turnSkillPart = "target";
       const enemy = value.skill === 13;
-      target.setAttribute("aria-label", t(enemy ? "Enemy target" : "Skill target"));
-      if (!enemy) target.append(option("", t("No target")));
+      const spell = isCommandSpell(value.skill);
+      target.setAttribute("aria-label", t(enemy ? "Enemy target" : spell ? "Command spell target" : "Skill target"));
+      if (!enemy && !spell) target.append(option("", t("No target")));
       for (let slot = 1; slot <= (enemy ? 6 : 3); slot += 1) {
         target.append(option(String(slot), t(enemy ? "Enemy {slot}" : "Servant {slot}", { slot })));
       }
@@ -172,7 +176,8 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const index = Number(item.dataset.turnSkillIndex);
     const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
     const exchange = selection.startsWith("swap:");
-    const skill = Number(exchange ? selection.slice(5) : selection);
+    const spell = isCommandSpell(selection);
+    const skill = exchange ? Number(selection.slice(5)) : spell ? selection : Number(selection);
     const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
     if (exchange) {
       const swap = select.dataset.turnSkillPart === "skill" ? previous?.swap || [1, 4]
@@ -184,8 +189,8 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const selectedTarget = item.querySelector('[data-turn-skill-part="target"]')?.value || "";
     let target = selectedTarget === "" ? null : Number(selectedTarget);
     if (select.dataset.turnSkillPart === "skill" && previous
-        && (previous.swap || (previous.skill === 13) !== (skill === 13))) {
-      target = skill === 13 ? 1 : null;
+        && (previous.swap || (previous.skill === 13) !== (skill === 13) || isCommandSpell(previous.skill) !== spell)) {
+      target = skill === 13 || spell ? 1 : null;
     }
     edit({ type: "update", index, skill, target }, index, select.dataset.turnSkillPart);
   });
