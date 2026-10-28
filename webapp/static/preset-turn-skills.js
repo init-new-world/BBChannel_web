@@ -1,6 +1,7 @@
 import { t } from "./i18n.js";
 import { COMMAND_SPELLS, decodeBasicSkill, isCommandSpell, MAX_SKILL_COMMANDS } from "./turn-skills-model.js";
 import { changeSkillSource, inspectSkillSource } from "./turn-skills-source.js";
+import { specialSkillChoice, specialSkillColors } from "./special-skills-model.js";
 
 export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, validateConfig, onChange, onError }) {
   const section = document.querySelector("#preset-turn-skills");
@@ -35,6 +36,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const item = document.createElement("div");
     item.className = "turn-skill-row";
     item.classList.toggle("turn-skill-exchange", Boolean(value.swap));
+    item.classList.toggle("turn-skill-color", value.choice !== undefined);
     item.dataset.turnSkillIndex = String(index);
     item.setAttribute("role", "group");
     item.setAttribute("aria-label", t("Skill {index}", { index: index + 1 }));
@@ -54,6 +56,11 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     for (const [kind, spell] of Object.entries(COMMAND_SPELLS)) {
       skill.append(option(spell, t(kind === "np" ? "Command Spell / NP Charge" : "Command Spell / Heal")));
     }
+    for (let slot = 1; slot <= 3; slot += 1) {
+      for (const number of [2, 3]) {
+        skill.append(option(String(-((slot - 1) * 3 + number)), t("NP Color / Servant {slot} / Skill {skill}", { slot, skill: number })));
+      }
+    }
     skill.value = value.swap ? `swap:${value.skill}` : String(value.skill);
     skill.title = skill.selectedOptions[0].textContent;
     let target;
@@ -71,6 +78,22 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         field.append(heading, positionSelect(part, label, slots, position));
         target.append(field);
       }
+    } else if (value.choice !== undefined) {
+      target = document.createElement("div");
+      target.className = "turn-skill-color-choice";
+      const colors = specialSkillColors(value.skill);
+      const swatch = document.createElement("span");
+      swatch.className = "np-color-swatch";
+      swatch.dataset.color = colors[value.choice - 1];
+      swatch.setAttribute("aria-hidden", "true");
+      const choice = document.createElement("select");
+      choice.className = "field";
+      choice.dataset.turnSkillPart = "choice";
+      choice.setAttribute("aria-label", t("NP color"));
+      colors.forEach((color, index) => choice.append(option(String(index + 1), t(color))));
+      choice.value = String(value.choice);
+      choice.title = choice.selectedOptions[0].textContent;
+      target.append(swatch, choice);
     } else {
       target = document.createElement("select");
       target.className = "field";
@@ -179,6 +202,13 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const spell = isCommandSpell(selection);
     const skill = exchange ? Number(selection.slice(5)) : spell ? selection : Number(selection);
     const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
+    if (specialSkillColors(skill)) {
+      const choice = select.dataset.turnSkillPart === "skill"
+        ? specialSkillChoice(rendered?.info.commands?.[index], skill)
+        : Number(item.querySelector('[data-turn-skill-part="choice"]').value);
+      edit({ type: "update", index, skill, choice }, index, select.dataset.turnSkillPart);
+      return;
+    }
     if (exchange) {
       const swap = select.dataset.turnSkillPart === "skill" ? previous?.swap || [1, 4]
         : [Number(item.querySelector('[data-turn-skill-part="front"]').value),
@@ -189,7 +219,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const selectedTarget = item.querySelector('[data-turn-skill-part="target"]')?.value || "";
     let target = selectedTarget === "" ? null : Number(selectedTarget);
     if (select.dataset.turnSkillPart === "skill" && previous
-        && (previous.swap || (previous.skill === 13) !== (skill === 13) || isCommandSpell(previous.skill) !== spell)) {
+        && (previous.swap || previous.choice !== undefined || (previous.skill === 13) !== (skill === 13) || isCommandSpell(previous.skill) !== spell)) {
       target = skill === 13 || spell ? 1 : null;
     }
     edit({ type: "update", index, skill, target }, index, select.dataset.turnSkillPart);

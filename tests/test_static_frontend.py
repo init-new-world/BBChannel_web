@@ -14,6 +14,7 @@ def test_operator_console_static_files_exist():
     assert (STATIC_DIR / "preset-drops.js").is_file()
     assert (STATIC_DIR / "preset-turn-skills.js").is_file()
     assert (STATIC_DIR / "turn-skills-source.js").is_file()
+    assert (STATIC_DIR / "special-skills-model.js").is_file()
     assert (STATIC_DIR / "turn-nps-source.js").is_file()
     assert (STATIC_DIR / "turn-strategies-source.js").is_file()
     assert (STATIC_DIR / "json-source.js").is_file()

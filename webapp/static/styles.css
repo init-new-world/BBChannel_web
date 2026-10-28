@@ -1276,6 +1276,23 @@ select:disabled {
   grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto;
 }
 
+.turn-skill-color-choice {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.np-color-swatch {
+  width: 12px;
+  height: 12px;
+}
+
+.np-color-swatch[data-color="Quick"] { background: #328858; }
+.np-color-swatch[data-color="Arts"] { background: #2c78bd; }
+.np-color-swatch[data-color="Buster"] { background: #c54242; }
+
 .turn-skill-exchange-targets {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1325,6 +1342,14 @@ select:disabled {
   .turn-skill-exchange > select,
   .turn-skill-exchange-targets {
     grid-column: 1 / -1;
+  }
+
+  .turn-skill-color > select {
+    grid-column: 1 / -1;
+  }
+
+  .turn-skill-color .turn-skill-tools {
+    grid-column: 2;
   }
 
   .turn-skill-tools {

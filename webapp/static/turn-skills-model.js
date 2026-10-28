@@ -1,3 +1,5 @@
+import { decodeSpecialSkill, makeSpecialSkill } from "./special-skills-model.js";
+
 export const MAX_SKILL_COMMANDS = 1000;
 export const COMMAND_SPELLS = Object.freeze({
   np: "\u4ee4\u5492\u00b7\u5b9d\u5177\u89e3\u653e",
@@ -26,6 +28,8 @@ function validExchange(skill, positions) {
 }
 
 export function decodeBasicSkill(value) {
+  const special = decodeSpecialSkill(value);
+  if (special) return special;
   const paired = Array.isArray(value);
   if (paired && value.length === 3) {
     const [skill, ...swap] = value;
@@ -51,7 +55,11 @@ export function readBasicSkills(value) {
   return value;
 }
 
-function command(skill, target = null, swap) {
+function command(skill, target = null, swap, choice) {
+  if (choice !== undefined || (Number.isInteger(skill) && skill < 0)) {
+    if (target !== null || swap !== undefined) throw new Error("Select a valid NP color.");
+    return makeSpecialSkill(skill, choice);
+  }
   if (isCommandSpell(skill)) {
     if (swap !== undefined || !Number.isInteger(target) || target < 1 || target > 3) {
       throw new Error("Select a valid command spell target.");
@@ -81,9 +89,9 @@ export function changeSkillSequence(value, edit) {
   const next = readBasicSkills(value).slice();
   if (edit.type === "add") {
     if (next.length >= MAX_SKILL_COMMANDS) throw new Error("Skill sequence exceeds 1,000 entries.");
-    next.push(command(edit.skill === undefined ? 1 : edit.skill, edit.target, edit.swap));
+    next.push(command(edit.skill === undefined ? 1 : edit.skill, edit.target, edit.swap, edit.choice));
   } else if (edit.type === "update") {
-    next[entryIndex(edit.index, next.length)] = command(edit.skill, edit.target, edit.swap);
+    next[entryIndex(edit.index, next.length)] = command(edit.skill, edit.target, edit.swap, edit.choice);
   } else if (edit.type === "remove") {
     next.splice(entryIndex(edit.index, next.length), 1);
   } else if (edit.type === "move") {
