@@ -6,6 +6,7 @@ import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { applyStrategySource, clearStrategySource, inspectStrategySource } from "./turn-strategies-source.js";
+import { parseJsonSource, readJsonField } from "./json-source.js";
 import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
@@ -2153,12 +2154,20 @@ function renderPresetRunOptions() {
       controls.forEach((group) => { group.disabled = true; });
       return;
     }
+    const occurrences = new Map();
+    for (const property of parseJsonSource(els.presetJson.value).children) {
+      const name = property.children[0].value;
+      occurrences.set(name, (occurrences.get(name) || 0) + 1);
+    }
     els.presetRunInputs.forEach((input) => {
       const field = input.dataset.runOption;
+      const ambiguous = occurrences.get(field) > 1;
       const draft = editor.runOptionDrafts?.[field];
       input.setCustomValidity(draft?.error ? t(draft.error) : "");
       if (input.type === "checkbox") {
         input.checked = enabled(config[field]);
+        input.disabled = ambiguous;
+        input.title = ambiguous ? t("Ambiguous run option.") : "";
       } else {
         const defaultValue = input.hasAttribute("data-default") ? Number(input.dataset.default) : field === "randomTime" ? 0 : 30;
         const value = Object.hasOwn(config, field) ? config[field] : defaultValue;
@@ -2172,7 +2181,9 @@ function renderPresetRunOptions() {
             input.title = input.placeholder;
           }
         }
-        input.disabled = field === "checkStuckInterval" && !enabled(config.stuckRestart) && !draft;
+        input.disabled = ambiguous || (field === "checkStuckInterval" && !enabled(config.stuckRestart) && !draft);
+        if (ambiguous) input.title = t("Ambiguous run option.");
+        else if (!input.hasAttribute("data-run-live")) input.title = "";
       }
     });
   } catch {
@@ -2190,10 +2201,9 @@ function updatePresetRunOption(event, draftOnly = false) {
     const config = JSON.parse(els.presetJson.value);
     if (!config || typeof config !== "object" || Array.isArray(config)) return;
     const field = input.dataset.runOption;
-    if (input.type === "checkbox") {
-      config[field] = input.checked;
-    } else {
-      const value = input.valueAsNumber;
+    let value = input.checked;
+    if (input.type !== "checkbox") {
+      value = input.valueAsNumber;
       if (!Number.isFinite(value) || value < Number(input.min) || value > Number(input.max)
           || (input.step === "1" && !Number.isSafeInteger(value))) {
         const error = input.dataset.numberError || (field === "randomTime" ? "Random wait must be between 0 and 10 seconds."
@@ -2209,13 +2219,12 @@ function updatePresetRunOption(event, draftOnly = false) {
       } else if (editor.runOptionDrafts) delete editor.runOptionDrafts[field];
       input.setCustomValidity("");
       if (draftOnly && !input.hasAttribute("data-run-live")) return;
-      config[field] = value;
     }
-    els.presetJson.value = JSON.stringify(config, null, 2);
+    els.presetJson.value = readJsonField(els.presetJson.value, field, "Ambiguous run option.").replace(value);
     renderPresetScriptStrategy();
     setPresetError("");
   } catch (error) {
-    setPresetError(error.message);
+    setPresetError(t(error.message));
   }
 }
 

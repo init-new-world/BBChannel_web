@@ -251,6 +251,7 @@ const zh = {
   "Invalid NP edit.": "宝具编辑无效。",
   "Ambiguous NP field.": "宝具字段含义不明确。",
   "Ambiguous strategy field.": "策略字段含义不明确。",
+  "Ambiguous run option.": "运行参数字段含义不明确。",
   "Selected strategy preset is invalid or empty.": "所选策略预设无效或为空。",
   "Replace the current turn strategies?": "替换当前回合的策略？",
   "Clear strategies for this turn?": "清空此回合的策略？",
