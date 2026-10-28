@@ -1,22 +1,8 @@
-import { applyEdits, modify, parseTree } from "./vendor/jsonc-parser.js";
+import { readJsonField } from "./json-source.js";
 import { changeSkillSequence, readBasicSkills, skillField } from "./turn-skills-model.js";
 
 function document(source, strategyField) {
-  const field = skillField(strategyField);
-  if (typeof source !== "string") throw new Error("Invalid script JSON.");
-  const errors = [];
-  let root;
-  try {
-    root = parseTree(source, errors, { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false });
-  } catch {
-    throw new Error("Invalid script JSON.");
-  }
-  if (errors.length || root?.type !== "object") throw new Error("Invalid script JSON.");
-  const properties = root.children.filter((property) => property.children[0].value === field);
-  if (properties.length > 1) throw new Error("Ambiguous skill field.");
-  const node = properties[0]?.children[1];
-  const value = node ? JSON.parse(source.slice(node.offset, node.offset + node.length)) : undefined;
-  return { field, node, value };
+  return readJsonField(source, skillField(strategyField), "Ambiguous skill field.");
 }
 
 function basicCommands(source, entry) {
@@ -53,10 +39,5 @@ export function changeSkillSource(source, strategyField, edit) {
   const entry = document(source, strategyField);
   const value = edit?.type === "clear" ? entry.value : basicCommands(source, entry);
   const next = changeSkillSequence(value, edit);
-  if (entry.node) {
-    return applyEdits(source, [{ offset: entry.node.offset, length: entry.node.length, content: JSON.stringify(next) }]);
-  }
-  return applyEdits(source, modify(source, [entry.field], next, {
-    formattingOptions: { insertSpaces: true, tabSize: 2, eol: source.includes("\r\n") ? "\r\n" : "\n" },
-  }));
+  return entry.replace(next);
 }

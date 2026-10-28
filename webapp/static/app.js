@@ -4,6 +4,7 @@ import { createPresetEquipEditor } from "./preset-equips.js";
 import { createPresetSettlementEditor } from "./preset-settlement.js";
 import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
+import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
@@ -2058,10 +2059,10 @@ function renderPresetScriptStrategy() {
   const editor = state.presetEditor;
   const isSetting = editor?.kind === "settings";
   els.presetScriptStrategy.hidden = !isSetting;
-  renderPresetTurnNps(null, "");
   updatePresetSaveState();
   if (!isSetting) {
     els.presetScriptStrategy.disabled = true;
+    renderPresetTurnNps(null, "");
     presetTurnSkills.render("");
     return;
   }
@@ -2073,6 +2074,7 @@ function renderPresetScriptStrategy() {
     targets = scriptStrategyTargets(config);
   } catch (error) {
     els.presetScriptStrategy.disabled = true;
+    renderPresetTurnNps(null, "");
     presetTurnSkills.render("");
     els.presetTurnStrategyStatus.textContent = error instanceof SyntaxError ? t("Invalid script JSON.") : error.message;
     return;
@@ -2210,40 +2212,35 @@ function turnNpField(target) {
   return /^round[0-9]+_turn[0-9]+_strategy$/.test(target) ? target.replace(/_strategy$/, "_np") : "";
 }
 
-function readTurnNps(config, field) {
-  const nps = Object.hasOwn(config, field) ? config[field] : [];
-  if (!Array.isArray(nps) || nps.length > 3 || new Set(nps).size !== nps.length
-      || nps.some((value) => !Number.isInteger(value) || value < 1 || value > 3)) {
-    throw new Error("Invalid NP sequence.");
-  }
-  return [...nps];
-}
-
 function renderPresetTurnNps(config, target) {
   const field = turnNpField(target);
   els.presetTurnNps.hidden = !field;
   els.presetTurnNpStatus.hidden = true;
   els.presetTurnNpStatus.textContent = "";
   els.clearTurnNps.disabled = true;
-  els.presetTurnNpInputs.forEach((input) => { input.disabled = true; });
-  if (!field || !config) return;
-  const value = config[field];
-  els.clearTurnNps.disabled = !Object.hasOwn(config, field) || (Array.isArray(value) && !value.length);
+  if (!field || !config) {
+    els.presetTurnNpInputs.forEach((input) => { input.disabled = true; });
+    return;
+  }
   try {
-    const nps = readTurnNps(config, field);
+    editableScriptWaves(config);
+    const info = inspectNpSource(els.presetJson.value, target);
+    els.clearTurnNps.disabled = !info.canClear;
+    if (info.error) throw new Error(info.error);
+    const nps = info.nps;
     els.presetTurnNpInputs.forEach((input, index) => {
       input.replaceChildren(...[0, 1, 2, 3].map((servant) => {
         const option = document.createElement("option");
         option.value = String(servant);
-        option.textContent = servant ? `NP ${servant}` : "None";
+        option.textContent = servant ? t("NP {slot}", { slot: servant }) : t("None");
         return option;
       }));
       input.value = String(nps[index] || 0);
       input.disabled = index > nps.length;
     });
   } catch (error) {
-    els.presetTurnNpInputs.forEach((input) => { input.value = "0"; });
-    els.presetTurnNpStatus.textContent = error.message;
+    els.presetTurnNpInputs.forEach((input) => { input.disabled = true; input.value = "0"; });
+    els.presetTurnNpStatus.textContent = t(error.message);
     els.presetTurnNpStatus.hidden = false;
   }
 }
@@ -2256,30 +2253,20 @@ function updateTurnNps(event) {
     const { config, field: target } = readScriptStrategyTarget();
     const field = turnNpField(target);
     if (!field) return;
-    let nps = [];
+    editableScriptWaves(config);
+    let edit = { type: "clear" };
     if (event) {
       const input = event.currentTarget;
       if (input.disabled) return;
-      nps = readTurnNps(config, field);
-      const index = Number(input.dataset.turnNpIndex);
-      const servant = Number(input.value);
-      if (servant === 0) {
-        nps.splice(index, 1);
-      } else {
-        const previousIndex = nps.indexOf(servant);
-        if (previousIndex !== -1) nps[previousIndex] = nps[index];
-        nps[index] = servant;
-        nps = nps.filter((value) => value !== undefined);
-      }
-    } else if (els.clearTurnNps.disabled || !window.confirm("Clear Noble Phantasms for this turn?")) {
+      edit = { type: "select", index: Number(input.dataset.turnNpIndex), servant: Number(input.value) };
+    } else if (els.clearTurnNps.disabled || !window.confirm(t("Clear Noble Phantasms for this turn?"))) {
       return;
     }
-    config[field] = nps;
-    els.presetJson.value = JSON.stringify(config, null, 2);
+    els.presetJson.value = changeNpSource(els.presetJson.value, target, edit);
     renderPresetScriptStrategy();
     setPresetError("");
   } catch (error) {
-    setPresetError(error.message);
+    setPresetError(t(error.message));
   }
 }
 
