@@ -15,8 +15,9 @@ export function decodeBasicSkill(value) {
   if (paired && value.length !== 2) return null;
   const skill = paired ? value[0] : value;
   const target = paired ? value[1] : null;
-  if (!Number.isInteger(skill) || skill < 1 || skill > 12
-      || (target !== null && (!Number.isInteger(target) || target < 1 || target > 3))) return null;
+  if (!Number.isInteger(skill) || skill < 1 || skill > 13
+      || (skill === 13 && target === null)
+      || (target !== null && (!Number.isInteger(target) || target < 1 || target > (skill === 13 ? 6 : 3)))) return null;
   return { skill, target };
 }
 
@@ -29,8 +30,9 @@ export function readBasicSkills(value) {
 }
 
 function command(skill, target = null) {
-  if (!Number.isInteger(skill) || skill < 1 || skill > 12) throw new Error("Select a valid skill.");
-  if (target !== null && (!Number.isInteger(target) || target < 1 || target > 3)) {
+  if (!Number.isInteger(skill) || skill < 1 || skill > 13) throw new Error("Select a valid skill.");
+  if ((skill === 13 && target === null)
+      || (target !== null && (!Number.isInteger(target) || target < 1 || target > (skill === 13 ? 6 : 3)))) {
     throw new Error("Select a valid skill target.");
   }
   return target === null ? skill : [skill, target];

@@ -72,7 +72,7 @@ def test_turn_skill_edits_keep_order_targets_other_turns_and_numeric_source(tag_
     page.close()
 
 
-@pytest.mark.parametrize("value", [None, "legacy", [True], [1.0], [[1, 2.0]], [1, [13, 2]], [1, ["Start", 1, []], 2, "End"]])
+@pytest.mark.parametrize("value", [None, "legacy", [True], [1.0], [[1, 2.0]], [1, [13, 0]], [1, ["Start", 1, []], 2, "End"]])
 def test_legacy_and_advanced_skills_stay_read_only_until_explicit_clear(tag_console, value):
     browser, url, _directory = tag_console
     page = browser.new_page()

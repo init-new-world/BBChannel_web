@@ -53,13 +53,14 @@ def test_skill_field_rejects_noncanonical_or_unsafe_turn_keys(field):
     (1, {"skill": 1, "target": None}), (12, {"skill": 12, "target": None}),
     ([5, 2], {"skill": 5, "target": 2}), ([10, 3], {"skill": 10, "target": 3}),
     ([1, None], {"skill": 1, "target": None}),
+    ([13, 1], {"skill": 13, "target": 1}), ([13, 6], {"skill": 13, "target": 6}),
 ])
 def test_basic_skill_decoder_follows_compiler_number_and_target_rules(value, expected):
     assert _run("decode", value=value)["result"] == expected
 
 
 @pytest.mark.parametrize("value", [True, "1", 1.5, -1, 0, 13, {}, [1], [1, False], [1, 4], [1, 1, 2],
-                                   [13, 2], ["Start", 1, []], ["Hakuno", 1, []]])
+                                   [13, None], [13, 0], [13, 7], [13, True], ["Start", 1, []], ["Hakuno", 1, []]])
 def test_basic_skill_decoder_never_coerces_advanced_or_malformed_commands(value):
     assert _run("decode", value=value)["result"] is None
 
@@ -70,11 +71,11 @@ def test_absent_skill_sequence_can_be_edited_without_manufacturing_commands_on_r
 
 
 def test_reading_basic_sequences_preserves_existing_command_representations():
-    value = [1, [5, 2], [12, None]]
+    value = [1, [5, 2], [12, None], [13, 6]]
     assert _run("read", value=value)["result"] == value
 
 
-@pytest.mark.parametrize("value", [None, "1", False, {"future": 1}, [1, [13, 2]], [1, ["Start", 1, []], 2, "End"]])
+@pytest.mark.parametrize("value", [None, "1", False, {"future": 1}, [1, [13, 0]], [1, ["Start", 1, []], 2, "End"]])
 def test_legacy_or_advanced_sequences_are_read_only_until_explicit_clear(value):
     assert _run("read", value=value)["error"]
     assert _run("edit", value=value, edit={"type": "add"})["error"]
@@ -88,6 +89,8 @@ def test_legacy_or_advanced_sequences_are_read_only_until_explicit_clear(value):
     ({"type": "move", "index": 0, "to": 1}, [[5, 2], 1]),
     ({"type": "remove", "index": 1}, [1]),
     ({"type": "clear"}, []),
+    ({"type": "add", "skill": 13, "target": 6}, [1, [5, 2], [13, 6]]),
+    ({"type": "update", "index": 0, "skill": 13, "target": 1}, [[13, 1], [5, 2]]),
 ])
 def test_basic_skill_edits_preserve_order_and_do_not_mutate_source(edit, expected):
     assert _run("edit", value=[1, [5, 2]], edit=edit)["result"] == expected
@@ -99,6 +102,7 @@ def test_basic_skill_edits_preserve_order_and_do_not_mutate_source(edit, expecte
     {"type": "move", "index": 0, "to": 0.5}, {"type": "add", "skill": False},
     {"type": "add", "skill": 13}, {"type": "add", "skill": 1, "target": 4},
     {"type": "add", "skill": 1, "target": False}, {"type": "unknown"},
+    {"type": "add", "skill": 13, "target": None}, {"type": "add", "skill": 13, "target": 7},
 ])
 def test_invalid_edits_never_modify_the_existing_skill_sequence(edit):
     assert _run("edit", value=[1, [5, 2]], edit=edit)["error"]

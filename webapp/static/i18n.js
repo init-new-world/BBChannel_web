@@ -199,6 +199,8 @@ const zh = {
   "Clear the selected skill sequence?": "清空选中的技能顺序？",
   "Skill {index}": "技能 {index}",
   "Skill target": "技能目标",
+  "Enemy target": "敌方目标",
+  "Enemy {slot}": "敌方 {slot}",
   "No target": "无目标",
   "Servant {slot}": "从者 {slot}",
   "Servant {slot} / Skill {skill}": "从者 {slot} / 技能 {skill}",

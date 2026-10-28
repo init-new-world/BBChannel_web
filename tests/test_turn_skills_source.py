@@ -29,7 +29,7 @@ def _run(action, source, field="round1_turn0_strategy", edit=None):
     return json.loads(response.stdout)
 
 
-@pytest.mark.parametrize("sequence", ["[1.0]", "[1e0]", "[[1.0,2]]", "[[1,2.0]]", "[[1,2e0]]"])
+@pytest.mark.parametrize("sequence", ["[1.0]", "[1e0]", "[[1.0,2]]", "[[1,2.0]]", "[[1,2e0]]", "[[13.0,2]]", "[[13,2.0]]"])
 def test_integral_float_tokens_remain_read_only_like_the_python_compiler(sequence):
     source = '{"round1_turn0_skill":' + sequence + ',"metadata":{"float":1.0,"large":9007199254740993}}'
     state = _run("inspect", source)["result"]
@@ -51,6 +51,7 @@ def test_integral_float_tokens_remain_read_only_like_the_python_compiler(sequenc
     ({"type": "move", "index": 1, "to": 0}, [[5, 2], 1]),
     ({"type": "remove", "index": 0}, [[5, 2]]),
     ({"type": "clear"}, []),
+    ({"type": "add", "skill": 13, "target": 6}, [1, [5, 2], [13, 6]]),
 ])
 def test_existing_skill_edits_only_replace_the_selected_value_span(edit, expected):
     prefix = '{\n "metadata":{"float":1.0,"large":9007199254740993,"name":"原文"},\n "round1_turn0_skill": '
