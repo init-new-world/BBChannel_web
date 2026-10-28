@@ -10,8 +10,19 @@ export function skillField(strategyField) {
   return match[3] ? strategyField.replace(/extraStrategy$/, "extraSkill") : strategyField.replace(/_strategy$/, "_skill");
 }
 
+function validExchange(skill, positions) {
+  return Number.isInteger(skill) && skill >= 10 && skill <= 12
+    && Array.isArray(positions) && positions.length === 2
+    && positions.every((position) => Number.isInteger(position) && position >= 1 && position <= 6)
+    && (positions[0] <= 3) !== (positions[1] <= 3);
+}
+
 export function decodeBasicSkill(value) {
   const paired = Array.isArray(value);
+  if (paired && value.length === 3) {
+    const [skill, ...swap] = value;
+    return validExchange(skill, swap) ? { skill, target: null, swap } : null;
+  }
   if (paired && value.length !== 2) return null;
   const skill = paired ? value[0] : value;
   const target = paired ? value[1] : null;
@@ -29,8 +40,12 @@ export function readBasicSkills(value) {
   return value;
 }
 
-function command(skill, target = null) {
+function command(skill, target = null, swap) {
   if (!Number.isInteger(skill) || skill < 1 || skill > 13) throw new Error("Select a valid skill.");
+  if (swap !== undefined) {
+    if (target !== null || !validExchange(skill, swap)) throw new Error("Select a frontline and a reserve servant.");
+    return [skill, ...swap];
+  }
   if ((skill === 13 && target === null)
       || (target !== null && (!Number.isInteger(target) || target < 1 || target > (skill === 13 ? 6 : 3)))) {
     throw new Error("Select a valid skill target.");
@@ -49,9 +64,9 @@ export function changeSkillSequence(value, edit) {
   const next = readBasicSkills(value).slice();
   if (edit.type === "add") {
     if (next.length >= MAX_SKILL_COMMANDS) throw new Error("Skill sequence exceeds 1,000 entries.");
-    next.push(command(edit.skill === undefined ? 1 : edit.skill, edit.target));
+    next.push(command(edit.skill === undefined ? 1 : edit.skill, edit.target, edit.swap));
   } else if (edit.type === "update") {
-    next[entryIndex(edit.index, next.length)] = command(edit.skill, edit.target);
+    next[entryIndex(edit.index, next.length)] = command(edit.skill, edit.target, edit.swap);
   } else if (edit.type === "remove") {
     next.splice(entryIndex(edit.index, next.length), 1);
   } else if (edit.type === "move") {

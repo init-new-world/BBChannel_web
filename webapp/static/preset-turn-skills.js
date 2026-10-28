@@ -19,10 +19,22 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     return node;
   }
 
+  function positionSelect(part, label, slots, value) {
+    const select = document.createElement("select");
+    select.className = "field";
+    select.dataset.turnSkillPart = part;
+    select.setAttribute("aria-label", t(label));
+    for (const slot of slots) select.append(option(String(slot), t("Servant {slot}", { slot })));
+    select.value = String(value);
+    select.title = `${t(label)}: ${select.selectedOptions[0].textContent}`;
+    return select;
+  }
+
   function row(command, index, length) {
     const value = decodeBasicSkill(command);
     const item = document.createElement("div");
     item.className = "turn-skill-row";
+    item.classList.toggle("turn-skill-exchange", Boolean(value.swap));
     item.dataset.turnSkillIndex = String(index);
     item.setAttribute("role", "group");
     item.setAttribute("aria-label", t("Skill {index}", { index: index + 1 }));
@@ -36,19 +48,39 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         : number <= 12 ? t("Master / Skill {skill}", { skill: number - 9 }) : t("Enemy target");
       skill.append(option(String(number), label));
     }
-    skill.value = String(value.skill);
-    skill.title = skill.selectedOptions[0].textContent;
-    const target = document.createElement("select");
-    target.className = "field";
-    target.dataset.turnSkillPart = "target";
-    const enemy = value.skill === 13;
-    target.setAttribute("aria-label", t(enemy ? "Enemy target" : "Skill target"));
-    if (!enemy) target.append(option("", t("No target")));
-    for (let slot = 1; slot <= (enemy ? 6 : 3); slot += 1) {
-      target.append(option(String(slot), t(enemy ? "Enemy {slot}" : "Servant {slot}", { slot })));
+    for (let number = 10; number <= 12; number += 1) {
+      skill.append(option(`swap:${number}`, t("Order change / Skill {skill}", { skill: number - 9 })));
     }
-    target.value = value.target === null ? "" : String(value.target);
-    target.title = target.selectedOptions[0].textContent;
+    skill.value = value.swap ? `swap:${value.skill}` : String(value.skill);
+    skill.title = skill.selectedOptions[0].textContent;
+    let target;
+    if (value.swap) {
+      target = document.createElement("div");
+      target.className = "turn-skill-exchange-targets";
+      for (const [part, label, slots, position] of [
+        ["front", "Frontline", [1, 2, 3], value.swap.find((slot) => slot <= 3)],
+        ["reserve", "Reserve", [4, 5, 6], value.swap.find((slot) => slot > 3)],
+      ]) {
+        const field = document.createElement("label");
+        field.className = "field-stack";
+        const heading = document.createElement("span");
+        heading.textContent = t(label);
+        field.append(heading, positionSelect(part, label, slots, position));
+        target.append(field);
+      }
+    } else {
+      target = document.createElement("select");
+      target.className = "field";
+      target.dataset.turnSkillPart = "target";
+      const enemy = value.skill === 13;
+      target.setAttribute("aria-label", t(enemy ? "Enemy target" : "Skill target"));
+      if (!enemy) target.append(option("", t("No target")));
+      for (let slot = 1; slot <= (enemy ? 6 : 3); slot += 1) {
+        target.append(option(String(slot), t(enemy ? "Enemy {slot}" : "Servant {slot}", { slot })));
+      }
+      target.value = value.target === null ? "" : String(value.target);
+      target.title = target.selectedOptions[0].textContent;
+    }
     const tools = document.createElement("div");
     tools.className = "turn-skill-tools";
     for (const [action, icon, label, disabled] of [
@@ -138,11 +170,21 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const item = select?.closest("[data-turn-skill-index]");
     if (!item) return;
     const index = Number(item.dataset.turnSkillIndex);
-    const skill = Number(item.querySelector('[data-turn-skill-part="skill"]').value);
-    const selectedTarget = item.querySelector('[data-turn-skill-part="target"]').value;
-    let target = selectedTarget === "" ? null : Number(selectedTarget);
+    const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
+    const exchange = selection.startsWith("swap:");
+    const skill = Number(exchange ? selection.slice(5) : selection);
     const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
-    if (select.dataset.turnSkillPart === "skill" && previous && (previous.skill === 13) !== (skill === 13)) {
+    if (exchange) {
+      const swap = select.dataset.turnSkillPart === "skill" ? previous?.swap || [1, 4]
+        : [Number(item.querySelector('[data-turn-skill-part="front"]').value),
+          Number(item.querySelector('[data-turn-skill-part="reserve"]').value)];
+      edit({ type: "update", index, skill, swap }, index, select.dataset.turnSkillPart);
+      return;
+    }
+    const selectedTarget = item.querySelector('[data-turn-skill-part="target"]')?.value || "";
+    let target = selectedTarget === "" ? null : Number(selectedTarget);
+    if (select.dataset.turnSkillPart === "skill" && previous
+        && (previous.swap || (previous.skill === 13) !== (skill === 13))) {
       target = skill === 13 ? 1 : null;
     }
     edit({ type: "update", index, skill, target }, index, select.dataset.turnSkillPart);
