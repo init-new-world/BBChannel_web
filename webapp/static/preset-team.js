@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { editTeamSource, editUsedServantsSource, inspectTeamSource } from "./team-source.js";
 
 export function createPresetTeamEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-team");
@@ -74,6 +75,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     assistSlot.replaceChildren(...options);
     if (invalid) assistSlot.selectedIndex = options.length - 1;
     else assistSlot.value = value == null ? "" : String(value);
+    assistSlot.title = assistSlot.selectedOptions[0]?.textContent || "";
   }
 
   async function loadCatalog(editor, catalog) {
@@ -147,17 +149,27 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
         : masters.length ? t("{count} outfits", { count: masters.length }) : t("No outfits available");
   }
 
-  function renderUsed(config) {
-    const configured = config.usedServant === undefined ? [0, 1, 2] : config.usedServant;
-    const valid = Array.isArray(configured);
+  function renderUsed(state, ambiguous) {
     usedSlots.forEach((input) => {
-      input.checked = valid && configured.includes(Number(input.dataset.teamUsed));
-      input.disabled = !valid;
+      input.checked = state.valid && state.slots.includes(Number(input.dataset.teamUsed));
+      input.disabled = !state.valid;
+      input.title = ambiguous ? t("Ambiguous team field.") : "";
     });
-    usedStatus.textContent = !valid ? t("Invalid usedServant value.")
-      : configured.some((slot) => !Number.isInteger(slot) || slot < 0 || slot > 5)
-        ? t("Unrecognized entries retained.") : "";
+    usedStatus.textContent = ambiguous ? t("Ambiguous team field.")
+      : !state.valid ? t("Invalid usedServant value.")
+        : state.unrecognized ? t("Unrecognized entries retained.") : "";
     usedStatus.hidden = !usedStatus.textContent;
+  }
+
+  function protectAmbiguous(editor, fields) {
+    const ambiguous = new Set(fields);
+    const selections = [[serverSelect, "server", false], [masterSex, "master_sex", false],
+      [assistSlot, "assistIdx", false], [master, "master_equip", editor.masterCatalog?.state !== "ready"],
+      ...slots.map((select) => [select, `servant_${select.dataset.teamSlot}_name`, editor.teamCatalog?.state !== "ready"])];
+    for (const [select, field, unavailable] of selections) {
+      select.disabled = unavailable || ambiguous.has(field);
+      if (ambiguous.has(field)) select.title = t("Ambiguous team field.");
+    }
   }
 
   function renderMasterSex(config) {
@@ -214,8 +226,10 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     }
     retry.hidden = true;
     let config;
+    let info;
     try {
       config = readConfig();
+      info = inspectTeamSource(source.value);
     } catch {
       editor.teamCatalog = null;
       controls.disabled = true;
@@ -233,12 +247,13 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     renderMasters(config, editor);
     renderMasterSex(config);
     renderMasterPortrait(config, editor);
-    renderUsed(config);
+    renderUsed(info.used, info.ambiguous.includes("usedServant"));
     const server = typeof config.server === "string" ? config.server.toUpperCase() : "";
     if (!["CH", "CNTW", "JP"].includes(server)) {
       editor.teamCatalog = null;
       renderSlots(config, null);
       status.textContent = t("Unsupported server.");
+      protectAmbiguous(editor, info.ambiguous);
       return;
     }
     let catalog = editor.teamCatalog;
@@ -252,6 +267,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     status.textContent = catalog.state === "loading" ? t("Loading {server} servants...", { server })
       : catalog.state === "error" ? catalog.error
         : t("{count} servants ({server})", { count: catalog.servants.length, server });
+    protectAmbiguous(editor, info.ambiguous);
   }
 
   function update(event) {
@@ -260,30 +276,37 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy
         || controls.disabled || select.disabled || select.selectedOptions[0]?.disabled) return;
     try {
-      const config = readConfig();
+      let field;
+      let value;
+      let removing = false;
       if (select === serverSelect) {
-        if (select.value === "") delete config.server;
-        else config.server = select.value;
+        field = "server";
+        removing = select.value === "";
+        value = select.value;
       } else if (select === master) {
-        if (select.value === "") delete config.master_equip;
-        else {
+        field = "master_equip";
+        removing = select.value === "";
+        if (!removing) {
           const selected = editor.masterCatalog?.masters?.find((item) => String(item.sn) === select.value);
           if (!selected) return;
-          config.master_equip = selected.sn;
+          value = selected.sn;
         }
       } else if (select === masterSex) {
         if (!["0", "1"].includes(select.value)) return;
-        config.master_sex = Number(select.value);
+        field = "master_sex";
+        value = Number(select.value);
       } else if (select === assistSlot) {
-        if (select.value === "") delete config.assistIdx;
-        else config.assistIdx = Number(select.value);
+        field = "assistIdx";
+        removing = select.value === "";
+        value = Number(select.value);
       } else {
-        config[`servant_${select.dataset.teamSlot}_name`] = select.value;
+        field = `servant_${select.dataset.teamSlot}_name`;
+        value = select.value;
       }
-      source.value = JSON.stringify(config, null, 2);
+      source.value = editTeamSource(source.value, { type: removing ? "remove" : "set", field, value });
       onChange(select === serverSelect ? "server" : undefined);
     } catch (error) {
-      onError(error.message);
+      onError(t(error.message));
     }
   }
 
@@ -293,17 +316,11 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy
         || controls.disabled || input.disabled) return;
     try {
-      const config = readConfig();
-      const configured = config.usedServant === undefined ? [0, 1, 2] : config.usedServant;
-      if (!Array.isArray(configured)) return;
       const slot = Number(input.dataset.teamUsed);
-      const next = configured.filter((value) => value !== slot);
-      if (input.checked) next.push(slot);
-      config.usedServant = next;
-      source.value = JSON.stringify(config, null, 2);
+      source.value = editUsedServantsSource(source.value, slot, input.checked);
       onChange();
     } catch (error) {
-      onError(error.message);
+      onError(t(error.message));
     }
   }
 

@@ -30,6 +30,11 @@ export function readJsonField(source, field, ambiguityError) {
         formattingOptions: { insertSpaces: true, tabSize: 2, eol: source.includes("\r\n") ? "\r\n" : "\n" },
       }));
     },
+    remove() {
+      return applyEdits(source, modify(source, [field], undefined, {
+        formattingOptions: { insertSpaces: true, tabSize: 2, eol: source.includes("\r\n") ? "\r\n" : "\n" },
+      }));
+    },
     replaceSource(nextSource) {
       parseJsonSource(nextSource);
       if (node) {
