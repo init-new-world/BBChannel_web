@@ -19,6 +19,8 @@ def test_operator_console_static_files_exist():
     assert (STATIC_DIR / "kukulkan-model.js").is_file()
     assert (STATIC_DIR / "third-skill-model.js").is_file()
     assert (STATIC_DIR / "skill-variants-model.js").is_file()
+    assert (STATIC_DIR / "hakuno-needs-model.js").is_file()
+    assert (STATIC_DIR / "preset-hakuno-needs.js").is_file()
     assert (STATIC_DIR / "turn-nps-source.js").is_file()
     assert (STATIC_DIR / "turn-strategies-source.js").is_file()
     assert (STATIC_DIR / "json-source.js").is_file()

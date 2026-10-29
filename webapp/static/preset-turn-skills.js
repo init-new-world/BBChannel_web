@@ -6,6 +6,10 @@ import { KUKULKAN_SKILL, kukulkanNeedsTarget } from "./kukulkan-model.js";
 import { THIRD_SKILL_NAMES, thirdSkillOptions } from "./third-skill-model.js";
 import { SKILL_VARIANT_NAMES, skillVariantAvailable, skillVariantNumbers, skillVariantOptions } from "./skill-variants-model.js";
 import { readJsonField } from "./json-source.js";
+import { HAKUNO_SKILL } from "./hakuno-needs-model.js";
+import { createHakunoNeedsControls } from "./preset-hakuno-needs.js";
+
+const HAKUNO_NEEDS_PREFIX = "HakunoNeeds:";
 
 const THIRD_SKILL_LABELS = { Barghest: "UDK-Barghest", BBDubai: "BB Dubai", Soujyuro: "Soujyuro", Hakuno: "Hakuno" };
 const THIRD_OPTION_LABELS = { Q: "Quick", A: "Arts", B: "Buster", T: "Sky", D: "Earth", R: "Human" };
@@ -38,6 +42,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
   const count = document.querySelector("#preset-turn-skill-count");
   const add = document.querySelector("#add-turn-skill");
   const clear = document.querySelector("#clear-turn-skills");
+  const hakunoControls = createHakunoNeedsControls();
   let rendered = null;
 
   function option(value, label) {
@@ -58,13 +63,14 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     return select;
   }
 
-  function row(command, index, length, server) {
+  function row(command, index, length, { server, config, field, editor }) {
     const value = decodeBasicSkill(command);
     const item = document.createElement("div");
     item.className = "turn-skill-row";
     item.classList.toggle("turn-skill-exchange", Boolean(value.swap));
     item.classList.toggle("turn-skill-color", value.choice !== undefined);
     item.classList.toggle("turn-skill-named", Boolean(value.named));
+    item.classList.toggle("turn-skill-hakuno", value.needs !== undefined);
     item.dataset.turnSkillIndex = String(index);
     item.setAttribute("role", "group");
     item.setAttribute("aria-label", t("Skill {index}", { index: index + 1 }));
@@ -112,10 +118,16 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         skill.append(entry);
       }
     }
-    skill.value = value.named ? `${value.named}:${value.skill}` : value.swap ? `swap:${value.skill}` : String(value.skill);
+    for (const number of [1, 4, 7]) {
+      skill.append(option(`${HAKUNO_NEEDS_PREFIX}${number}`, t("Hakuno Cards / Slot {slot} / Skill 1", { slot: (number + 2) / 3 })));
+    }
+    skill.value = value.needs !== undefined ? `${HAKUNO_NEEDS_PREFIX}${value.skill}`
+      : value.named ? `${value.named}:${value.skill}` : value.swap ? `swap:${value.skill}` : String(value.skill);
     skill.title = skill.selectedOptions[0].title || skill.selectedOptions[0].textContent;
     let target;
-    if (value.swap) {
+    if (value.needs !== undefined) {
+      target = hakunoControls.render({ needs: value.needs, index, field, config, editor });
+    } else if (value.swap) {
       target = document.createElement("div");
       target.className = "turn-skill-exchange-targets";
       for (const [part, label, slots, position] of [
@@ -251,10 +263,12 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     try {
       if (editor?.kind !== "settings" || !target) throw new Error("No turn selected");
       if (rendered?.editor !== editor || rendered.source !== source.value || rendered.target !== target) {
-        validateConfig(JSON.parse(source.value));
+        const config = JSON.parse(source.value);
+        validateConfig(config);
         const info = inspectSkillSource(source.value, target);
         const server = variantServer(source.value);
-        list.replaceChildren(...(info.commands || []).map((command, index) => row(command, index, info.commands.length, server)));
+        const context = { server, config, field: target, editor };
+        list.replaceChildren(...(info.commands || []).map((command, index) => row(command, index, info.commands.length, context)));
         rendered = { editor, source: source.value, target, info };
       }
       controls.disabled = Boolean(editor.saving || editor.strategyApplyBusy);
@@ -283,13 +297,32 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       if (rendered?.editor !== editor || rendered.source !== source.value || rendered.target !== field) {
         throw new Error("Skill sequence changed.");
       }
-      source.value = changeSkillSource(source.value, field, change);
-      onChange();
+      if (change.type === "needs-group" || change.type === "needs-action") {
+        const value = decodeBasicSkill(rendered.info.commands?.[change.index]);
+        if (value?.needs === undefined) throw new Error("Skill sequence changed.");
+        const context = { needs: value.needs, index: change.index, field, config, editor };
+        if (change.type === "needs-group") {
+          hakunoControls.select(context, change.group);
+          list.querySelector(`[data-turn-skill-index="${change.index}"] .turn-skill-hakuno-controls`)
+            .replaceWith(hakunoControls.render(context));
+        } else {
+          const result = hakunoControls.change(context, change);
+          part = result.part;
+          source.value = changeSkillSource(source.value, field, { type: "update", index: change.index, named: HAKUNO_SKILL, skill: value.skill, needs: result.needs });
+          onChange();
+        }
+      } else {
+        if (["move", "remove", "clear"].includes(change.type)) hakunoControls.forget(field);
+        if (change.needs !== undefined) hakunoControls.activate(field, change.index, editor);
+        source.value = changeSkillSource(source.value, field, change);
+        onChange();
+      }
       if (getEditor() !== editor) return;
       const item = list.querySelector(`[data-turn-skill-index="${Math.max(focusIndex, 0)}"]`)
         || list.lastElementChild;
       const focus = item?.querySelector(`[data-turn-skill-part="${part}"]`) || add;
       focus.focus({ preventScroll: true });
+      if (part.startsWith("needs-")) focus.scrollIntoView({ block: "nearest" });
     } catch (error) {
       onError(t(error.message));
     }
@@ -307,12 +340,20 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     if (!item || control.selectedOptions?.[0]?.disabled) return;
     const index = Number(item.dataset.turnSkillIndex);
     const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
+    const needsMode = selection.startsWith(HAKUNO_NEEDS_PREFIX);
     const named = [KUKULKAN_SKILL, ...THIRD_SKILL_NAMES, ...SKILL_VARIANT_NAMES].find((name) => selection.startsWith(`${name}:`));
     const exchange = selection.startsWith("swap:");
     const spell = isCommandSpell(selection);
-    const skill = named ? Number(selection.slice(named.length + 1))
+    const skill = needsMode ? Number(selection.slice(HAKUNO_NEEDS_PREFIX.length)) : named ? Number(selection.slice(named.length + 1))
       : exchange ? Number(selection.slice(5)) : spell ? selection : Number(selection);
     const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
+    if (needsMode) {
+      const part = control.dataset.turnSkillPart;
+      if (part === "skill") edit({ type: "update", index, named: HAKUNO_SKILL, skill, needs: previous?.needs ?? [] }, index);
+      else if (part === "needs-group") edit({ type: "needs-group", index, group: Number(control.value) }, index, part);
+      else if (part.startsWith("needs-card-")) edit({ type: "needs-action", index, action: "update-card", card: Number(part.slice(11)), code: control.value }, index, part);
+      return;
+    }
     if (named === KUKULKAN_SKILL) {
       const sameKind = previous?.named === KUKULKAN_SKILL;
       const changingSkill = control.dataset.turnSkillPart === "skill";
@@ -326,7 +367,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     }
     if (named) {
       const option = control.dataset.turnSkillPart === "skill"
-        ? previous?.named === named ? previous.option : namedOptions(named)[0]
+        ? previous?.named === named && previous.needs === undefined ? previous.option : namedOptions(named)[0]
         : named === "Barghest" ? control.checked ? 1 : 0 : control.value;
       edit({ type: "update", index, named, skill, option }, index, control.dataset.turnSkillPart);
       return;
@@ -354,6 +395,14 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     edit({ type: "update", index, skill, target }, index, control.dataset.turnSkillPart);
   });
   list.addEventListener("click", (event) => {
+    const needs = event.target.closest("button[data-hakuno-needs-action]");
+    if (needs) {
+      if (needs.disabled) return;
+      const index = Number(needs.closest("[data-turn-skill-index]").dataset.turnSkillIndex);
+      edit({ type: "needs-action", index, action: needs.dataset.hakunoNeedsAction,
+        card: needs.dataset.hakunoCardIndex === undefined ? undefined : Number(needs.dataset.hakunoCardIndex) }, index);
+      return;
+    }
     const option = event.target.closest("button[data-turn-skill-option]");
     if (option) {
       if (option.disabled) return;

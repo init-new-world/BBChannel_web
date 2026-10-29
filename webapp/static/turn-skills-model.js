@@ -2,6 +2,7 @@ import { decodeSpecialSkill, makeSpecialSkill } from "./special-skills-model.js"
 import { decodeKukulkan, KUKULKAN_SKILL, makeKukulkan } from "./kukulkan-model.js";
 import { decodeThirdSkill, makeThirdSkill } from "./third-skill-model.js";
 import { decodeSkillVariant, makeSkillVariant, SKILL_VARIANT_NAMES } from "./skill-variants-model.js";
+import { decodeHakunoNeeds, HAKUNO_SKILL, makeHakunoNeeds } from "./hakuno-needs-model.js";
 
 export const MAX_SKILL_COMMANDS = 1000;
 export const COMMAND_SPELLS = Object.freeze({
@@ -31,7 +32,7 @@ function validExchange(skill, positions) {
 }
 
 export function decodeBasicSkill(value) {
-  const named = decodeKukulkan(value) || decodeThirdSkill(value) || decodeSkillVariant(value);
+  const named = decodeKukulkan(value) || decodeThirdSkill(value) || decodeSkillVariant(value) || decodeHakunoNeeds(value);
   if (named) return named;
   const special = decodeSpecialSkill(value);
   if (special) return special;
@@ -61,7 +62,13 @@ export function readBasicSkills(value) {
 }
 
 function command(edit) {
-  const { skill, target = null, swap, choice, named, option } = edit;
+  const { skill, target = null, swap, choice, named, option, needs } = edit;
+  if (needs !== undefined) {
+    if (named !== HAKUNO_SKILL || target !== null || swap !== undefined || choice !== undefined || option !== undefined) {
+      throw new Error("Select valid Hakuno card parameters.");
+    }
+    return makeHakunoNeeds(skill, needs);
+  }
   if (named !== undefined || option !== undefined) {
     if (swap !== undefined || choice !== undefined) {
       throw new Error("Select valid named-skill parameters.");

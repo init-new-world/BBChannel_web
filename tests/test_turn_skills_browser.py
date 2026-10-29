@@ -15,7 +15,7 @@ def _open(page, url):
     page.locator("#edit-setting").click()
     section = page.locator("#preset-turn-skills")
     playwright.expect(section).to_be_attached(timeout=1000)
-    section.locator("summary").click()
+    section.locator(":scope > summary").click()
 
 
 def _row(page, index):

@@ -1313,6 +1313,73 @@ select:disabled {
   flex: 1;
 }
 
+.turn-skill-hakuno {
+  align-items: start;
+}
+
+.turn-skill-hakuno-controls {
+  display: block;
+}
+
+.turn-skill-hakuno-controls > summary {
+  min-height: 34px;
+  line-height: 34px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hakuno-needs-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.hakuno-needs-heading,
+.hakuno-needs-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hakuno-needs-heading {
+  grid-template-columns: minmax(0, 1fr) repeat(2, 28px);
+}
+
+.hakuno-needs-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.turn-skill-hakuno-controls .field {
+  width: 100%;
+  padding: 0 5px;
+}
+
+.turn-skill-hakuno-controls .icon-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.hakuno-needs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hakuno-needs-actions span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .turn-skill-color-choice {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);

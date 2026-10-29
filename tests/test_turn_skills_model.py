@@ -60,7 +60,7 @@ def test_basic_skill_decoder_follows_compiler_number_and_target_rules(value, exp
 
 
 @pytest.mark.parametrize("value", [True, "1", 1.5, -1, 0, 13, {}, [1], [1, False], [1, 4], [1, 1, 2],
-                                   [13, None], [13, 0], [13, 7], [13, True], ["Start", 1, []], ["Hakuno", 1, []]])
+                                   [13, None], [13, 0], [13, 7], [13, True], ["Start", 1, []], ["Hakuno", 2, []]])
 def test_basic_skill_decoder_never_coerces_advanced_or_malformed_commands(value):
     assert _run("decode", value=value)["result"] is None
 

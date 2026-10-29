@@ -103,7 +103,7 @@ def test_third_skill_options_transitions_and_source_safe_save(tag_console, width
 
 @pytest.mark.parametrize("command", [["Barghest", 3, True], ["BBDubai", 3, 1.0], ["Barghest", 1, 0],
                                      ["Soujyuro", 3, "Quick"], ["Soujyuro", 3.0, "Q"],
-                                     ["Hakuno", 1, [["1B"]]], ["Hakuno", 3, "Q"]])
+                                     ["Hakuno", 2, [["1B"]]], ["Hakuno", 3, "Q"]])
 def test_non_original_third_skill_forms_stay_read_only_until_clear(tag_console, command):
     browser, url, _directory = tag_console
     page = browser.new_page()
