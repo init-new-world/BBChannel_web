@@ -1276,6 +1276,39 @@ select:disabled {
   grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto;
 }
 
+.turn-skill-named {
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 260px) auto;
+}
+
+.turn-skill-named-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+}
+
+.turn-skill-named-controls .checkline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.turn-skill-named-controls input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.turn-skill-named-controls .field {
+  flex: 1;
+  width: 0;
+}
+
 .turn-skill-color-choice {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);
@@ -1328,6 +1361,22 @@ select:disabled {
   display: inline-grid;
   place-items: center;
   padding: 0;
+}
+
+@media (max-width: 760px) {
+  .turn-skill-named {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .turn-skill-named > select,
+  .turn-skill-named-controls {
+    grid-column: 1 / -1;
+  }
+
+  .turn-skill-named .turn-skill-tools {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
 }
 
 @media (max-width: 560px) {

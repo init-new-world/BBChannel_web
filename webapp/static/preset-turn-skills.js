@@ -2,6 +2,7 @@ import { t } from "./i18n.js";
 import { COMMAND_SPELLS, decodeBasicSkill, isCommandSpell, MAX_SKILL_COMMANDS } from "./turn-skills-model.js";
 import { changeSkillSource, inspectSkillSource } from "./turn-skills-source.js";
 import { specialSkillChoice, specialSkillColors } from "./special-skills-model.js";
+import { KUKULKAN_SKILL, kukulkanNeedsTarget } from "./kukulkan-model.js";
 
 export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, validateConfig, onChange, onError }) {
   const section = document.querySelector("#preset-turn-skills");
@@ -37,6 +38,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     item.className = "turn-skill-row";
     item.classList.toggle("turn-skill-exchange", Boolean(value.swap));
     item.classList.toggle("turn-skill-color", value.choice !== undefined);
+    item.classList.toggle("turn-skill-named", Boolean(value.named));
     item.dataset.turnSkillIndex = String(index);
     item.setAttribute("role", "group");
     item.setAttribute("aria-label", t("Skill {index}", { index: index + 1 }));
@@ -61,7 +63,12 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         skill.append(option(String(-((slot - 1) * 3 + number)), t("NP Color / Servant {slot} / Skill {skill}", { slot, skill: number })));
       }
     }
-    skill.value = value.swap ? `swap:${value.skill}` : String(value.skill);
+    for (let number = 1; number <= 9; number += 1) {
+      skill.append(option(`${KUKULKAN_SKILL}:${number}`, t("Kukulkan / Servant {slot} / Skill {skill}", {
+        slot: Math.floor((number - 1) / 3) + 1, skill: (number - 1) % 3 + 1,
+      })));
+    }
+    skill.value = value.named ? `${value.named}:${value.skill}` : value.swap ? `swap:${value.skill}` : String(value.skill);
     skill.title = skill.selectedOptions[0].textContent;
     let target;
     if (value.swap) {
@@ -78,6 +85,21 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         field.append(heading, positionSelect(part, label, slots, position));
         target.append(field);
       }
+    } else if (value.named === KUKULKAN_SKILL) {
+      target = document.createElement("div");
+      target.className = "turn-skill-named-controls";
+      const label = document.createElement("label");
+      label.className = "checkline";
+      label.title = t("Spend 10 critical stars");
+      const useStars = document.createElement("input");
+      useStars.type = "checkbox";
+      useStars.dataset.turnSkillPart = "named-option";
+      useStars.checked = value.option === 1;
+      const text = document.createElement("span");
+      text.textContent = t("Use 10 Stars");
+      label.append(useStars, text);
+      target.append(label);
+      if (kukulkanNeedsTarget(value.skill)) target.append(positionSelect("target", "Skill target", [1, 2, 3], value.target));
     } else if (value.choice !== undefined) {
       target = document.createElement("div");
       target.className = "turn-skill-color-choice";
@@ -193,36 +215,49 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     if (!clear.disabled && !controls.disabled && window.confirm(t("Clear the selected skill sequence?"))) edit({ type: "clear" });
   });
   list.addEventListener("change", (event) => {
-    const select = event.target.closest("select[data-turn-skill-part]");
-    const item = select?.closest("[data-turn-skill-index]");
+    const control = event.target.closest("select[data-turn-skill-part], input[data-turn-skill-part]");
+    const item = control?.closest("[data-turn-skill-index]");
     if (!item) return;
     const index = Number(item.dataset.turnSkillIndex);
     const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
+    const named = selection.startsWith(`${KUKULKAN_SKILL}:`);
     const exchange = selection.startsWith("swap:");
     const spell = isCommandSpell(selection);
-    const skill = exchange ? Number(selection.slice(5)) : spell ? selection : Number(selection);
+    const skill = named ? Number(selection.slice(KUKULKAN_SKILL.length + 1))
+      : exchange ? Number(selection.slice(5)) : spell ? selection : Number(selection);
     const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
+    if (named) {
+      const sameKind = previous?.named === KUKULKAN_SKILL;
+      const changingSkill = control.dataset.turnSkillPart === "skill";
+      const option = changingSkill ? sameKind ? previous.option : 0
+        : item.querySelector('input[data-turn-skill-part="named-option"]')?.checked ? 1 : 0;
+      const target = !kukulkanNeedsTarget(skill) ? null : changingSkill
+        ? sameKind && previous.target !== null ? previous.target : 1
+        : Number(item.querySelector('select[data-turn-skill-part="target"]')?.value || 1);
+      edit({ type: "update", index, named: KUKULKAN_SKILL, skill, option, target }, index, control.dataset.turnSkillPart);
+      return;
+    }
     if (specialSkillColors(skill)) {
-      const choice = select.dataset.turnSkillPart === "skill"
+      const choice = control.dataset.turnSkillPart === "skill"
         ? specialSkillChoice(rendered?.info.commands?.[index], skill)
         : Number(item.querySelector('[data-turn-skill-part="choice"]').value);
-      edit({ type: "update", index, skill, choice }, index, select.dataset.turnSkillPart);
+      edit({ type: "update", index, skill, choice }, index, control.dataset.turnSkillPart);
       return;
     }
     if (exchange) {
-      const swap = select.dataset.turnSkillPart === "skill" ? previous?.swap || [1, 4]
+      const swap = control.dataset.turnSkillPart === "skill" ? previous?.swap || [1, 4]
         : [Number(item.querySelector('[data-turn-skill-part="front"]').value),
           Number(item.querySelector('[data-turn-skill-part="reserve"]').value)];
-      edit({ type: "update", index, skill, swap }, index, select.dataset.turnSkillPart);
+      edit({ type: "update", index, skill, swap }, index, control.dataset.turnSkillPart);
       return;
     }
     const selectedTarget = item.querySelector('[data-turn-skill-part="target"]')?.value || "";
     let target = selectedTarget === "" ? null : Number(selectedTarget);
-    if (select.dataset.turnSkillPart === "skill" && previous
-        && (previous.swap || previous.choice !== undefined || (previous.skill === 13) !== (skill === 13) || isCommandSpell(previous.skill) !== spell)) {
+    if (control.dataset.turnSkillPart === "skill" && previous
+        && (previous.named || previous.swap || previous.choice !== undefined || (previous.skill === 13) !== (skill === 13) || isCommandSpell(previous.skill) !== spell)) {
       target = skill === 13 || spell ? 1 : null;
     }
-    edit({ type: "update", index, skill, target }, index, select.dataset.turnSkillPart);
+    edit({ type: "update", index, skill, target }, index, control.dataset.turnSkillPart);
   });
   list.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-turn-skill-action]");

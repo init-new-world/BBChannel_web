@@ -1,4 +1,5 @@
 import { decodeSpecialSkill, makeSpecialSkill } from "./special-skills-model.js";
+import { decodeKukulkan, KUKULKAN_SKILL, makeKukulkan } from "./kukulkan-model.js";
 
 export const MAX_SKILL_COMMANDS = 1000;
 export const COMMAND_SPELLS = Object.freeze({
@@ -28,6 +29,8 @@ function validExchange(skill, positions) {
 }
 
 export function decodeBasicSkill(value) {
+  const named = decodeKukulkan(value);
+  if (named) return named;
   const special = decodeSpecialSkill(value);
   if (special) return special;
   const paired = Array.isArray(value);
@@ -55,7 +58,14 @@ export function readBasicSkills(value) {
   return value;
 }
 
-function command(skill, target = null, swap, choice) {
+function command(edit) {
+  const { skill, target = null, swap, choice, named, option } = edit;
+  if (named !== undefined || option !== undefined) {
+    if (named !== KUKULKAN_SKILL || swap !== undefined || choice !== undefined) {
+      throw new Error("Select valid Kukulkan skill parameters.");
+    }
+    return makeKukulkan(skill, option, target);
+  }
   if (choice !== undefined || (Number.isInteger(skill) && skill < 0)) {
     if (target !== null || swap !== undefined) throw new Error("Select a valid NP color.");
     return makeSpecialSkill(skill, choice);
@@ -89,9 +99,9 @@ export function changeSkillSequence(value, edit) {
   const next = readBasicSkills(value).slice();
   if (edit.type === "add") {
     if (next.length >= MAX_SKILL_COMMANDS) throw new Error("Skill sequence exceeds 1,000 entries.");
-    next.push(command(edit.skill === undefined ? 1 : edit.skill, edit.target, edit.swap, edit.choice));
+    next.push(command({ ...edit, skill: edit.skill === undefined && edit.named === undefined ? 1 : edit.skill }));
   } else if (edit.type === "update") {
-    next[entryIndex(edit.index, next.length)] = command(edit.skill, edit.target, edit.swap, edit.choice);
+    next[entryIndex(edit.index, next.length)] = command(edit);
   } else if (edit.type === "remove") {
     next.splice(entryIndex(edit.index, next.length), 1);
   } else if (edit.type === "move") {
