@@ -179,6 +179,16 @@ def _select_np(
     raise StrategySelectionError("NP strategy has no valid servant position.")
 
 
+def matches_card_preference(card: dict[str, Any], preference: str) -> bool:
+    special_keys = card.get("special_keys")
+    return card.get("code") == preference or (
+        isinstance(special_keys, list) and (
+            preference in special_keys
+            or any(preference == f"{card['code']}{key}" for key in special_keys)
+        )
+    )
+
+
 def _preferred_faces(
     spec: dict[str, Any],
     cards: list[dict[str, Any]],
@@ -194,13 +204,7 @@ def _preferred_faces(
     ranked_slots: set[int] = set()
     for preference_index, preference in enumerate(preferences):
         for card in eligible:
-            special_keys = card.get("special_keys")
-            if card.get("code") == preference or (
-                isinstance(special_keys, list) and (
-                    preference in special_keys
-                    or any(preference == f"{card['code']}{key}" for key in special_keys)
-                )
-            ):
+            if matches_card_preference(card, preference):
                 slot = int(card["slot"])
                 if slot not in ranked_slots:
                     ranked.append((preference_index, card))

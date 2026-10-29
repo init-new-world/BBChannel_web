@@ -483,9 +483,12 @@ def test_wait_for_battle_transition_uses_highest_confidence_round_match():
     assert result == {"state": "battle", "round": 2}
 
 
-def test_hakuno_reroll_casts_skill_until_card_need_matches():
+@pytest.mark.parametrize("need", [["1B", "2A"], ["1BS0", "2AS0"], ["S0", "1BS0"]],
+                         ids=["ordinary", "combined-tag", "tag-alias-overlap"])
+def test_hakuno_reroll_casts_skill_until_card_need_matches(need):
     taps = []
     events = []
+    tags = [] if need == ["1B", "2A"] else [{"code": "S0", "template_path": "battle/customCommandCard/example.png"}]
 
     class Operation:
         def to_dict(self):
@@ -518,13 +521,14 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches():
     class Cards:
         calls = 0
 
-        def recognize(self, _screenshot, _server, _servants, *, threshold):
+        def recognize(self, _screenshot, _server, _servants, *, threshold, special_keys=None):
             assert threshold == 0.75
+            assert special_keys == (tags or None)
             self.calls += 1
             codes = ["1B", "3Q"] if self.calls == 1 else ["1B", "2A"]
             return {
                 "complete": True,
-                "cards": [{"code": code} for code in codes],
+                "cards": [{"code": code, "special_keys": ["S0"] if code != "3Q" else []} for code in codes],
             }
 
     class Context:
@@ -544,7 +548,7 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches():
         [{"slot": 0, "name": "Hakuno", "active": True, "sn": "1"}],
         {
             "type": "hakuno_card_reroll",
-            "need_cards": [["1B", "2A"]],
+            "need_cards": [need],
             "skill_step": {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590},
             "max_rerolls": 3,
         },
@@ -554,6 +558,7 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches():
         1.0,
         0.01,
         0,
+        special_keys=tags,
     )
 
     assert tap_count == 5

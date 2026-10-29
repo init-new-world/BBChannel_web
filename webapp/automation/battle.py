@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
+from itertools import permutations
 from time import monotonic
 from typing import Any
 
@@ -21,6 +21,7 @@ from webapp.automation.program import (
 )
 from webapp.automation.strategy import (
     StrategySelectionError,
+    matches_card_preference,
     select_command_cards,
     select_command_cards_without_chain,
 )
@@ -258,16 +259,22 @@ def _matches_hakuno_needs(
     cards: list[dict[str, Any]],
     need_cards: list[list[str]],
 ) -> bool:
-    available = Counter(
-        card["code"]
+    available = [
+        card
         for card in cards
         if isinstance(card.get("code"), str)
         and card.get("available") is not False
-    )
-    return any(
-        all(available[code] >= count for code, count in Counter(need).items())
-        for need in need_cards
-    )
+    ]
+    for need in need_cards:
+        if len(need) > len(available):
+            continue
+        # A card may match several aliases, but each hand slot can be used only once.
+        if any(
+            all(matches_card_preference(card, code) for card, code in zip(selection, need, strict=True))
+            for selection in permutations(available, len(need))
+        ):
+            return True
+    return False
 
 
 def _recognize_command_cards(
