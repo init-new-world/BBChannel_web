@@ -72,9 +72,20 @@ def test_duplicate_strategy_fields_disable_replacement_and_clear(tag_console):
 def test_preset_response_for_a_changed_target_does_not_edit_the_previous_turn(tag_console):
     browser, url, _directory = tag_console
     page = browser.new_page()
-    _seed(page, url)
+    page.add_init_script("""
+        const originalFetch = window.fetch;
+        window.fetch = async (...args) => {
+            if (new URL(args[0], location.href).pathname === '/api/settings/demo') {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            return originalFetch(...args);
+        };
+    """)
+    _entries, original = _seed(page, url)
     page.goto(url)
     page.locator("#edit-setting").click()
+    playwright.expect(page.locator("#preset-dialog")).to_be_visible()
+    assert _config(page) == original
     response = page.request.get(f"{url}/api/strategies/Preset")
     pending = []
     page.route("**/api/strategies/Preset", lambda route: pending.append(route))
@@ -84,5 +95,6 @@ def test_preset_response_for_a_changed_target_does_not_edit_the_previous_turn(ta
     page.locator("#preset-strategy-target").evaluate("e => {e.value='round2_extraStrategy'; e.dispatchEvent(new Event('change',{bubbles:true}));}")
     pending.pop().fulfill(response=response)
     playwright.expect(page.locator("#save-preset")).to_be_enabled()
+    playwright.expect(page.locator("#preset-error")).to_contain_text("Script turn changed")
     assert page.locator("#preset-json").input_value() == before
     page.close()
