@@ -4,9 +4,31 @@ import { changeSkillSource, inspectSkillSource } from "./turn-skills-source.js";
 import { specialSkillChoice, specialSkillColors } from "./special-skills-model.js";
 import { KUKULKAN_SKILL, kukulkanNeedsTarget } from "./kukulkan-model.js";
 import { THIRD_SKILL_NAMES, thirdSkillOptions } from "./third-skill-model.js";
+import { SKILL_VARIANT_NAMES, skillVariantAvailable, skillVariantNumbers, skillVariantOptions } from "./skill-variants-model.js";
+import { readJsonField } from "./json-source.js";
 
 const THIRD_SKILL_LABELS = { Barghest: "UDK-Barghest", BBDubai: "BB Dubai", Soujyuro: "Soujyuro", Hakuno: "Hakuno" };
 const THIRD_OPTION_LABELS = { Q: "Quick", A: "Arts", B: "Buster", T: "Sky", D: "Earth", R: "Human" };
+const VARIANT_LABELS = { VanGoghMiner: "Van Gogh (Miner)", Dante: "Dante", Gyokuto: "Gyokuto", Charlotte: "Charlotte Corday", Flora: "Flora" };
+const VARIANT_OPTION_LABELS = {
+  VanGoghMiner: { Q: "Quick", A: "Arts", B: "Buster" },
+  Dante: { A: "Paradiso (Arts Up)", B: "Inferno (Buster Up)" },
+  Gyokuto: { All: "Moonlight (AoE NP)", One: "Sun (Single-Target NP)" },
+  Charlotte: { "\u6280": "Skill Up", "\u66b4": "Critical Damage Up", "\u5b9d": "NP Damage Up" },
+  Flora: { T: "Normal", D: "Underworld Garden" },
+};
+
+function namedOptions(named) {
+  return thirdSkillOptions(named) || skillVariantOptions(named);
+}
+
+function variantServer(source) {
+  try {
+    return readJsonField(source, "server", "Ambiguous server field.").value;
+  } catch {
+    return null;
+  }
+}
 
 export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, validateConfig, onChange, onError }) {
   const section = document.querySelector("#preset-turn-skills");
@@ -36,7 +58,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     return select;
   }
 
-  function row(command, index, length) {
+  function row(command, index, length, server) {
     const value = decodeBasicSkill(command);
     const item = document.createElement("div");
     item.className = "turn-skill-row";
@@ -79,8 +101,19 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         })));
       }
     }
+    for (const named of SKILL_VARIANT_NAMES) {
+      for (const number of skillVariantNumbers(named)) {
+        const labels = {
+          name: t(VARIANT_LABELS[named]), slot: Math.floor((number - 1) / 3) + 1, skill: (number - 1) % 3 + 1,
+        };
+        const entry = option(`${named}:${number}`, t("{name} / Slot {slot} / Skill {skill}", labels));
+        entry.title = t("{name} / Servant {slot} / Skill {skill}", labels);
+        entry.disabled = !skillVariantAvailable(named, server);
+        skill.append(entry);
+      }
+    }
     skill.value = value.named ? `${value.named}:${value.skill}` : value.swap ? `swap:${value.skill}` : String(value.skill);
-    skill.title = skill.selectedOptions[0].textContent;
+    skill.title = skill.selectedOptions[0].title || skill.selectedOptions[0].textContent;
     let target;
     if (value.swap) {
       target = document.createElement("div");
@@ -138,12 +171,13 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         choice.className = "field";
         choice.dataset.turnSkillPart = "named-option";
         choice.setAttribute("aria-label", t("Skill option"));
-        for (const optionValue of thirdSkillOptions(value.named)) {
-          choice.append(option(optionValue, t(THIRD_OPTION_LABELS[optionValue])));
+        const labels = VARIANT_OPTION_LABELS[value.named] || THIRD_OPTION_LABELS;
+        for (const optionValue of namedOptions(value.named)) {
+          choice.append(option(optionValue, t(labels[optionValue])));
         }
         choice.value = value.option;
         choice.title = choice.selectedOptions[0].textContent;
-        if (value.named === "Soujyuro") {
+        if (["Soujyuro", "VanGoghMiner", "Dante"].includes(value.named)) {
           const swatch = document.createElement("span");
           swatch.className = "np-color-swatch";
           swatch.dataset.color = THIRD_OPTION_LABELS[value.option];
@@ -219,7 +253,8 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       if (rendered?.editor !== editor || rendered.source !== source.value || rendered.target !== target) {
         validateConfig(JSON.parse(source.value));
         const info = inspectSkillSource(source.value, target);
-        list.replaceChildren(...(info.commands || []).map((command, index) => row(command, index, info.commands.length)));
+        const server = variantServer(source.value);
+        list.replaceChildren(...(info.commands || []).map((command, index) => row(command, index, info.commands.length, server)));
         rendered = { editor, source: source.value, target, info };
       }
       controls.disabled = Boolean(editor.saving || editor.strategyApplyBusy);
@@ -269,10 +304,10 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
   list.addEventListener("change", (event) => {
     const control = event.target.closest("select[data-turn-skill-part], input[data-turn-skill-part]");
     const item = control?.closest("[data-turn-skill-index]");
-    if (!item) return;
+    if (!item || control.selectedOptions?.[0]?.disabled) return;
     const index = Number(item.dataset.turnSkillIndex);
     const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
-    const named = [KUKULKAN_SKILL, ...THIRD_SKILL_NAMES].find((name) => selection.startsWith(`${name}:`));
+    const named = [KUKULKAN_SKILL, ...THIRD_SKILL_NAMES, ...SKILL_VARIANT_NAMES].find((name) => selection.startsWith(`${name}:`));
     const exchange = selection.startsWith("swap:");
     const spell = isCommandSpell(selection);
     const skill = named ? Number(selection.slice(named.length + 1))
@@ -291,7 +326,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     }
     if (named) {
       const option = control.dataset.turnSkillPart === "skill"
-        ? previous?.named === named ? previous.option : thirdSkillOptions(named)[0]
+        ? previous?.named === named ? previous.option : namedOptions(named)[0]
         : named === "Barghest" ? control.checked ? 1 : 0 : control.value;
       edit({ type: "update", index, named, skill, option }, index, control.dataset.turnSkillPart);
       return;

@@ -1,6 +1,7 @@
 import { decodeSpecialSkill, makeSpecialSkill } from "./special-skills-model.js";
 import { decodeKukulkan, KUKULKAN_SKILL, makeKukulkan } from "./kukulkan-model.js";
 import { decodeThirdSkill, makeThirdSkill } from "./third-skill-model.js";
+import { decodeSkillVariant, makeSkillVariant, SKILL_VARIANT_NAMES } from "./skill-variants-model.js";
 
 export const MAX_SKILL_COMMANDS = 1000;
 export const COMMAND_SPELLS = Object.freeze({
@@ -30,7 +31,7 @@ function validExchange(skill, positions) {
 }
 
 export function decodeBasicSkill(value) {
-  const named = decodeKukulkan(value) || decodeThirdSkill(value);
+  const named = decodeKukulkan(value) || decodeThirdSkill(value) || decodeSkillVariant(value);
   if (named) return named;
   const special = decodeSpecialSkill(value);
   if (special) return special;
@@ -66,8 +67,8 @@ function command(edit) {
       throw new Error("Select valid named-skill parameters.");
     }
     if (named === KUKULKAN_SKILL) return makeKukulkan(skill, option, target);
-    if (target !== null) throw new Error("Select valid third-skill parameters.");
-    return makeThirdSkill(named, skill, option);
+    if (target !== null) throw new Error("Select valid named-skill parameters.");
+    return SKILL_VARIANT_NAMES.includes(named) ? makeSkillVariant(named, skill, option) : makeThirdSkill(named, skill, option);
   }
   if (choice !== undefined || (Number.isInteger(skill) && skill < 0)) {
     if (target !== null || swap !== undefined) throw new Error("Select a valid NP color.");
