@@ -20,6 +20,7 @@ from webapp.services.resources import ResourceService
 VALID_SERVERS = {"CH", "CNTW", "JP"}
 TURN_FIELD_RE = re.compile(r"^round(?P<round>\d+)_turn(?P<turn>\d+)_(skill|np|strategy|condition|replace)$")
 SETTING_STRATEGY_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_strategy|extraStrategy)$")
+SETTING_SKILL_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_skill|extraSkill)$")
 ROUND_NUMBER_RE = re.compile(r"^round(?P<round>\d+)_")
 SPECIAL_KEY_NAME_RE = re.compile(
     r"^W(?P<W>-?\d+)H(?P<H>-?\d+)"
@@ -174,12 +175,13 @@ class ScriptDataService:
                     )
                 references = [
                     field for field, value in config.items()
-                    if SETTING_STRATEGY_FIELD_RE.fullmatch(field) and _uses_special_key(value, code)
+                    if (SETTING_STRATEGY_FIELD_RE.fullmatch(field) or SETTING_SKILL_FIELD_RE.fullmatch(field))
+                    and _uses_special_key(value, code)
                 ]
                 if references:
                     raise AppError(
                         ErrorCode.DATA_FILE_CONFLICT,
-                        f"Command tag {code} is still referenced by this script's strategies.",
+                        f"Command tag {code} is still referenced by this script's strategies or skill commands.",
                         {"name": name, "code": code, "fields": references},
                     )
                 entries.pop()
