@@ -1309,6 +1309,10 @@ select:disabled {
   width: 0;
 }
 
+.turn-skill-named-controls .segmented-control {
+  flex: 1;
+}
+
 .turn-skill-color-choice {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);

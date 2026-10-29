@@ -3,6 +3,10 @@ import { COMMAND_SPELLS, decodeBasicSkill, isCommandSpell, MAX_SKILL_COMMANDS } 
 import { changeSkillSource, inspectSkillSource } from "./turn-skills-source.js";
 import { specialSkillChoice, specialSkillColors } from "./special-skills-model.js";
 import { KUKULKAN_SKILL, kukulkanNeedsTarget } from "./kukulkan-model.js";
+import { THIRD_SKILL_NAMES, thirdSkillOptions } from "./third-skill-model.js";
+
+const THIRD_SKILL_LABELS = { Barghest: "UDK-Barghest", BBDubai: "BB Dubai", Soujyuro: "Soujyuro", Hakuno: "Hakuno" };
+const THIRD_OPTION_LABELS = { Q: "Quick", A: "Arts", B: "Buster", T: "Sky", D: "Earth", R: "Human" };
 
 export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, validateConfig, onChange, onError }) {
   const section = document.querySelector("#preset-turn-skills");
@@ -68,6 +72,13 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         slot: Math.floor((number - 1) / 3) + 1, skill: (number - 1) % 3 + 1,
       })));
     }
+    for (const named of THIRD_SKILL_NAMES) {
+      for (const number of [3, 6, 9]) {
+        skill.append(option(`${named}:${number}`, t("{name} / Servant {slot} / Skill 3", {
+          name: t(THIRD_SKILL_LABELS[named]), slot: number / 3,
+        })));
+      }
+    }
     skill.value = value.named ? `${value.named}:${value.skill}` : value.swap ? `swap:${value.skill}` : String(value.skill);
     skill.title = skill.selectedOptions[0].textContent;
     let target;
@@ -85,21 +96,62 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         field.append(heading, positionSelect(part, label, slots, position));
         target.append(field);
       }
-    } else if (value.named === KUKULKAN_SKILL) {
+    } else if (value.named === KUKULKAN_SKILL || value.named === "Barghest") {
       target = document.createElement("div");
       target.className = "turn-skill-named-controls";
       const label = document.createElement("label");
       label.className = "checkline";
-      label.title = t("Spend 10 critical stars");
+      label.title = t(value.named === KUKULKAN_SKILL ? "Spend 10 critical stars" : "Single Target");
       const useStars = document.createElement("input");
       useStars.type = "checkbox";
       useStars.dataset.turnSkillPart = "named-option";
       useStars.checked = value.option === 1;
       const text = document.createElement("span");
-      text.textContent = t("Use 10 Stars");
+      text.textContent = t(value.named === KUKULKAN_SKILL ? "Use 10 Stars" : "Single Target");
       label.append(useStars, text);
       target.append(label);
-      if (kukulkanNeedsTarget(value.skill)) target.append(positionSelect("target", "Skill target", [1, 2, 3], value.target));
+      if (value.named === KUKULKAN_SKILL && kukulkanNeedsTarget(value.skill)) {
+        target.append(positionSelect("target", "Skill target", [1, 2, 3], value.target));
+      }
+    } else if (value.named) {
+      target = document.createElement("div");
+      target.className = "turn-skill-named-controls";
+      if (value.named === "BBDubai") {
+        const modes = document.createElement("div");
+        modes.className = "segmented-control";
+        modes.setAttribute("role", "group");
+        modes.setAttribute("aria-label", t("Skill option"));
+        for (const [number, label] of [[0, "Attack Type"], [1, "Defense Type"]]) {
+          const mode = document.createElement("button");
+          mode.type = "button";
+          mode.className = "segment";
+          mode.classList.toggle("active", value.option === number);
+          mode.dataset.turnSkillPart = `named-option-${number}`;
+          mode.dataset.turnSkillOption = String(number);
+          mode.setAttribute("aria-pressed", String(value.option === number));
+          mode.textContent = mode.title = t(label);
+          modes.append(mode);
+        }
+        target.append(modes);
+      } else {
+        const choice = document.createElement("select");
+        choice.className = "field";
+        choice.dataset.turnSkillPart = "named-option";
+        choice.setAttribute("aria-label", t("Skill option"));
+        for (const optionValue of thirdSkillOptions(value.named)) {
+          choice.append(option(optionValue, t(THIRD_OPTION_LABELS[optionValue])));
+        }
+        choice.value = value.option;
+        choice.title = choice.selectedOptions[0].textContent;
+        if (value.named === "Soujyuro") {
+          const swatch = document.createElement("span");
+          swatch.className = "np-color-swatch";
+          swatch.dataset.color = THIRD_OPTION_LABELS[value.option];
+          swatch.setAttribute("aria-hidden", "true");
+          target.append(swatch);
+        }
+        target.append(choice);
+      }
     } else if (value.choice !== undefined) {
       target = document.createElement("div");
       target.className = "turn-skill-color-choice";
@@ -220,13 +272,13 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     if (!item) return;
     const index = Number(item.dataset.turnSkillIndex);
     const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
-    const named = selection.startsWith(`${KUKULKAN_SKILL}:`);
+    const named = [KUKULKAN_SKILL, ...THIRD_SKILL_NAMES].find((name) => selection.startsWith(`${name}:`));
     const exchange = selection.startsWith("swap:");
     const spell = isCommandSpell(selection);
-    const skill = named ? Number(selection.slice(KUKULKAN_SKILL.length + 1))
+    const skill = named ? Number(selection.slice(named.length + 1))
       : exchange ? Number(selection.slice(5)) : spell ? selection : Number(selection);
     const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
-    if (named) {
+    if (named === KUKULKAN_SKILL) {
       const sameKind = previous?.named === KUKULKAN_SKILL;
       const changingSkill = control.dataset.turnSkillPart === "skill";
       const option = changingSkill ? sameKind ? previous.option : 0
@@ -235,6 +287,13 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         ? sameKind && previous.target !== null ? previous.target : 1
         : Number(item.querySelector('select[data-turn-skill-part="target"]')?.value || 1);
       edit({ type: "update", index, named: KUKULKAN_SKILL, skill, option, target }, index, control.dataset.turnSkillPart);
+      return;
+    }
+    if (named) {
+      const option = control.dataset.turnSkillPart === "skill"
+        ? previous?.named === named ? previous.option : thirdSkillOptions(named)[0]
+        : named === "Barghest" ? control.checked ? 1 : 0 : control.value;
+      edit({ type: "update", index, named, skill, option }, index, control.dataset.turnSkillPart);
       return;
     }
     if (specialSkillColors(skill)) {
@@ -260,6 +319,17 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     edit({ type: "update", index, skill, target }, index, control.dataset.turnSkillPart);
   });
   list.addEventListener("click", (event) => {
+    const option = event.target.closest("button[data-turn-skill-option]");
+    if (option) {
+      if (option.disabled) return;
+      const index = Number(option.closest("[data-turn-skill-index]").dataset.turnSkillIndex);
+      const previous = decodeBasicSkill(rendered?.info.commands?.[index]);
+      if (previous?.named === "BBDubai") {
+        edit({ type: "update", index, named: previous.named, skill: previous.skill, option: Number(option.dataset.turnSkillOption) },
+          index, option.dataset.turnSkillPart);
+      }
+      return;
+    }
     const button = event.target.closest("button[data-turn-skill-action]");
     if (!button || button.disabled) return;
     const index = Number(button.closest("[data-turn-skill-index]").dataset.turnSkillIndex);
