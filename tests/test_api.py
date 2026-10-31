@@ -1250,7 +1250,7 @@ def test_setting_program_compiles_conditional_skill_block_controls(tmp_path: Pat
     turn = payload["rounds"][0]["turns"][0]
     assert turn["condition"] == condition
     assert [action.get("control") for action in turn["actions"]] == [
-        {"type": "condition_start", "execute_when_matched": True, "check_cards": True},
+        {"type": "condition_start", "execute_when_matched": True, "check_cards": True, "checks": [1]},
         None,
         {"type": "condition_end"},
     ]

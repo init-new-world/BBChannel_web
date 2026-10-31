@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 
@@ -461,6 +462,7 @@ def _compile_skill_control(
         "type": "condition_start",
         "execute_when_matched": bool(command[1]),
         "check_cards": bool(checks) and any(checks),
+        "checks": deepcopy(checks),
     }
     return result
 

@@ -755,6 +755,7 @@ def create_battle_execute_plan_handler(
                             tap_interval,
                             special_keys=special_keys,
                             card_wait_seconds=card_wait_seconds,
+                            checks=control["checks"],
                         )
                         tap_count += condition_taps
                     execute_conditional_skills = matched == control["execute_when_matched"]
@@ -1274,6 +1275,7 @@ def _evaluate_card_condition(
     tap_interval: float | _TapTiming,
     special_keys: list[dict[str, Any]] | None = None,
     card_wait_seconds: float = 0.0,
+    checks: list[Any] | tuple[Any, ...] | None = None,
 ) -> tuple[bool, int]:
     if card_recognizer is None:
         raise ValueError("Command card recognition is not configured.")
@@ -1307,13 +1309,20 @@ def _evaluate_card_condition(
         raise ValueError(
             f"Recognized {recognized['recognized_count']} of 5 command cards."
         )
-    try:
-        select_command_cards(condition, recognized["cards"])
-        matched = True
-        reason = None
-    except StrategySelectionError as exc:
-        matched = False
-        reason = str(exc)
+    matched = False
+    reason = "No selected command card strategies matched."
+    for index, strategy in enumerate(condition):
+        # Keep mask lookup lazy: an earlier match may precede a missing position.
+        if checks and not checks[index]:
+            continue
+        try:
+            select_command_cards([strategy], recognized["cards"])
+        except StrategySelectionError as exc:
+            reason = str(exc)
+        else:
+            matched = True
+            reason = None
+            break
     back_x, back_y = COMMAND_CARD_BACK_POINT
     tap_count += _execute_steps(
         context,
