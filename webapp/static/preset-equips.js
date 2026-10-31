@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { editAssistEquipSource, inspectAssistEquipSource } from "./assist-equips-source.js";
 
 export function createPresetEquipEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-assist-equips");
@@ -10,37 +11,6 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
   const refresh = document.querySelector("#refresh-assist-equips");
   const status = document.querySelector("#preset-assist-equip-status");
   let usesEquip = false;
-
-  function readConfig() {
-    const config = JSON.parse(source.value);
-    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error(t("Invalid script JSON."));
-    return config;
-  }
-
-  function equipNames(value) {
-    const names = new Set();
-    const pending = [value];
-    let visited = 0;
-    while (pending.length) {
-      if (++visited > 1000) throw new Error(t("CE list exceeds 1,000 values."));
-      const item = pending.pop();
-      if (item == null) continue;
-      if (typeof item === "string") {
-        if (item) names.add(item);
-      } else if (Array.isArray(item)) {
-        if (visited + pending.length + item.length > 1000) throw new Error(t("CE list exceeds 1,000 values."));
-        for (let index = item.length - 1; index >= 0; index--) pending.push(item[index]);
-      } else {
-        throw new Error(t("Unsupported CE value."));
-      }
-    }
-    return [...names];
-  }
-
-  function removeName(value, name) {
-    if (!Array.isArray(value)) return value === name ? [] : value;
-    return value.filter((item) => item !== name).map((item) => removeName(item, name));
-  }
 
   async function loadCatalog(editor, catalog) {
     try {
@@ -113,12 +83,13 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
       section.open = false;
       editor.equipsInitialized = true;
     }
-    let config;
+    let info;
     try {
-      config = readConfig();
-    } catch {
+      info = inspectAssistEquipSource(source.value);
+    } catch (error) {
       controls.disabled = true;
-      status.textContent = t("Invalid script JSON.");
+      list.replaceChildren();
+      status.textContent = t(error.message);
       return;
     }
     let catalog = editor.equipCatalog;
@@ -127,13 +98,8 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
       editor.equipCatalog = catalog;
       void loadCatalog(editor, catalog);
     }
-    let names = [];
-    let error = "";
-    try {
-      names = equipNames(config.assistEquip);
-    } catch (failure) {
-      error = failure.message;
-    }
+    const names = info.names || [];
+    const error = info.error ? t(info.error) : "";
     const focused = document.activeElement;
     const focusedRow = focused?.closest("[data-assist-equip-name]");
     const focusedIndex = [...list.children].indexOf(focusedRow);
@@ -151,7 +117,7 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     picker.title = picker.selectedOptions[0]?.textContent || "";
     picker.disabled = Boolean(error) || catalog.state !== "ready" || !choices.length;
     add.disabled = picker.disabled;
-    clear.disabled = !Object.hasOwn(config, "assistEquip") || (Array.isArray(config.assistEquip) && !config.assistEquip.length);
+    clear.disabled = !info.canClear;
     refresh.disabled = catalog.state === "loading";
     status.textContent = error || (!usesEquip ? t("Inactive for this recognition mode.")
       : catalog.state === "loading" ? t("Loading CE catalog...")
@@ -171,26 +137,20 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     const editor = getEditor();
     if (editor?.kind !== "settings" || controls.disabled || editor.saving || editor.strategyApplyBusy) return;
     try {
-      const config = readConfig();
+      const info = inspectAssistEquipSource(source.value);
       if (action === "clear") {
-        if (clear.disabled || !window.confirm(t("Clear all assist CEs?"))) return;
-        config.assistEquip = [];
+        if (clear.disabled || !info.canClear || !window.confirm(t("Clear all assist CEs?"))) return;
       } else {
-        const names = equipNames(config.assistEquip);
+        if (info.error) throw new Error(info.error);
+        const names = info.names;
         if (action === "add") {
           if (add.disabled || !editor.equipCatalog?.names?.includes(name) || names.includes(name)) return;
-          const current = config.assistEquip;
-          const next = Array.isArray(current) ? [...current, name] : current ? [current, name] : [name];
-          equipNames(next);
-          config.assistEquip = next;
-        } else if (names.includes(name)) {
-          config.assistEquip = removeName(config.assistEquip, name);
-        } else return;
+        } else if (!names.includes(name)) return;
       }
-      source.value = JSON.stringify(config, null, 2);
+      source.value = editAssistEquipSource(source.value, { type: action, name });
       onChange();
     } catch (error) {
-      onError(error.message);
+      onError(t(error.message));
     }
   }
 
