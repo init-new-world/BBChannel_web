@@ -269,6 +269,8 @@ const zh = {
   "Select a valid Hakuno card.": "请选择有效的白野需求卡片。",
   "Invalid Hakuno card edit.": "白野发牌需求编辑无效。",
   "Select valid Hakuno card parameters.": "请选择有效的白野发牌需求参数。",
+  "Ambiguous assist field.": "助战筛选字段含义不明确。",
+  "Invalid assist edit.": "助战筛选编辑无效。",
   "No target": "无目标",
   "Servant {slot}": "从者 {slot}",
   "Servant {slot} / Skill {skill}": "从者 {slot} / 技能 {skill}",

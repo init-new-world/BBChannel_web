@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { editAssistSource, inspectAssistSource } from "./assist-source.js";
 
 export function createPresetAssistEditor({ getEditor, source, onChange, onError }) {
   const section = document.querySelector("#preset-assist-options");
@@ -62,7 +63,7 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
     const editor = getEditor();
     if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy || controls.disabled || input.disabled) return;
     try {
-      const config = readConfig();
+      readConfig();
       const field = input.dataset.assistOption;
       const value = input.valueAsNumber;
       input.setCustomValidity("");
@@ -72,13 +73,13 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
         input.setCustomValidity(t(input.dataset.numberError));
         return;
       }
+      const next = editAssistSource(source.value, { type: "set", field, value });
       if (commit) delete editor.assistNumberDrafts[field];
       else editor.assistNumberDrafts[field] = {};
-      config[field] = value;
-      source.value = JSON.stringify(config, null, 2);
+      source.value = next;
       onChange();
     } catch (error) {
-      onError(error.message);
+      onError(t(error.message));
     }
   }
 
@@ -92,8 +93,10 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
       editor.assistOptionsInitialized = true;
     }
     let config;
+    let ambiguous;
     try {
       config = readConfig();
+      ambiguous = inspectAssistSource(source.value).ambiguous;
     } catch {
       controls.disabled = true;
       return false;
@@ -109,7 +112,10 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
     inputs.forEach((input) => {
       const requirement = input.dataset.assistRequires;
       const editingDraft = editor.assistNumberDrafts?.[input.dataset.assistOption];
-      input.disabled = Boolean(requirement) && !modeOption?.hasAttribute(`data-${requirement}`) && !editingDraft;
+      const duplicate = ambiguous.includes(input.dataset.assistOption);
+      input.disabled = duplicate || (Boolean(requirement) && !modeOption?.hasAttribute(`data-${requirement}`) && !editingDraft);
+      if (duplicate) input.title = t("Ambiguous assist field.");
+      else if (input.type === "checkbox") input.removeAttribute("title");
     });
     return Boolean(modeOption?.hasAttribute("data-equip"));
   }
@@ -120,12 +126,13 @@ export function createPresetAssistEditor({ getEditor, source, onChange, onError 
     if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy || controls.disabled || input.disabled) return;
     if (input.type !== "checkbox" && input.selectedOptions[0]?.disabled) return;
     try {
-      const config = readConfig();
-      config[input.dataset.assistOption] = input.type === "checkbox" ? input.checked : optionValue(input, input.selectedOptions[0]);
-      source.value = JSON.stringify(config, null, 2);
+      readConfig();
+      const field = input.dataset.assistOption;
+      const value = input.type === "checkbox" ? input.checked : optionValue(input, input.selectedOptions[0]);
+      source.value = editAssistSource(source.value, { type: "set", field, value });
       onChange();
     } catch (error) {
-      onError(error.message);
+      onError(t(error.message));
     }
   }));
   inputs.filter((input) => input.type === "number").forEach((input) => {
