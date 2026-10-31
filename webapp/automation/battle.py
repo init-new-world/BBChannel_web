@@ -755,7 +755,6 @@ def create_battle_execute_plan_handler(
                             tap_interval,
                             special_keys=special_keys,
                             card_wait_seconds=card_wait_seconds,
-                            speedup_skills=speedup_skills,
                         )
                         tap_count += condition_taps
                     execute_conditional_skills = matched == control["execute_when_matched"]
