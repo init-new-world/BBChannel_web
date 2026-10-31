@@ -272,6 +272,8 @@ const zh = {
   "Select valid Hakuno card parameters.": "请选择有效的白野发牌需求参数。",
   "Ambiguous assist field.": "助战筛选字段含义不明确。",
   "Ambiguous CE field.": "助战礼装字段含义不明确。",
+  "Ambiguous settlement field.": "结算字段含义不明确。",
+  "Invalid settlement edit.": "结算编辑无效。",
   "Invalid assist edit.": "助战筛选编辑无效。",
   "No target": "无目标",
   "Servant {slot}": "从者 {slot}",
