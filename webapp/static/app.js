@@ -179,6 +179,7 @@ const els = {
   inspectChocolate: document.querySelector("#inspect-chocolate"),
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
+  inspectDigdigGrid: document.querySelector("#inspect-digdig-grid"),
   executeDigdig: document.querySelector("#execute-digdig"),
   inspectLottery: document.querySelector("#inspect-lottery"),
   runLottery: document.querySelector("#run-lottery"),
@@ -505,6 +506,7 @@ function bindEvents() {
   els.inspectChocolate.addEventListener("click", inspectChocolate);
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
+  els.inspectDigdigGrid.addEventListener("click", inspectDigdigGrid);
   els.executeDigdig.addEventListener("click", executeDigdig);
   els.inspectLottery.addEventListener("click", inspectLottery);
   els.runLottery.addEventListener("click", runLottery);
@@ -3026,6 +3028,16 @@ async function inspectDigdig() {
   });
 }
 
+async function inspectDigdigGrid() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.digdig.inspect-board-grid", {
+    setting_name: settingName,
+  });
+}
+
 async function executeDigdig() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -3413,6 +3425,17 @@ function renderJobResult(job) {
     els.jobResult.textContent = details.join(" · ");
     return;
   }
+  if (job.kind === "event.digdig.inspect-board-grid") {
+    const toolCount = result.recognized_tool_count || 0;
+    const pieceCount = result.recognized_piece_count || 0;
+    const crossCount = result.recognized_intersection_count || 0;
+    els.jobResult.textContent = [
+      `${toolCount}/28 dig cells`,
+      `${pieceCount} ${pieceCount === 1 ? "piece" : "pieces"}`,
+      `${crossCount} ${crossCount === 1 ? "intersection" : "intersections"}`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.digdig.execute") {
     const actionCount = result.actions?.length || 0;
     els.jobResult.textContent = [
@@ -3717,6 +3740,10 @@ function updateControls() {
     || !els.settingSelect.value
     || hasRunningJob;
   els.inspectDigdig.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsDigdig
+    || hasRunningJob;
+  els.inspectDigdigGrid.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsDigdig
     || hasRunningJob;

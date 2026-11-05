@@ -43,6 +43,7 @@ def test_job_api_starts_lists_and_reads_completed_job(tmp_path: Path):
                     "event.chocolate.run",
                     "event.digdig.execute",
                     "event.digdig.inspect",
+                    "event.digdig.inspect-board-grid",
                     "event.expball.inspect",
                     "event.expball.inspect-storage-grid",
                     "event.expball.navigate",

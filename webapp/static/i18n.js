@@ -159,6 +159,7 @@ const zh = {
   "Import Script": "导入脚本",
   "Import Tag": "导入标签",
   "Inspect Dig Board": "检查挖掘棋盘",
+  "Inspect Dig Grid": "检查挖掘网格",
   "Inspect EXP Flow": "检查经验素材流程",
   "Inspect Lottery": "检查奖池",
   "Inspect State": "检查状态",

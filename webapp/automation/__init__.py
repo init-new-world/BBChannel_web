@@ -20,10 +20,13 @@ from webapp.automation.chocolate import (
 )
 from webapp.automation.diagnostic import register_diagnostic_job
 from webapp.automation.digdig import (
+    DIGDIG_BOARD_GRID_INSPECT_JOB_KIND,
     DIGDIG_EXECUTE_JOB_KIND,
     DIGDIG_INSPECT_JOB_KIND,
+    create_digdig_board_grid_inspect_handler,
     create_digdig_execute_handler,
     create_digdig_inspect_handler,
+    register_digdig_board_grid_inspect_job,
     register_digdig_execute_job,
     register_digdig_inspect_job,
 )
@@ -119,6 +122,7 @@ __all__ = [
     "BATTLE_RESTART_GAME_JOB_KIND",
     "CHOCOLATE_INSPECT_JOB_KIND",
     "CHOCOLATE_RUN_JOB_KIND",
+    "DIGDIG_BOARD_GRID_INSPECT_JOB_KIND",
     "DIGDIG_INSPECT_JOB_KIND",
     "DIGDIG_EXECUTE_JOB_KIND",
     "EXPBALL_INSPECT_JOB_KIND",
@@ -142,6 +146,7 @@ __all__ = [
     "create_battle_execute_plan_handler",
     "create_chocolate_inspect_handler",
     "create_chocolate_run_handler",
+    "create_digdig_board_grid_inspect_handler",
     "create_digdig_inspect_handler",
     "create_digdig_execute_handler",
     "create_expball_inspect_handler",
@@ -169,6 +174,7 @@ __all__ = [
     "register_completion_job",
     "register_battle_entry_job",
     "register_diagnostic_job",
+    "register_digdig_board_grid_inspect_job",
     "register_digdig_inspect_job",
     "register_digdig_execute_job",
     "register_expball_inspect_job",
