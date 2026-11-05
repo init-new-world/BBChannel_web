@@ -82,7 +82,7 @@ Implemented workflows include:
 - Battle entry, support selection, team checks, skills, command-card strategies, result handling, repeated runs, and bounded crash or frozen-screen recovery.
 - Assist filters for servant/CE identity, limit break, friendship, NP and servant level, main and append skill levels, custom tags, NP color, and Olga form.
 - CE template creation and inventory management, plus a visual custom-tag crop/import/binding tool.
-- Lottery, Valentine exchange, excavation (including 28-cell board grid and 18-intersection inspection), and supported EXP-material workflows, with job history, progress events, pause/resume, and cancellation.
+- Lottery, Valentine exchange, excavation (including 28-cell board grid and 18-intersection inspection plus one-key and filtered excavation cycles), and supported EXP-material workflows, with job history, progress events, pause/resume, and cancellation.
 - Material drop queries from the bundled data and a local notebook.
 
 The console's top-bar language selector supports English and Simplified Chinese. It saves the choice in browser local storage and otherwise follows the browser language. Static interface controls and common live status text are translated; script JSON, device identifiers, names, and backend-provided messages remain unchanged.

@@ -180,7 +180,9 @@ const els = {
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   inspectDigdigGrid: document.querySelector("#inspect-digdig-grid"),
+  digdigMaxCycles: document.querySelector("#digdig-max-cycles"),
   executeDigdig: document.querySelector("#execute-digdig"),
+  runDigdig: document.querySelector("#run-digdig"),
   inspectLottery: document.querySelector("#inspect-lottery"),
   runLottery: document.querySelector("#run-lottery"),
   lotteryPaySlot: document.querySelector("#lottery-pay-slot"),
@@ -508,6 +510,7 @@ function bindEvents() {
   els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.inspectDigdigGrid.addEventListener("click", inspectDigdigGrid);
   els.executeDigdig.addEventListener("click", executeDigdig);
+  els.runDigdig.addEventListener("click", runDigdig);
   els.inspectLottery.addEventListener("click", inspectLottery);
   els.runLottery.addEventListener("click", runLottery);
   els.lotteryStar3.addEventListener("change", updateControls);
@@ -3048,6 +3051,18 @@ async function executeDigdig() {
   });
 }
 
+async function runDigdig() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.digdig.run", {
+    setting_name: settingName,
+    one_key: true,
+    max_cycles: readNumber(els.digdigMaxCycles),
+  });
+}
+
 function selectedLotteryStars() {
   return [
     [3, els.lotteryStar3],
@@ -3445,6 +3460,20 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.digdig.run") {
+    const cycles = result.cycles_completed || 0;
+    const dugCount = result.dug_cells?.length || 0;
+    const details = [
+      result.completed ? "Auto dig complete" : "Auto dig stopped",
+      `${cycles} ${cycles === 1 ? "cycle" : "cycles"}`,
+    ];
+    if (dugCount > 0) {
+      details.push(`${dugCount} ${dugCount === 1 ? "cell" : "cells"}`);
+    }
+    details.push(humanizeResultValue(result.reason || "unknown"));
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
   if (job.kind === "event.lottery.inspect") {
     const details = [
       `Lottery: ${humanizeResultValue(result.state || "unknown")}`,
@@ -3748,6 +3777,11 @@ function updateControls() {
     || !supportsDigdig
     || hasRunningJob;
   els.executeDigdig.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsDigdig
+    || hasRunningJob;
+  els.digdigMaxCycles.disabled = !supportsDigdig || hasRunningJob;
+  els.runDigdig.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsDigdig
     || hasRunningJob;

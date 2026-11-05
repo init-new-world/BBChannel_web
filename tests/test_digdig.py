@@ -2,12 +2,15 @@ from webapp.automation.digdig import (
     DIGDIG_BOARD_GRID_INSPECT_JOB_KIND,
     DIGDIG_EXECUTE_JOB_KIND,
     DIGDIG_INSPECT_JOB_KIND,
+    DIGDIG_RUN_JOB_KIND,
     create_digdig_board_grid_inspect_handler,
     create_digdig_execute_handler,
     create_digdig_inspect_handler,
+    create_digdig_run_handler,
     register_digdig_board_grid_inspect_job,
     register_digdig_execute_job,
     register_digdig_inspect_job,
+    register_digdig_run_job,
 )
 from webapp.core.models import MatchResult, OperationResult
 from webapp.runtime import JobDatabase, JobManager
@@ -399,3 +402,234 @@ def test_digdig_board_grid_inspect_handler_and_registration(tmp_path):
         )
         assert manager.has_kind(DIGDIG_BOARD_GRID_INSPECT_JOB_KIND)
         assert manager.requires_device(DIGDIG_BOARD_GRID_INSPECT_JOB_KIND) is True
+
+
+def test_digdig_run_handler_supports_one_key_and_filtered_excavation_cycles(tmp_path):
+    class OneKeyRecognizer:
+        def __init__(self):
+            self.states = [
+                {
+                    "server": "CH",
+                    "state": "execute",
+                    "status": "actionable",
+                    "recommended_action": "execute_dig",
+                    "matches": [
+                        {
+                            "name": "execute",
+                            "center": [845, 565],
+                            "size": [100, 40],
+                        }
+                    ],
+                },
+                {
+                    "server": "CH",
+                    "state": "digResult",
+                    "status": "observed",
+                    "recommended_action": None,
+                    "matches": [{"name": "digResult"}],
+                },
+                {
+                    "server": "CH",
+                    "state": "freeDig",
+                    "status": "observed",
+                    "recommended_action": None,
+                    "matches": [{"name": "freeDig"}],
+                },
+            ]
+
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.82
+            return self.states.pop(0)
+
+    device = _Device()
+    context = _Context()
+    one_key_result = create_digdig_run_handler(
+        _ScriptData(),
+        device,
+        OneKeyRecognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "one_key": True,
+            "max_cycles": 1,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert one_key_result["completed"] is True
+    assert one_key_result["stopped"] is False
+    assert one_key_result["mode"] == "one_key"
+    assert one_key_result["reason"] == "max_cycles_reached"
+    assert one_key_result["cycles_completed"] == 1
+    assert one_key_result["actions"] == ["free_dig", "execute_dig", "go_ahead"]
+    assert device.taps == [(1070, 200), (845, 565), (640, 637)]
+
+    class FilterRecognizer:
+        def __init__(self):
+            def make_slots(dug_set):
+                return [
+                    {
+                        "slot": slot,
+                        "dug": slot in dug_set,
+                        "piece": (
+                            None
+                            if slot in dug_set
+                            else "shovel_bone" if slot == 1 else "hammer_teeth"
+                        ),
+                        "piece_id": (
+                            None if slot in dug_set else 2 if slot == 1 else 6
+                        ),
+                    }
+                    for slot in range(28)
+                ]
+
+            initial_dug = set(range(28)) - {1, 7, 8, 19, 20, 26, 27}
+            after_piece_dug = initial_dug | {1}
+            after_probe_dug = after_piece_dug | {7, 8, 27}
+            self.board_reports = [
+                {
+                    "server": "CH",
+                    "rows": 4,
+                    "columns": 7,
+                    "slots": make_slots(initial_dug),
+                    "intersections": [
+                        {
+                            "index": idx,
+                            "material": "hx" if idx == 0 else None,
+                            "material_id": 1 if idx == 0 else None,
+                        }
+                        for idx in range(18)
+                    ],
+                },
+                {
+                    "server": "CH",
+                    "rows": 4,
+                    "columns": 7,
+                    "slots": make_slots(after_piece_dug),
+                    "intersections": [
+                        {
+                            "index": idx,
+                            "material": "hx" if idx == 0 else None,
+                            "material_id": 1 if idx == 0 else None,
+                        }
+                        for idx in range(18)
+                    ],
+                },
+                {
+                    "server": "CH",
+                    "rows": 4,
+                    "columns": 7,
+                    "slots": make_slots(after_probe_dug),
+                    "intersections": [
+                        {
+                            "index": idx,
+                            "material": "jlg" if idx == 17 else None,
+                            "material_id": 2 if idx == 17 else None,
+                        }
+                        for idx in range(18)
+                    ],
+                },
+            ]
+            self.state_reports = [
+                # Cell 1 triggers first-dig confirmation then digResult -> corner
+                {"server": "CH", "state": "needConfirm", "status": "observed", "matches": []},
+                {"server": "CH", "state": "checkmark", "status": "observed", "matches": []},
+                {"server": "CH", "state": "digResult", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                # Intersection 0 surrounding undug cell 7
+                {"server": "CH", "state": "reward", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                # Intersection 0 surrounding undug cell 8
+                {"server": "CH", "state": "digResult", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                # Intersection 17 unexposed probe cell 27
+                {"server": "CH", "state": "digResult", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                # Intersection 17 surrounding undug cells 19, 20, 26
+                {"server": "CH", "state": "digResult", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                {"server": "CH", "state": "digResult", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                {"server": "CH", "state": "digResult", "status": "observed", "matches": []},
+                {"server": "CH", "state": "corner", "status": "observed", "matches": []},
+                # Reset board confirmation
+                {
+                    "server": "CH",
+                    "state": "execute",
+                    "status": "actionable",
+                    "matches": [{"name": "execute", "center": [840, 563], "size": [100, 40]}],
+                },
+            ]
+
+        @staticmethod
+        def board_cell_roi(slot: int):
+            return DigdigRecognizer.board_cell_roi(slot)
+
+        def recognize_board_grid(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.7
+            return self.board_reports.pop(0)
+
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.82
+            return self.state_reports.pop(0)
+
+    filter_device = _Device()
+    filter_context = _Context()
+    filter_result = create_digdig_run_handler(
+        _ScriptData(),
+        filter_device,
+        FilterRecognizer(),
+    )(
+        filter_context,
+        {
+            "setting_name": "demo",
+            "one_key": False,
+            "target_pieces": ["bone"],
+            "target_extras": ["hx", "jlg"],
+            "max_cycles": 1,
+            "reset_board": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert filter_result["completed"] is True
+    assert filter_result["stopped"] is False
+    assert filter_result["mode"] == "filter"
+    assert filter_result["target_piece_ids"] == [2]
+    assert filter_result["target_extra_ids"] == [1, 2]
+    assert filter_result["dug_cells"] == [1, 7, 8, 27, 19, 20, 26]
+    assert filter_result["matched_intersections"] == [0, 17]
+    assert filter_result["cycles_completed"] == 1
+    assert filter_result["actions"] == [
+        "dig_cell_1",
+        "checkmark",
+        "confirm",
+        "go_ahead",
+        "dig_cell_7",
+        "go_ahead",
+        "dig_cell_8",
+        "go_ahead",
+        "dig_cell_27",
+        "go_ahead",
+        "dig_cell_19",
+        "go_ahead",
+        "dig_cell_20",
+        "go_ahead",
+        "dig_cell_26",
+        "go_ahead",
+        "reset_board",
+        "execute_reset",
+    ]
+
+    with JobManager(JobDatabase(tmp_path / "runtime2.db")) as manager:
+        register_digdig_run_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            FilterRecognizer(),
+        )
+        assert manager.has_kind(DIGDIG_RUN_JOB_KIND)
+        assert manager.requires_device(DIGDIG_RUN_JOB_KIND) is True

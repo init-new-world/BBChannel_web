@@ -78,6 +78,18 @@ _EXTRA_MATERIALS = (
     ("jlg", 2),
     ("zsds", 3),
 )
+_PIECE_ID_BY_NAME: dict[str, int] = {
+    name.lower(): piece_id
+    for group in _TOOL_PIECES.values()
+    for name, piece_id in group
+} | {
+    name.split("_", 1)[1].lower(): piece_id
+    for group in _TOOL_PIECES.values()
+    for name, piece_id in group
+}
+_EXTRA_ID_BY_NAME: dict[str, int] = {
+    material.lower(): material_id for material, material_id in _EXTRA_MATERIALS
+}
 _BOARD_CELL_ROIS = tuple(
     (
         round((926 + column * 131) * 2 / 3),
@@ -498,6 +510,60 @@ class DigdigRecognizer:
             "slots": slots,
             "intersections": intersections,
         }
+
+    @staticmethod
+    def board_cell_roi(slot: int) -> tuple[int, int, int, int]:
+        if isinstance(slot, bool) or not isinstance(slot, int) or not 0 <= slot < len(_BOARD_CELL_ROIS):
+            raise ValueError(f"slot must be between 0 and {len(_BOARD_CELL_ROIS) - 1}.")
+        return _BOARD_CELL_ROIS[slot]
+
+
+def normalize_digdig_piece_targets(values: Any) -> list[int]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("target_pieces must be a list.")
+    piece_ids: set[int] = set()
+    for item in values:
+        if isinstance(item, bool):
+            raise ValueError("target_pieces entries must be piece names or IDs 1..15.")
+        if isinstance(item, int):
+            if not 1 <= item <= 15:
+                raise ValueError("target_pieces integer IDs must be between 1 and 15.")
+            piece_ids.add(item)
+            continue
+        if isinstance(item, str):
+            key = item.strip().lower()
+            piece_id = _PIECE_ID_BY_NAME.get(key)
+            if piece_id is not None:
+                piece_ids.add(piece_id)
+                continue
+        raise ValueError(f"Unknown excavation piece target: {item!r}.")
+    return sorted(piece_ids)
+
+
+def normalize_digdig_extra_targets(values: Any) -> list[int]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("target_extras must be a list.")
+    extra_ids: set[int] = set()
+    for item in values:
+        if isinstance(item, bool):
+            raise ValueError("target_extras entries must be material names or IDs 1..3.")
+        if isinstance(item, int):
+            if not 1 <= item <= 3:
+                raise ValueError("target_extras integer IDs must be between 1 and 3.")
+            extra_ids.add(item)
+            continue
+        if isinstance(item, str):
+            key = item.strip().lower()
+            extra_id = _EXTRA_ID_BY_NAME.get(key)
+            if extra_id is not None:
+                extra_ids.add(extra_id)
+                continue
+        raise ValueError(f"Unknown excavation extra material target: {item!r}.")
+    return sorted(extra_ids)
 
 
 def _piece_tool(name: str) -> str | None:

@@ -223,7 +223,12 @@
             <div class="section-label">Excavation Board</div>
             <button id="inspect-digdig" class="ghost-button wide" type="button">Inspect Dig Board</button>
             <button id="inspect-digdig-grid" class="ghost-button wide" type="button">Inspect Dig Grid</button>
-            <button id="execute-digdig" class="primary-button wide" type="button">Execute Selection</button>
+            <label class="input-row">
+              <span>Dig cycles</span>
+              <input id="digdig-max-cycles" class="field number-field" type="number" min="1" max="200" step="1" value="10">
+            </label>
+            <button id="execute-digdig" class="ghost-button wide" type="button">Execute Selection</button>
+            <button id="run-digdig" class="primary-button wide" type="button">Run Auto Dig</button>
             <div class="panel-divider"></div>
             <div class="section-label">Unlimited Lottery</div>
             <label class="input-row">

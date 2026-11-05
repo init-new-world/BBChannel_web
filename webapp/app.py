@@ -32,6 +32,7 @@ from webapp.automation import (
     register_digdig_board_grid_inspect_job,
     register_digdig_execute_job,
     register_digdig_inspect_job,
+    register_digdig_run_job,
     register_expball_inspect_job,
     register_expball_storage_grid_inspect_job,
     register_expball_navigate_job,
@@ -287,6 +288,12 @@ def create_app(
         digdig_recognizer,
     )
     register_digdig_execute_job(
+        job_manager,
+        script_data,
+        device_service,
+        digdig_recognizer,
+    )
+    register_digdig_run_job(
         job_manager,
         script_data,
         device_service,
