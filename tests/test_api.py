@@ -1256,6 +1256,86 @@ def test_setting_program_compiles_conditional_skill_block_controls(tmp_path: Pat
     ]
 
 
+def test_setting_program_compiles_four_field_np_conditional_skills(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "np-condition.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [
+                ["Start", 1, [], ["np", [1, "≥", 50], [0, "≥", 50], [1, "≤", 100]]],
+                1,
+                ["End"],
+            ],
+        },
+    )
+
+    payload = client.get("/api/settings/np-condition/program").json()
+
+    assert payload["execution"]["battle"] == {"ready": True, "reason": None}
+    turn = payload["rounds"][0]["turns"][0]
+    assert [action.get("control") for action in turn["actions"]] == [
+        {
+            "type": "condition_start",
+            "execute_when_matched": True,
+            "check_cards": False,
+            "checks": [],
+            "check_np": True,
+            "np_checks": [
+                {"servant": 1, "enabled": True, "operator": "≥", "value": 50},
+                {"servant": 2, "enabled": False, "operator": "≥", "value": 50},
+                {"servant": 3, "enabled": True, "operator": "≤", "value": 100},
+            ],
+        },
+        None,
+        {"type": "condition_end"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "bad_np_spec",
+    [
+        "np",
+        ["other", [1, "≥", 50], [0, "≥", 50], [0, "≥", 50]],
+        ["np", [1, "≥", 50], [0, "≥", 50]],
+        ["np", [2, "≥", 50], [0, "≥", 50], [0, "≥", 50]],
+        ["np", [1, ">", 50], [0, "≥", 50], [0, "≥", 50]],
+        ["np", [1, "≥", -1], [0, "≥", 50], [0, "≥", 50]],
+        ["np", [1, "≥", 301], [0, "≥", 50], [0, "≥", 50]],
+        ["np", [1, "≥", True], [0, "≥", 50], [0, "≥", 50]],
+    ],
+)
+def test_setting_program_rejects_malformed_four_field_np_condition(
+    tmp_path: Path,
+    bad_np_spec,
+):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    _write_json(
+        data / "settings" / "bad-np-condition.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [
+                ["Start", 1, [], bad_np_spec],
+                1,
+                ["End"],
+            ],
+        },
+    )
+
+    payload = client.get("/api/settings/bad-np-condition/program").json()
+
+    assert payload["execution"]["battle"]["ready"] is False
+    assert payload["rounds"][0]["turns"][0]["actions"][0]["supported"] is False
+
+
 def test_setting_program_compiles_master_order_change(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

@@ -29,6 +29,7 @@ from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
 from webapp.services.cards import CommandCardRecognizer, recognize_card_blocks
 from webapp.services.devices import DeviceService
+from webapp.services.np_charge import NpChargeRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.script_data import ScriptDataService
 
@@ -503,6 +504,7 @@ def register_battle_jobs(
     device_service: DeviceService | None = None,
     recognition: RecognitionService | None = None,
     card_recognizer: CommandCardRecognizer | None = None,
+    np_recognizer: NpChargeRecognizer | None = None,
 ) -> None:
     def dry_run(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
@@ -604,6 +606,7 @@ def register_battle_jobs(
                 device_service,
                 recognition,
                 card_recognizer,
+                np_recognizer,
             ),
             requires_device=True,
         )
@@ -614,6 +617,7 @@ def create_battle_execute_plan_handler(
     device_service: DeviceService,
     recognition: RecognitionService,
     card_recognizer: CommandCardRecognizer | None,
+    np_recognizer: NpChargeRecognizer | None = None,
 ):
     def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
@@ -667,6 +671,19 @@ def create_battle_execute_plan_handler(
         )
         if needs_card_recognition and card_recognizer is None:
             raise ValueError("Command card recognition is not configured.")
+        needs_np_recognition = any(
+            action.get("control", {}).get("check_np")
+            for round_plan in program["rounds"]
+            for turn in round_plan["turns"]
+            for action in turn["actions"]
+        )
+        effective_np_recognizer = np_recognizer or (
+            NpChargeRecognizer(recognition)
+            if isinstance(recognition, RecognitionService)
+            else None
+        )
+        if needs_np_recognition and effective_np_recognizer is None:
+            raise ValueError("NP charge recognition is not configured.")
         if initialize_settings:
             initialize_battle_settings(
                 context,
@@ -725,12 +742,15 @@ def create_battle_execute_plan_handler(
             for skill_number, action in enumerate(skill_actions, start=1):
                 control = action.get("control")
                 if control and control["type"] == "condition_start":
-                    matched = True
-                    if control["check_cards"]:
+                    check_np = bool(control.get("check_np"))
+                    check_cards = bool(control["check_cards"])
+                    if check_cards:
                         condition = turn.get("condition")
                         if not isinstance(condition, list) or not condition:
                             raise ValueError("Conditional skill block has no card condition.")
-                        _wait_for_battle_ready(
+                    battle_screenshot: bytes | None = None
+                    if check_np or check_cards:
+                        battle_screenshot = _wait_for_battle_ready(
                             context,
                             device_service,
                             recognition,
@@ -740,7 +760,21 @@ def create_battle_execute_plan_handler(
                             poll_interval,
                             reconnect_timing=tap_interval,
                         )
-                        matched, condition_taps = _evaluate_card_condition(
+                    np_matched = True
+                    if check_np:
+                        assert battle_screenshot is not None
+                        assert effective_np_recognizer is not None
+                        np_matched = _evaluate_np_condition(
+                            context,
+                            effective_np_recognizer,
+                            battle_screenshot,
+                            program["server"],
+                            servant_positions,
+                            control["np_checks"],
+                        )
+                    card_matched = True
+                    if check_cards:
+                        card_matched, condition_taps = _evaluate_card_condition(
                             context,
                             device_service,
                             recognition,
@@ -758,6 +792,7 @@ def create_battle_execute_plan_handler(
                             checks=control["checks"],
                         )
                         tap_count += condition_taps
+                    matched = np_matched and card_matched
                     execute_conditional_skills = matched == control["execute_when_matched"]
                     continue
                 if control and control["type"] == "condition_end":
@@ -1338,6 +1373,53 @@ def _evaluate_card_condition(
     return matched, tap_count
 
 
+def _evaluate_np_condition(
+    context: RunContext,
+    np_recognizer: NpChargeRecognizer,
+    screenshot: bytes,
+    server: str,
+    servant_positions: list[str | None],
+    np_checks: list[dict[str, Any]],
+) -> bool:
+    present = [servant is not None for servant in servant_positions[:3]]
+    recognized = np_recognizer.recognize(screenshot, server, present=present)
+    if not recognized["complete"]:
+        recognized_count = sum(1 for value in recognized["values"] if value is not None)
+        raise ValueError(f"Recognized {recognized_count} of 3 NP charge values.")
+    matched = True
+    reason: str | None = None
+    for item in np_checks:
+        if not item["enabled"]:
+            continue
+        servant = int(item["servant"])
+        value = recognized["values"][servant - 1]
+        if value is None:
+            raise ValueError(f"Missing NP charge value for servant slot {servant}.")
+        target = int(item["value"])
+        operator = item["operator"]
+        if operator == "≥":
+            slot_matched = value >= target
+        elif operator == "≤":
+            slot_matched = value <= target
+        else:
+            raise ValueError(f"Unsupported NP condition operator: {operator!r}.")
+        if not slot_matched:
+            matched = False
+            reason = f"Servant {servant} NP {value}% did not satisfy {operator} {target}%."
+            break
+    context.emit(
+        "skill_np_condition",
+        "Conditional skill NP check completed.",
+        data={
+            "matched": matched,
+            "reason": reason,
+            "checks": np_checks,
+            "recognition": recognized,
+        },
+    )
+    return matched
+
+
 def _execute_skills_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
@@ -1560,7 +1642,7 @@ def _wait_for_battle_ready(
     timeout_seconds: float,
     poll_interval: float,
     reconnect_timing: float | _TapTiming | None = None,
-) -> None:
+) -> bytes:
     started = monotonic()
     attempts = 0
     while True:
@@ -1593,7 +1675,7 @@ def _wait_for_battle_ready(
             },
         )
         if match.matched:
-            return
+            return screenshot
         if monotonic() - started >= timeout_seconds:
             raise TimeoutError(
                 f"Battle controls did not become ready within {timeout_seconds:.2f} seconds."

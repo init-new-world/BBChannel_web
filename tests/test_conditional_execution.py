@@ -273,3 +273,282 @@ def test_registered_conditional_job_without_card_checks_skips_hand_inspection(
     assert outcome.condition_events == []
     assert ("tap", 1250, 683) not in outcome.trace
     assert ("sleep", 0.037) in outcome.trace
+
+
+class _FakeNpRecognizer:
+    def __init__(self, trace, values=(80, 30, 0), *, complete=True):
+        self.trace = trace
+        self.values = list(values)
+        self.complete = complete
+        self.calls = []
+
+    def recognize(self, screenshot, server, *, present, threshold=None):
+        assert screenshot == b"battle"
+        assert server == "CH"
+        self.calls.append(tuple(present))
+        self.trace.append(("recognize_np", tuple(present)))
+        return {
+            "values": list(self.values),
+            "complete": self.complete,
+        }
+
+
+def _run_four_field_conditional_job(
+    monkeypatch,
+    *,
+    mode=1,
+    checks=None,
+    np_spec=None,
+    np_values=(80, 30, 0),
+    np_complete=True,
+    servants=None,
+    extra_pre_actions=(),
+):
+    condition = {
+        "card1": {
+            "type": 1,
+            "cards": ["1B"],
+            "criticalStar": 0,
+            "more_or_less": True,
+        },
+        "card2": {
+            "type": 2,
+            "cards": [],
+            "criticalStar": 0,
+            "more_or_less": True,
+        },
+        "card3": {
+            "type": 2,
+            "cards": [],
+            "criticalStar": 0,
+            "more_or_less": True,
+        },
+        "colorFirst": True,
+    }
+    if checks is None:
+        checks = []
+    if np_spec is None:
+        np_spec = ["np", [1, "≥", 50], [0, "≥", 50], [0, "≥", 50]]
+    if servants is None:
+        servants = [
+            {"slot": 0, "name": "One", "active": True, "sn": "100"},
+            {"slot": 1, "name": "Two", "active": True, "sn": "200"},
+            {"slot": 2, "name": None, "active": False, "sn": None},
+        ]
+    plan = {
+        "name": "np-condition-repro",
+        "server": "CH",
+        "servants": servants,
+        "run": {
+            "first_battle_set": 0,
+            "interval_before_choose_card": 0.037,
+            "no_speedup_skill": True,
+            "random_time": 0,
+            "random_touch": False,
+        },
+        "rounds": [
+            {
+                "round": 1,
+                "turns": [
+                    {
+                        "turn": 0,
+                        "nps": [],
+                        "strategy": None,
+                        "condition": [condition],
+                        "actions": [
+                            {"type": "skill", "command": command}
+                            for command in (
+                                *extra_pre_actions,
+                                ["Start", mode, checks, np_spec],
+                                1,
+                                ["End"],
+                            )
+                        ],
+                    }
+                ],
+            }
+        ],
+        "validation": {"ok": True, "errors": []},
+    }
+    program = compile_battle_program(plan)
+    assert program["execution"]["battle"] == {"ready": True, "reason": None}
+    trace = []
+    cards = _FakeCards(trace)
+    np_recognizer = _FakeNpRecognizer(trace, np_values, complete=np_complete)
+
+    def record_sleep(context, seconds):
+        context.raise_if_cancelled()
+        trace.append(("sleep", seconds))
+
+    monkeypatch.setattr(RunContext, "sleep", record_sleep)
+    monkeypatch.setattr(
+        battle,
+        "_wait_for_battle_transition",
+        lambda *_args, **_kwargs: {"state": "finished", "round": None},
+    )
+    database = _MemoryDatabase()
+    try:
+        with JobManager(database, max_workers=1) as manager:
+            battle.register_battle_jobs(
+                manager,
+                SimpleNamespace(get_setting_plan=lambda _name: deepcopy(plan)),
+                _FakeDevice(trace),
+                _FakeRecognition(),
+                cards,
+                np_recognizer,
+            )
+            job = manager.start(
+                "battle.execute-plan",
+                {
+                    "setting_name": "np-condition-repro",
+                    "threshold": 0.75,
+                    "timeout_seconds": 0.1,
+                    "poll_interval": 0.01,
+                    "tap_interval_seconds": 0.013,
+                    "initialize_settings": False,
+                },
+                device_key="fake:np-condition",
+            )
+            result = manager.wait(job.job_id, timeout=2)
+        events = database.list_events(job.job_id)
+    finally:
+        database.connection.close()
+    return SimpleNamespace(
+        result=result,
+        trace=trace,
+        cards=cards,
+        np_recognizer=np_recognizer,
+        roles=[
+            event.data["role"]
+            for event in events
+            if event.event_type == "device_action"
+        ],
+        condition_events=[
+            event for event in events if event.event_type == "skill_condition"
+        ],
+        np_condition_events=[
+            event for event in events if event.event_type == "skill_np_condition"
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "np_spec", "np_values", "should_execute_skill"),
+    [
+        (1, ["np", [1, "≥", 50], [1, "≤", 30], [0, "≥", 100]], (80, 30, 0), True),
+        (1, ["np", [1, "≥", 50], [1, "≤", 20], [0, "≥", 100]], (80, 30, 0), False),
+        (0, ["np", [1, "≥", 50], [1, "≤", 20], [0, "≥", 100]], (80, 30, 0), True),
+        (0, ["np", [1, "≥", 50], [1, "≤", 30], [0, "≥", 100]], (80, 30, 0), False),
+    ],
+)
+def test_four_field_np_only_conditional_skill_execution(
+    monkeypatch,
+    mode,
+    np_spec,
+    np_values,
+    should_execute_skill,
+):
+    outcome = _run_four_field_conditional_job(
+        monkeypatch,
+        mode=mode,
+        checks=[],
+        np_spec=np_spec,
+        np_values=np_values,
+    )
+
+    assert outcome.result.status == JobStatus.SUCCEEDED, outcome.result.error
+    assert outcome.cards.calls == 0
+    assert outcome.np_recognizer.calls == [(True, True, False)]
+    assert len(outcome.np_condition_events) == 1
+    expected_roles = [
+        *(["servant_skill_1"] if should_execute_skill else []),
+        "attack",
+        "face_card_1",
+        "face_card_2",
+        "face_card_3",
+    ]
+    assert outcome.roles == expected_roles
+
+
+def test_four_field_combined_np_and_card_condition_reuses_battle_snapshot(monkeypatch):
+    outcome = _run_four_field_conditional_job(
+        monkeypatch,
+        mode=1,
+        checks=[1],
+        np_spec=["np", [1, "≥", 50], [0, "≥", 50], [0, "≥", 50]],
+        np_values=(80, 0, 0),
+    )
+
+    assert outcome.result.status == JobStatus.SUCCEEDED, outcome.result.error
+    assert outcome.np_recognizer.calls == [(True, True, False)]
+    assert outcome.cards.calls == 1
+    assert len(outcome.np_condition_events) == 1
+    assert len(outcome.condition_events) == 1
+    assert outcome.roles == [
+        "condition_attack",
+        "condition_back",
+        "servant_skill_1",
+        "attack",
+        "face_card_1",
+        "face_card_2",
+        "face_card_3",
+    ]
+    assert outcome.trace[:10] == [
+        ("snapshot", "battle"),
+        ("recognize_np", (True, True, False)),
+        ("tap", 1150, 600),
+        ("sleep", 0.013),
+        ("snapshot", "cards"),
+        ("sleep", 0.037),
+        ("snapshot", "cards"),
+        ("recognize",),
+        ("tap", 1250, 683),
+        ("sleep", 0.013),
+    ]
+
+
+def test_four_field_combined_condition_requires_both_np_and_card_match(monkeypatch):
+    outcome = _run_four_field_conditional_job(
+        monkeypatch,
+        mode=1,
+        checks=[1],
+        np_spec=["np", [1, "≥", 100], [0, "≥", 50], [0, "≥", 50]],
+        np_values=(80, 0, 0),
+    )
+
+    assert outcome.result.status == JobStatus.SUCCEEDED, outcome.result.error
+    assert outcome.np_condition_events[0].data["matched"] is False
+    assert outcome.condition_events[0].data["matched"] is True
+    assert "servant_skill_1" not in outcome.roles
+
+
+def test_four_field_all_disabled_np_checks_skips_np_recognition(monkeypatch):
+    outcome = _run_four_field_conditional_job(
+        monkeypatch,
+        mode=1,
+        checks=[],
+        np_spec=["np", [0, "≥", 50], [0, "≥", 50], [0, "≥", 50]],
+        np_values=(0, 0, 0),
+    )
+
+    assert outcome.result.status == JobStatus.SUCCEEDED, outcome.result.error
+    assert outcome.np_recognizer.calls == []
+    assert outcome.np_condition_events == []
+    assert "servant_skill_1" in outcome.roles
+
+
+def test_four_field_incomplete_np_recognition_fails_job(monkeypatch):
+    outcome = _run_four_field_conditional_job(
+        monkeypatch,
+        mode=1,
+        checks=[],
+        np_spec=["np", [1, "≥", 50], [0, "≥", 50], [0, "≥", 50]],
+        np_values=(80, None, 0),
+        np_complete=False,
+    )
+
+    assert outcome.result.status == JobStatus.FAILED
+    assert outcome.result.error == {
+        "type": "ValueError",
+        "message": "Recognized 2 of 3 NP charge values.",
+    }

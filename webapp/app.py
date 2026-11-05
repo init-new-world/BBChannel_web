@@ -71,6 +71,7 @@ from webapp.services.master_portraits import MasterPortraitService
 from webapp.services.lottery import LotteryRecognizer
 from webapp.services.materials import MaterialDropService
 from webapp.services.notebook import NotebookService
+from webapp.services.np_charge import NpChargeRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.quest import QuestRecognizer
 from webapp.services.resources import ResourceService
@@ -240,6 +241,7 @@ def create_app(
     assist_tags = AssistTagService(resources)
     command_tags = CommandTagService(resources)
     card_recognizer = CommandCardRecognizer(resources, recognition)
+    np_recognizer = NpChargeRecognizer(recognition)
     team_recognizer = TeamRecognizer(resources, recognition)
     quest_recognizer = QuestRecognizer(recognition)
     chocolate_recognizer = ChocolateRecognizer(resources, recognition)
@@ -381,6 +383,7 @@ def create_app(
         device_service,
         recognition,
         card_recognizer,
+        np_recognizer,
     )
     stage_handler = create_stage_handler(
         script_data,
@@ -435,6 +438,7 @@ def create_app(
             device_service,
             recognition,
             card_recognizer,
+            np_recognizer,
         ),
         create_completion_handler(
             script_data,
@@ -487,6 +491,7 @@ def create_app(
     app.state.assist_tags = assist_tags
     app.state.command_tags = command_tags
     app.state.card_recognizer = card_recognizer
+    app.state.np_recognizer = np_recognizer
     app.state.quest_recognizer = quest_recognizer
     app.state.chocolate_recognizer = chocolate_recognizer
     app.state.digdig_recognizer = digdig_recognizer

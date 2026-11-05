@@ -452,19 +452,58 @@ def _compile_skill_control(
         return result
     if command[0] != "Start":
         return None
-    if len(command) != 3 or not isinstance(command[1], (bool, int)):
+    if len(command) not in {3, 4} or not isinstance(command[1], (bool, int)):
         return _unsupported(action, "Conditional skill blocks require Start, mode, and checks.")
     checks = command[2]
     if not isinstance(checks, (list, tuple)):
         return _unsupported(action, "Conditional skill checks must be a list.")
-    result = _supported(action, [])
-    result["control"] = {
+    control: dict[str, Any] = {
         "type": "condition_start",
         "execute_when_matched": bool(command[1]),
         "check_cards": bool(checks) and any(checks),
         "checks": deepcopy(checks),
     }
+    if len(command) == 4:
+        np_checks = _compile_np_condition(command[3])
+        if np_checks is None:
+            return _unsupported(
+                action,
+                "Conditional skill NP checks must be ['np', [enabled, '≥'|'≤', 0..300], ...].",
+            )
+        control["check_np"] = any(check["enabled"] for check in np_checks)
+        control["np_checks"] = np_checks
+    result = _supported(action, [])
+    result["control"] = control
     return result
+
+
+def _compile_np_condition(condition: Any) -> list[dict[str, Any]] | None:
+    if (
+        not isinstance(condition, (list, tuple))
+        or len(condition) != 4
+        or condition[0] != "np"
+    ):
+        return None
+    checks: list[dict[str, Any]] = []
+    for servant, entry in enumerate(condition[1:], start=1):
+        if not isinstance(entry, (list, tuple)) or len(entry) != 3:
+            return None
+        enabled, operator, threshold = entry
+        if not isinstance(enabled, (bool, int)) or enabled not in (0, 1):
+            return None
+        if not isinstance(operator, str) or operator not in {"≥", "≤"}:
+            return None
+        if isinstance(threshold, bool) or not isinstance(threshold, int) or not 0 <= threshold <= 300:
+            return None
+        checks.append(
+            {
+                "servant": servant,
+                "enabled": bool(enabled),
+                "operator": operator,
+                "value": threshold,
+            }
+        )
+    return checks
 
 
 def _compile_command_spell(
