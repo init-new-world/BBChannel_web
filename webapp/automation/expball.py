@@ -30,6 +30,9 @@ _ENHANCE_RECOMMEND_POINT = (1090, 163)
 _ENHANCE_SERVANT_RECOMMEND_POINT = (1217, 167)
 _ENHANCE_EXECUTE_POINT = (1140, 670)
 _ENHANCE_SKIP_ANIMATION_POINT = (823, 498)
+_ENHANCE_LIMIT_BREAK_POINT = (1050, 557)
+_ENHANCE_SKIP_LIMIT_BREAK_POINT = (633, 257)
+_ENHANCE_RETURN_FROM_LIMIT_BREAK_POINT = (1047, 285)
 
 
 def create_expball_inspect_handler(
@@ -834,6 +837,13 @@ def create_expball_enhance_handler(
         target_level: int | None = None
         if payload.get("target_level") is not None:
             target_level = _integer(payload, "target_level", 100, 1, 120)
+        auto_limit_break_raw = payload.get("auto_limit_break")
+        if auto_limit_break_raw is None:
+            auto_limit_break = bool(target == "servant")
+        elif not isinstance(auto_limit_break_raw, bool):
+            raise ValueError("auto_limit_break must be a boolean.")
+        else:
+            auto_limit_break = auto_limit_break_raw
         max_batches = _integer(payload, "max_batches", 1, 1, 1000)
         threshold = _number(payload, "threshold", 0.84, 0, 1)
         grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
@@ -856,11 +866,14 @@ def create_expball_enhance_handler(
         started = monotonic()
         attempts = 0
         batches_completed = 0
+        limit_breaks_completed = 0
         actions: list[str] = []
         selected_slots: list[int] = []
         materials_selected = False
         grid_cards_tapped = False
         pending_animation_skip = False
+        pending_limit_break_animation_skip = False
+        in_limit_break = False
         idle_polls = 0
         last_report: dict[str, Any] | None = None
         last_level_report: dict[str, Any] | None = None
@@ -887,8 +900,10 @@ def create_expball_enhance_handler(
                 "selection_mode": selection_mode,
                 "material_select_mode": selection_mode,
                 "target_level": target_level,
+                "auto_limit_break": auto_limit_break,
                 "max_batches": max_batches,
                 "batches_completed": batches_completed,
+                "limit_breaks_completed": limit_breaks_completed,
                 "completed": completed,
                 "stopped": stopped,
                 "reason": reason,
@@ -918,6 +933,7 @@ def create_expball_enhance_handler(
                 "role": role,
                 "target": target,
                 "batches_completed": batches_completed,
+                "limit_breaks_completed": limit_breaks_completed,
                 "operation": operation.to_dict(),
             }
             if extra:
@@ -952,9 +968,16 @@ def create_expball_enhance_handler(
                         "xzdx",
                         "tysd",
                         "qhjd",
+                        "qdjqh",
+                        "gotoqhcz",
                     )
                 )
-                or not ("help" in matches or "slot" in matches)
+                or not (
+                    "help" in matches
+                    or "slot" in matches
+                    or "sbzl" in matches
+                    or "ljzl" in matches
+                )
             ):
                 return False
             level_report = recognizer.recognize_servant_level(
@@ -973,14 +996,13 @@ def create_expball_enhance_handler(
             )
             current_level = level_report.get("current_level")
             valid = level_report.get("valid", True)
-            return bool(
-                valid
-                and isinstance(current_level, int)
-                and (
-                    current_level >= target_level
-                    or level_report.get("is_max_level") is True
-                )
-            )
+            if not valid or not isinstance(current_level, int):
+                return False
+            if current_level >= target_level:
+                return True
+            if auto_limit_break and ("sbzl" in matches or "ljzl" in matches):
+                return False
+            return bool(level_report.get("is_max_level") is True)
 
         while monotonic() - started <= timeout_seconds:
             attempts += 1
@@ -1002,6 +1024,7 @@ def create_expball_enhance_handler(
                     "attempt": attempts,
                     "target": target,
                     "batches_completed": batches_completed,
+                    "limit_breaks_completed": limit_breaks_completed,
                     **report,
                 },
             )
@@ -1013,9 +1036,39 @@ def create_expball_enhance_handler(
                 if isinstance(match, dict) and isinstance(match.get("name"), str)
             }
 
+            if pending_limit_break_animation_skip:
+                if any(
+                    name in matches
+                    for name in (
+                        "gotoqhcz",
+                        "help",
+                        "slot",
+                        "exlevel",
+                        "sbzl",
+                        "ljzl",
+                    )
+                ):
+                    pending_limit_break_animation_skip = False
+                    materials_selected = False
+                    grid_cards_tapped = False
+                else:
+                    if not tap_point(
+                        _ENHANCE_SKIP_LIMIT_BREAK_POINT,
+                        "skip_limit_break_animation",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    idle_polls = 0
+                    continue
+
             if pending_animation_skip:
                 if any(
-                    name in matches for name in ("help", "slot", "exlevel")
+                    name in matches
+                    for name in ("help", "slot", "exlevel", "sbzl", "ljzl")
                 ):
                     pending_animation_skip = False
                     materials_selected = False
@@ -1027,7 +1080,10 @@ def create_expball_enhance_handler(
                             reason="target_level_reached",
                             report=report,
                         )
-                    if batches_completed >= max_batches:
+                    if batches_completed >= max_batches and not (
+                        auto_limit_break
+                        and ("sbzl" in matches or "ljzl" in matches)
+                    ):
                         return finish(
                             completed=True,
                             stopped=False,
@@ -1060,20 +1116,6 @@ def create_expball_enhance_handler(
                     completed=False,
                     stopped=True,
                     reason="qp_full",
-                    report=report,
-                )
-            if "ljzl" in matches:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="grail_limit",
-                    report=report,
-                )
-            if "sbzl" in matches:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason="ascension_limit",
                     report=report,
                 )
             if "ljbhclose" in matches or "sure" in matches:
@@ -1111,8 +1153,10 @@ def create_expball_enhance_handler(
                     report=report,
                 )
 
-            if not materials_selected and inspect_level_if_needed(
-                screenshot, matches
+            if (
+                not materials_selected
+                and not in_limit_break
+                and inspect_level_if_needed(screenshot, matches)
             ):
                 return finish(
                     completed=True,
@@ -1122,13 +1166,16 @@ def create_expball_enhance_handler(
                 )
 
             acted = False
-            if "qhjd2" in matches:
-                confirm_target = matches["qhjd2"]
-                confirm_center = confirm_target.get("center") or (840, 590)
+            if "gotoqhcz" in matches:
+                goto_target = matches["gotoqhcz"]
+                goto_center = (
+                    goto_target.get("center")
+                    or _ENHANCE_RETURN_FROM_LIMIT_BREAK_POINT
+                )
                 if not tap_point(
-                    confirm_center,
-                    "confirm_enhancement",
-                    size=confirm_target.get("size"),
+                    goto_center,
+                    "return_to_servant_enhancement",
+                    size=goto_target.get("size"),
                 ):
                     return finish(
                         completed=False,
@@ -1136,8 +1183,87 @@ def create_expball_enhance_handler(
                         reason="device_action_failed",
                         report=report,
                     )
-                batches_completed += 1
-                pending_animation_skip = True
+                in_limit_break = False
+                materials_selected = False
+                grid_cards_tapped = False
+                acted = True
+            elif "qhjd2" in matches:
+                confirm_target = matches["qhjd2"]
+                confirm_center = confirm_target.get("center") or (840, 590)
+                if in_limit_break:
+                    if not tap_point(
+                        confirm_center,
+                        "confirm_limit_break",
+                        size=confirm_target.get("size"),
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    limit_breaks_completed += 1
+                    pending_limit_break_animation_skip = True
+                    in_limit_break = False
+                else:
+                    if not tap_point(
+                        confirm_center,
+                        "confirm_enhancement",
+                        size=confirm_target.get("size"),
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    batches_completed += 1
+                    pending_animation_skip = True
+                materials_selected = False
+                grid_cards_tapped = False
+                acted = True
+            elif "qdjqh" in matches:
+                if not tap_point(
+                    _ENHANCE_EXECUTE_POINT,
+                    "execute_limit_break",
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                in_limit_break = True
+                acted = True
+            elif "ljzl" in matches or "sbzl" in matches:
+                if not auto_limit_break:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason=(
+                            "grail_limit"
+                            if "ljzl" in matches
+                            else "ascension_limit"
+                        ),
+                        report=report,
+                    )
+                limit_key = "ljzl" if "ljzl" in matches else "sbzl"
+                limit_target = matches[limit_key]
+                limit_center = (
+                    limit_target.get("center") or _ENHANCE_LIMIT_BREAK_POINT
+                )
+                if not tap_point(
+                    limit_center,
+                    "open_limit_break",
+                    size=limit_target.get("size"),
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                in_limit_break = True
                 materials_selected = False
                 grid_cards_tapped = False
                 acted = True

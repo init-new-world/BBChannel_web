@@ -112,6 +112,7 @@ def create_expball_run_handler(
                 "max_batches",
                 "target_level",
                 "level_threshold",
+                "auto_limit_break",
             ):
                 _copy_option(payload, overflow_payload, key, key)
         _copy_option(

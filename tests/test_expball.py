@@ -1077,6 +1077,10 @@ def _enhance_report(*names, reason=None):
         "qhjd": (1153, 670),
         "qhjd2": (830, 593),
         "noSucai": (640, 360),
+        "sbzl": (1050, 557),
+        "ljzl": (1050, 557),
+        "qdjqh": (500, 120),
+        "gotoqhcz": (1047, 285),
     }
     return {
         "server": "CH",
@@ -1284,4 +1288,125 @@ def test_expball_enhance_closes_empty_materials_modal_and_stops():
         "close_empty_materials_dialog",
     ]
     assert device.taps == [(1090, 163), (640, 520)]
+
+
+def test_expball_enhance_performs_servant_limit_break_and_resumes_to_target_level():
+    reports = iter(
+        (
+            _enhance_report("sbzl", "help"),
+            _enhance_report("qdjqh", "help"),
+            _enhance_report("qhjd2"),
+            _enhance_report("unknown"),
+            _enhance_report("gotoqhcz", "help"),
+            _enhance_report("slot", "help"),
+            _enhance_report("feedjd", "help"),
+            _enhance_report("help"),
+            _enhance_report("qhjd2"),
+            _enhance_report("slot", "help"),
+        )
+    )
+    levels = iter(
+        (
+            {
+                "valid": True,
+                "current_level": 70,
+                "max_level": 70,
+                "is_max_level": True,
+            },
+            {
+                "valid": True,
+                "current_level": 70,
+                "max_level": 80,
+                "is_max_level": False,
+            },
+            {
+                "valid": True,
+                "current_level": 80,
+                "max_level": 80,
+                "is_max_level": True,
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_servant_level(self, *_args, **_kwargs):
+            return next(levels)
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "servant",
+            "material_select_mode": "auto",
+            "target_level": 80,
+            "max_batches": 2,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "target_level_reached"
+    assert result["limit_breaks_completed"] == 1
+    assert result["batches_completed"] == 1
+    assert result["actions"] == [
+        "open_limit_break",
+        "execute_limit_break",
+        "confirm_limit_break",
+        "skip_limit_break_animation",
+        "return_to_servant_enhancement",
+        "auto_select_materials",
+        "confirm_auto_select",
+        "execute_enhancement",
+        "confirm_enhancement",
+    ]
+    assert device.taps == [
+        (1050, 557),
+        (1140, 670),
+        (830, 593),
+        (633, 257),
+        (1047, 285),
+        (1217, 167),
+        (830, 593),
+        (1140, 670),
+        (830, 593),
+    ]
+
+
+def test_expball_enhance_stops_at_limit_break_when_auto_limit_break_disabled():
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return _enhance_report("ljzl", "help")
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "servant",
+            "auto_limit_break": False,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "grail_limit"
+    assert result["limit_breaks_completed"] == 0
+    assert device.taps == []
+
 
