@@ -281,8 +281,34 @@
                 <option value="stop">Stop</option>
                 <option value="storage">Storage</option>
                 <option value="sell">Sell</option>
+                <option value="servant_enhancement">Servant enhance</option>
+                <option value="equipment_enhancement">CE enhance</option>
               </select>
             </label>
+            <label class="input-row">
+              <span>Enhance</span>
+              <select id="expball-enhance-target" class="field" aria-label="Enhancement target">
+                <option value="equipment">CE enhance</option>
+                <option value="servant">Servant enhance</option>
+              </select>
+            </label>
+            <label class="input-row">
+              <span>Select mode</span>
+              <select id="expball-material-select-mode" class="field" aria-label="Enhancement material selection mode">
+                <option value="auto">Auto</option>
+                <option value="grid">Grid</option>
+              </select>
+            </label>
+            <label class="input-row">
+              <span>Target Lv.</span>
+              <input id="expball-target-level" class="field number-field" type="number" min="1" max="120" step="1" value="100">
+            </label>
+            <label class="input-row">
+              <span>Enhance batches</span>
+              <input id="expball-max-batches" class="field number-field" type="number" min="1" max="100" step="1" value="5">
+            </label>
+            <button id="inspect-expball-servant-level" class="ghost-button wide" type="button">Inspect Servant Level</button>
+            <button id="run-expball-enhance" class="ghost-button wide" type="button">Run Enhancement</button>
             <label class="input-row">
               <span>FP batches</span>
               <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">

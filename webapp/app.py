@@ -33,7 +33,9 @@ from webapp.automation import (
     register_digdig_execute_job,
     register_digdig_inspect_job,
     register_digdig_run_job,
+    register_expball_enhance_job,
     register_expball_inspect_job,
+    register_expball_servant_level_inspect_job,
     register_expball_storage_grid_inspect_job,
     register_expball_navigate_job,
     register_expball_run_job,
@@ -312,6 +314,12 @@ def create_app(
         device_service,
         expball_recognizer,
     )
+    register_expball_servant_level_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        expball_recognizer,
+    )
     register_expball_navigate_job(
         job_manager,
         script_data,
@@ -337,6 +345,12 @@ def create_app(
         expball_recognizer,
     )
     register_expball_summon_job(
+        job_manager,
+        script_data,
+        device_service,
+        expball_recognizer,
+    )
+    register_expball_enhance_job(
         job_manager,
         script_data,
         device_service,

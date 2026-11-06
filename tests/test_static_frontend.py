@@ -105,6 +105,12 @@ def test_operator_console_references_api_controls():
     assert 'id="expball-star-4"' in index
     assert 'id="expball-star-5"' in index
     assert 'id="expball-overflow-action"' in index
+    assert 'id="expball-enhance-target"' in index
+    assert 'id="expball-material-select-mode"' in index
+    assert 'id="expball-target-level"' in index
+    assert 'id="expball-max-batches"' in index
+    assert 'id="inspect-expball-servant-level"' in index
+    assert 'id="run-expball-enhance"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
     assert 'id="run-expball-storage"' in index
@@ -167,6 +173,8 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.lottery.run"' in script
     assert 'job.kind === "event.expball.inspect"' in script
     assert 'job.kind === "event.expball.inspect-storage-grid"' in script
+    assert 'job.kind === "event.expball.inspect-servant-level"' in script
+    assert 'job.kind === "event.expball.enhance"' in script
     assert 'job.kind === "event.expball.navigate"' in script
     assert 'job.kind === "event.expball.run"' in script
     assert 'job.kind === "event.expball.summon"' in script

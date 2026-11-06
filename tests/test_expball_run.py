@@ -270,6 +270,73 @@ def test_expball_run_handles_full_box_via_configured_storage_and_resumes():
     ]
 
 
+def test_expball_run_handles_full_box_via_servant_enhancement_and_completes_at_target_level():
+    nav_states = iter(
+        (
+            _navigation_report("summon_page"),
+            _navigation_report("enhancement_page"),
+        )
+    )
+    reports = iter(
+        (
+            _report(
+                "boxfull",
+                "summon",
+                "actionable",
+                action="handle_full_box",
+            ),
+            _report(
+                "slot",
+                "enhancement",
+                "actionable",
+                matches=[
+                    {"name": "slot", "center": [823, 283], "size": [120, 60]},
+                    {"name": "help", "center": [1180, 110], "size": [120, 60]},
+                ],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_servant_level(self, *_args, **_kwargs):
+            return {
+                "current_level": 100,
+                "max_level": 100,
+                "is_max_level": True,
+            }
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(), device, Recognizer()
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 5,
+            "overflow_action": "servant_enhancement",
+            "target_level": 100,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "target_level_reached"
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "navigate_summon",
+        "summon",
+        "navigate_servant_enhancement",
+        "servant_enhancement",
+    ]
+
+
 def test_expball_run_job_requires_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_expball_run_job(

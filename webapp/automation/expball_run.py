@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from webapp.automation.expball import (
+    create_expball_enhance_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
 )
@@ -15,7 +16,13 @@ from webapp.services.script_data import ScriptDataService
 
 
 EXPBALL_RUN_JOB_KIND = "event.expball.run"
-_OVERFLOW_ACTIONS = {"stop", "storage", "sell"}
+_OVERFLOW_ACTIONS = {
+    "stop",
+    "storage",
+    "sell",
+    "equipment_enhancement",
+    "servant_enhancement",
+}
 _VALID_CARD_STARS = {3, 4, 5}
 
 
@@ -44,6 +51,11 @@ def create_expball_run_handler(
         device_service,
         recognizer,
     )
+    enhance_handler = create_expball_enhance_handler(
+        script_data,
+        device_service,
+        recognizer,
+    )
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
@@ -57,7 +69,10 @@ def create_expball_run_handler(
         )
         overflow_action = str(payload.get("overflow_action") or "stop").lower()
         if overflow_action not in _OVERFLOW_ACTIONS:
-            raise ValueError("overflow_action must be stop, storage, or sell.")
+            raise ValueError(
+                "overflow_action must be stop, storage, sell, "
+                "equipment_enhancement, or servant_enhancement."
+            )
         stars = _parse_card_stars(payload)
         if overflow_action in {"storage", "sell"} and stars is None:
             raise ValueError(
@@ -85,6 +100,20 @@ def create_expball_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        if overflow_action in {"equipment_enhancement", "servant_enhancement"}:
+            overflow_payload["target"] = (
+                "equipment"
+                if overflow_action == "equipment_enhancement"
+                else "servant"
+            )
+            for key in (
+                "material_select_mode",
+                "select_base_first",
+                "max_batches",
+                "target_level",
+                "level_threshold",
+            ):
+                _copy_option(payload, overflow_payload, key, key)
         _copy_option(
             payload,
             navigation_payload,
@@ -214,11 +243,12 @@ def create_expball_run_handler(
                         or "navigation_stopped"
                     ),
                 )
-            overflow_handler = (
-                storage_handler
-                if overflow_action == "storage"
-                else sell_handler
-            )
+            if overflow_action == "storage":
+                overflow_handler = storage_handler
+            elif overflow_action == "sell":
+                overflow_handler = sell_handler
+            else:
+                overflow_handler = enhance_handler
             overflow_result = overflow_handler(context, dict(overflow_payload))
             record(overflow_action, overflow_result)
             if overflow_result.get("completed") is not True:
@@ -229,6 +259,15 @@ def create_expball_run_handler(
                         overflow_result.get("reason")
                         or f"{overflow_action}_stopped"
                     ),
+                )
+            if (
+                overflow_action == "servant_enhancement"
+                and overflow_result.get("reason") == "target_level_reached"
+            ):
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason="target_level_reached",
                 )
             overflow_cycles += 1
 

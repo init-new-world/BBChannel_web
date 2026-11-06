@@ -31,13 +31,43 @@ _STATE_SPECS = (
     ("qpfull", "confirmation", "observed", None, None),
     ("friendpointcall", "summon", "observed", None, None),
     ("in_store", "storage", "observed", None, None),
-    ("feedjd", "enhancement", "observed", None, None),
+    ("feedjd", "enhancement", "actionable", None, "confirm_auto_select"),
     ("doubleEXP", "enhancement", "observed", None, None),
-    ("sure", "confirmation", "observed", None, None),
+    ("sure", "confirmation", "actionable", None, "confirm_dialog"),
     ("menu", "navigation", "observed", None, None),
     ("shop", "navigation", "observed", None, None),
+    ("qhjd2", "confirmation", "actionable", None, "confirm_enhancement"),
+    ("qhjd", "enhancement", "actionable", None, "confirm_material_selection"),
+    ("sbzl", "enhancement", "actionable", None, "ascend_limit"),
+    ("ljzl", "enhancement", "actionable", None, "grail_limit"),
+    ("qdjqh", "enhancement", "actionable", None, "confirm_ascension"),
+    ("slot", "enhancement", "actionable", None, "open_material_slots"),
+    ("help", "enhancement", "actionable", None, "select_materials"),
+    ("exlevel", "enhancement", "actionable", None, "select_base"),
+    ("xzdx", "selection", "actionable", None, "select_target_card"),
+    ("tysd", "selection", "actionable", None, "select_material_card"),
 )
 _SCALES = (1.0, 0.75, 2 / 3, 0.5)
+_SERVANT_LEVEL_DIGIT_SCALES = (2 / 3, 0.5)
+_SERVANT_LEVEL_DIGITS = tuple(range(10))
+_SERVANT_LEVEL_LEFT_ROIS = tuple(
+    (
+        round((683 + 33 * index) * 2 / 3),
+        round(680 * 2 / 3),
+        round((723 + 33 * index) * 2 / 3) - round((683 + 33 * index) * 2 / 3),
+        round(745 * 2 / 3) - round(680 * 2 / 3),
+    )
+    for index in range(2)
+)
+_SERVANT_LEVEL_RIGHT_ROIS = tuple(
+    (
+        round((782 + 33 * index) * 2 / 3),
+        round(680 * 2 / 3),
+        round((822 + 33 * index) * 2 / 3) - round((782 + 33 * index) * 2 / 3),
+        round(745 * 2 / 3) - round(680 * 2 / 3),
+    )
+    for index in range(3)
+)
 _STORAGE_STARS = (3, 4, 5)
 _STORAGE_CARD_ROIS = tuple(
     (
@@ -267,5 +297,119 @@ class ExpBallRecognizer:
             "available_template_count": len(template_paths),
             "candidate_count": len(candidates),
             "recognized_count": len(best_by_slot),
+            "slots": slots,
+        }
+
+    def recognize_servant_level(
+        self,
+        screenshot: bytes,
+        *,
+        threshold: float = 0.6,
+    ) -> dict[str, Any]:
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        root = "expball/digits"
+        page = self._resources.template_index(prefix=root, limit=20)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+        template_paths = {
+            digit: f"{root}/{digit}.png"
+            for digit in _SERVANT_LEVEL_DIGITS
+            if f"{root}/{digit}.png" in available_paths
+        }
+        slot_defs = [
+            *tuple(
+                ("left", index, roi)
+                for index, roi in enumerate(_SERVANT_LEVEL_LEFT_ROIS)
+            ),
+            *tuple(
+                ("right", index, roi)
+                for index, roi in enumerate(_SERVANT_LEVEL_RIGHT_ROIS)
+            ),
+        ]
+        specs = [
+            (slot_index, side, index, digit, roi, template_paths[digit])
+            for slot_index, (side, index, roi) in enumerate(slot_defs)
+            for digit in _SERVANT_LEVEL_DIGITS
+            if digit in template_paths
+        ]
+        candidates = [
+            {
+                "template_path": template_path,
+                "threshold": threshold,
+                "roi": roi,
+                "scales": _SERVANT_LEVEL_DIGIT_SCALES,
+                "use_alpha_mask": False,
+            }
+            for _slot_index, _side, _index, _digit, roi, template_path in specs
+        ]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        best_by_slot: dict[int, tuple[int, Any]] = {}
+        for result, (slot_index, _side, _index, digit, _roi, _path) in zip(
+            results,
+            specs,
+            strict=True,
+        ):
+            if not result.matched:
+                continue
+            current = best_by_slot.get(slot_index)
+            if current is None or result.confidence > current[1].confidence:
+                best_by_slot[slot_index] = (digit, result)
+
+        left_digits: list[int] = []
+        right_digits: list[int] = []
+        slots: list[dict[str, Any]] = []
+        for slot_index, (side, index, roi) in enumerate(slot_defs):
+            best = best_by_slot.get(slot_index)
+            digit = best[0] if best is not None else None
+            if digit is not None:
+                if side == "left":
+                    left_digits.append(digit)
+                else:
+                    right_digits.append(digit)
+            slots.append(
+                {
+                    "slot": slot_index,
+                    "side": side,
+                    "index": index,
+                    "roi": list(roi),
+                    "digit": digit,
+                    "confidence": (
+                        best[1].confidence if best is not None else None
+                    ),
+                    "match": best[1].to_dict() if best is not None else None,
+                }
+            )
+
+        current_level = 0
+        for digit in left_digits:
+            current_level = current_level * 10 + digit
+        max_level = 0
+        for digit in right_digits:
+            max_level = max_level * 10 + digit
+        if left_digits and right_digits and current_level + 100 <= max_level:
+            current_level += 100
+        valid = bool(
+            left_digits
+            and right_digits
+            and current_level > 0
+            and max_level >= 20
+            and current_level <= max_level
+        )
+        return {
+            "valid": valid,
+            "current_level": current_level if valid else None,
+            "max_level": max_level if valid else None,
+            "is_max_level": bool(valid and current_level >= max_level),
+            "raw_current_level": current_level,
+            "raw_max_level": max_level,
+            "left_digits": left_digits,
+            "right_digits": right_digits,
+            "available_template_count": len(template_paths),
+            "candidate_count": len(candidates),
             "slots": slots,
         }

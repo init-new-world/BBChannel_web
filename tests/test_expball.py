@@ -1,13 +1,19 @@
 from webapp.automation.expball import (
+    EXPBALL_ENHANCE_JOB_KIND,
     EXPBALL_INSPECT_JOB_KIND,
+    EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
+    create_expball_enhance_handler,
     create_expball_inspect_handler,
+    create_expball_servant_level_inspect_handler,
     create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
+    register_expball_enhance_job,
     register_expball_inspect_job,
+    register_expball_servant_level_inspect_job,
     register_expball_storage_grid_inspect_job,
     register_expball_storage_job,
     register_expball_summon_job,
@@ -951,3 +957,331 @@ def test_expball_summon_job_requires_connected_device(tmp_path):
 
         assert manager.has_kind(EXPBALL_SUMMON_JOB_KIND)
         assert manager.requires_device(EXPBALL_SUMMON_JOB_KIND) is True
+
+
+def test_expball_recognizer_recognizes_servant_level_and_grail_levels():
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/digits"
+            assert limit == 20
+            return {
+                "entries": [
+                    {"path": f"expball/digits/{digit}.png"}
+                    for digit in range(10)
+                ]
+            }
+
+    class Recognition:
+        def __init__(self, slot_digits):
+            self.slot_digits = slot_digits
+            self.candidates = None
+
+        def match_templates(self, _screenshot, candidates):
+            self.candidates = candidates
+            results = []
+            for index, candidate in enumerate(candidates):
+                slot_index = index // 10
+                digit = index % 10
+                expected = self.slot_digits.get(slot_index)
+                matched = expected == digit
+                confidence = 0.96 if matched else 0.12
+                results.append(
+                    MatchResult(
+                        template_path=candidate["template_path"],
+                        matched=matched,
+                        confidence=confidence,
+                        threshold=0.6,
+                        top_left=[candidate["roi"][0], candidate["roi"][1]],
+                        size=[22, 33],
+                        center=[
+                            candidate["roi"][0] + 11,
+                            candidate["roi"][1] + 16,
+                        ],
+                        scale=2 / 3,
+                        roi=list(candidate["roi"]),
+                    )
+                )
+            return results
+
+    grail_recognition = Recognition({0: 2, 1: 0, 2: 1, 3: 2, 4: 0})
+    grail_report = ExpBallRecognizer(
+        Resources(), grail_recognition
+    ).recognize_servant_level(b"servant-level", threshold=0.6)
+
+    assert len(grail_recognition.candidates) == 50
+    assert grail_recognition.candidates[0]["use_alpha_mask"] is False
+    assert grail_report["current_level"] == 120
+    assert grail_report["max_level"] == 120
+    assert grail_report["is_max_level"] is True
+
+    normal_recognition = Recognition({0: 8, 1: 0, 2: 9, 3: 0})
+    normal_report = ExpBallRecognizer(
+        Resources(), normal_recognition
+    ).recognize_servant_level(b"servant-level", threshold=0.6)
+
+    assert normal_report["current_level"] == 80
+    assert normal_report["max_level"] == 90
+    assert normal_report["is_max_level"] is False
+
+
+def test_expball_servant_level_inspect_handler_and_job_registration(tmp_path):
+    class Recognizer:
+        def recognize_servant_level(self, screenshot, *, threshold):
+            assert screenshot == b"expball-screen"
+            assert threshold == 0.65
+            return {
+                "threshold": threshold,
+                "current_level": 100,
+                "max_level": 100,
+                "is_max_level": True,
+                "left_digits": [],
+                "right_digits": [],
+            }
+
+    context = _Context()
+    result = create_expball_servant_level_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )(context, {"setting_name": "demo", "threshold": 0.65})
+
+    assert result["setting_name"] == "demo"
+    assert result["server"] == "CH"
+    assert result["current_level"] == 100
+    assert result["max_level"] == 100
+    assert result["is_max_level"] is True
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_servant_level_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
+        assert manager.has_kind(EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND)
+        assert (
+            manager.requires_device(EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND)
+            is True
+        )
+
+
+def _enhance_report(*names, reason=None):
+    centers = {
+        "exlevel": (197, 157),
+        "xzdx": (300, 80),
+        "slot": (823, 283),
+        "help": (1180, 110),
+        "feedjd": (830, 593),
+        "sure": (640, 520),
+        "tysd": (420, 80),
+        "qhjd": (1153, 670),
+        "qhjd2": (830, 593),
+        "noSucai": (640, 360),
+    }
+    return {
+        "server": "CH",
+        "state": names[0] if names else "unknown",
+        "flow": "enhancement",
+        "status": "blocked" if reason else "actionable",
+        "reason": reason,
+        "recommended_action": None,
+        "matches": [
+            {
+                "name": name,
+                "center": list(centers[name]),
+                "size": [120, 50],
+            }
+            for name in names
+            if name in centers
+        ],
+    }
+
+
+def test_expball_enhance_auto_selects_and_stops_when_target_servant_level_reached():
+    reports = iter(
+        (
+            _enhance_report("exlevel", "help"),
+            _enhance_report("xzdx"),
+            _enhance_report("slot", "help"),
+            _enhance_report("feedjd", "help"),
+            _enhance_report("help"),
+            _enhance_report("qhjd2"),
+            _enhance_report("unknown"),
+            _enhance_report("slot", "help"),
+        )
+    )
+    levels = iter(
+        (
+            {
+                "current_level": 80,
+                "max_level": 90,
+                "is_max_level": False,
+            },
+            {
+                "current_level": 90,
+                "max_level": 90,
+                "is_max_level": True,
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.84
+            return next(reports)
+
+        def recognize_servant_level(self, _screenshot, *, threshold):
+            assert threshold == 0.6
+            return next(levels)
+
+    device = _Device()
+    context = _Context()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "target": "servant",
+            "material_select_mode": "auto",
+            "select_base_first": True,
+            "target_level": 90,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "target_level_reached"
+    assert result["batches_completed"] == 1
+    assert result["servant_level"]["current_level"] == 90
+    assert result["actions"] == [
+        "open_base_selection",
+        "select_base_card",
+        "auto_select_materials",
+        "confirm_auto_select",
+        "execute_enhancement",
+        "confirm_enhancement",
+        "skip_enhancement_animation",
+    ]
+    assert device.taps == [
+        (197, 157),
+        (135, 243),
+        (1217, 167),
+        (830, 593),
+        (1140, 670),
+        (830, 593),
+        (823, 498),
+    ]
+
+
+def test_expball_enhance_supports_rarity_filtered_grid_equipment_enhancement(tmp_path):
+    reports = iter(
+        (
+            _enhance_report("slot", "help"),
+            _enhance_report("tysd", "qhjd"),
+            _enhance_report("help"),
+            _enhance_report("qhjd2"),
+            _enhance_report("slot", "help"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_storage_grid(self, _screenshot, *, threshold):
+            assert threshold == 0.75
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 2,
+                "slots": [
+                    {"slot": 0, "star": 3, "center": [136, 248]},
+                    {"slot": 1, "star": 4, "center": [269, 248]},
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "equipment",
+            "material_select_mode": "grid",
+            "stars": [3, 4],
+            "max_batches": 1,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "batch_limit"
+    assert result["batches_completed"] == 1
+    assert result["selected_slots"] == [0, 1]
+    assert result["actions"] == [
+        "open_material_slots",
+        "select_material_card",
+        "select_material_card",
+        "confirm_material_selection",
+        "execute_enhancement",
+        "confirm_enhancement",
+    ]
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_enhance_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
+        assert manager.has_kind(EXPBALL_ENHANCE_JOB_KIND)
+        assert manager.requires_device(EXPBALL_ENHANCE_JOB_KIND) is True
+
+
+def test_expball_enhance_closes_empty_materials_modal_and_stops():
+    reports = iter(
+        (
+            _enhance_report("slot", "help"),
+            _enhance_report("sure", "slot", "help"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "equipment",
+            "material_select_mode": "auto",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "materials_exhausted"
+    assert result["actions"] == [
+        "auto_select_materials",
+        "close_empty_materials_dialog",
+    ]
+    assert device.taps == [(1090, 163), (640, 520)]
+

@@ -199,6 +199,12 @@ const els = {
   expballStar4: document.querySelector("#expball-star-4"),
   expballStar5: document.querySelector("#expball-star-5"),
   expballOverflowAction: document.querySelector("#expball-overflow-action"),
+  expballEnhanceTarget: document.querySelector("#expball-enhance-target"),
+  expballMaterialSelectMode: document.querySelector("#expball-material-select-mode"),
+  expballTargetLevel: document.querySelector("#expball-target-level"),
+  expballMaxBatches: document.querySelector("#expball-max-batches"),
+  inspectExpballServantLevel: document.querySelector("#inspect-expball-servant-level"),
+  runExpballEnhance: document.querySelector("#run-expball-enhance"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
@@ -531,6 +537,10 @@ function bindEvents() {
   els.expballStar4.addEventListener("change", updateControls);
   els.expballStar5.addEventListener("change", updateControls);
   els.expballOverflowAction.addEventListener("change", updateControls);
+  els.expballEnhanceTarget.addEventListener("change", updateControls);
+  els.expballMaterialSelectMode.addEventListener("change", updateControls);
+  els.inspectExpballServantLevel.addEventListener("click", inspectExpballServantLevel);
+  els.runExpballEnhance.addEventListener("click", runExpballEnhance);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
@@ -3165,6 +3175,34 @@ async function inspectExpballGrid() {
   });
 }
 
+async function inspectExpballServantLevel() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-servant-level", {
+    setting_name: settingName,
+  });
+}
+
+async function runExpballEnhance() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  const target = els.expballEnhanceTarget.value || "equipment";
+  const materialSelectMode = els.expballMaterialSelectMode.value || "auto";
+  const stars = selectedExpballStars();
+  await enqueueJob("event.expball.enhance", {
+    setting_name: settingName,
+    target,
+    material_select_mode: materialSelectMode,
+    max_batches: readNumber(els.expballMaxBatches),
+    ...(target === "servant" ? { target_level: readNumber(els.expballTargetLevel) } : {}),
+    ...(stars.length ? { stars } : {}),
+  });
+}
+
 async function runExpballSummon() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -3172,11 +3210,19 @@ async function runExpballSummon() {
   }
   const stars = selectedExpballStars();
   const overflowAction = els.expballOverflowAction.value || "stop";
+  const isEnhancementOverflow = ["equipment_enhancement", "servant_enhancement"].includes(overflowAction);
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
     overflow_action: overflowAction,
     ...(stars.length ? { stars } : {}),
+    ...(isEnhancementOverflow ? {
+      material_select_mode: els.expballMaterialSelectMode.value || "auto",
+      max_batches: readNumber(els.expballMaxBatches),
+      ...(overflowAction === "servant_enhancement"
+        ? { target_level: readNumber(els.expballTargetLevel) }
+        : {}),
+    } : {}),
   });
 }
 
@@ -3594,6 +3640,30 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.expball.inspect-servant-level") {
+    if (result.valid) {
+      els.jobResult.textContent = [
+        `Servant Lv. ${result.current_level}/${result.max_level}`,
+        result.is_max_level ? "Max level" : "Enhanceable",
+      ].join(" · ");
+    } else {
+      els.jobResult.textContent = "Servant level not detected";
+    }
+    return;
+  }
+  if (job.kind === "event.expball.enhance") {
+    const batches = result.batches_completed || 0;
+    const details = [
+      result.completed ? "Enhancement complete" : "Enhancement stopped",
+      `${batches} ${batches === 1 ? "batch" : "batches"}`,
+      humanizeResultValue(result.reason || "unknown"),
+    ];
+    if (result.servant_level?.current_level) {
+      details.push(`Lv. ${result.servant_level.current_level}/${result.servant_level.max_level}`);
+    }
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.run") {
     const details = [
       `${result.summons || 0}/${result.max_summons || 0} FP batches`,
@@ -3896,6 +3966,18 @@ function updateControls() {
   els.expballStar4.disabled = !supportsExpball || hasRunningJob;
   els.expballStar5.disabled = !supportsExpball || hasRunningJob;
   els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
+  els.expballEnhanceTarget.disabled = !supportsExpball || hasRunningJob;
+  els.expballMaterialSelectMode.disabled = !supportsExpball || hasRunningJob;
+  els.expballTargetLevel.disabled = !supportsExpball || hasRunningJob;
+  els.expballMaxBatches.disabled = !supportsExpball || hasRunningJob;
+  els.inspectExpballServantLevel.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
+  els.runExpballEnhance.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
   els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

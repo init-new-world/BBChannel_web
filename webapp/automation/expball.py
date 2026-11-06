@@ -16,10 +16,20 @@ from webapp.services.script_data import ScriptDataService
 
 EXPBALL_INSPECT_JOB_KIND = "event.expball.inspect"
 EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND = "event.expball.inspect-storage-grid"
+EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND = "event.expball.inspect-servant-level"
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
+EXPBALL_ENHANCE_JOB_KIND = "event.expball.enhance"
 _SUMMON_REQUEST_ACTIONS = {"summon_free_ten", "summon_ten"}
 _VALID_CARD_STARS = {3, 4, 5}
+_ENHANCE_TARGETS = {"equipment", "servant"}
+_ENHANCE_ADD_BASE_POINT = (197, 157)
+_ENHANCE_FIRST_CARD_POINT = (135, 243)
+_ENHANCE_OPEN_SLOTS_POINT = (823, 283)
+_ENHANCE_RECOMMEND_POINT = (1090, 163)
+_ENHANCE_SERVANT_RECOMMEND_POINT = (1217, 167)
+_ENHANCE_EXECUTE_POINT = (1140, 670)
+_ENHANCE_SKIP_ANIMATION_POINT = (823, 498)
 
 
 def create_expball_inspect_handler(
@@ -138,6 +148,67 @@ def register_expball_storage_grid_inspect_job(
     job_manager.register(
         EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
         create_expball_storage_grid_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_servant_level_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        threshold = _number(payload, "threshold", 0.6, 0, 1)
+        server = str(
+            script_data.get_setting_plan(normalized_name)["server"]
+        ).upper()
+        context.checkpoint(
+            "inspect_expball_servant_level",
+            progress=0.2,
+            message="Inspecting servant enhancement level digits.",
+        )
+        report = recognizer.recognize_servant_level(
+            device_service.snapshot(),
+            threshold=threshold,
+        )
+        context.emit(
+            "expball_servant_level",
+            "Servant enhancement level digits were inspected.",
+            data={"server": server, **report},
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Servant enhancement level inspection completed.",
+        )
+        return {
+            "setting_name": normalized_name,
+            "server": server,
+            **report,
+        }
+
+    return handler
+
+
+def register_expball_servant_level_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND,
+        create_expball_servant_level_inspect_handler(
             script_data,
             device_service,
             recognizer,
@@ -727,6 +798,562 @@ def register_expball_storage_job(
     job_manager.register(
         EXPBALL_STORAGE_JOB_KIND,
         create_expball_storage_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_enhance_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        target = str(payload.get("target") or "equipment").strip().lower()
+        if target not in _ENHANCE_TARGETS:
+            raise ValueError("target must be equipment or servant.")
+        selection_mode_raw = (
+            payload.get("selection_mode")
+            if payload.get("selection_mode") is not None
+            else payload.get("material_select_mode")
+        )
+        stars = _parse_card_stars(payload)
+        if selection_mode_raw is None:
+            selection_mode = "grid" if stars is not None else "auto"
+        else:
+            selection_mode = str(selection_mode_raw).strip().lower()
+        if selection_mode not in {"auto", "grid"}:
+            raise ValueError("selection_mode must be auto or grid.")
+        target_level: int | None = None
+        if payload.get("target_level") is not None:
+            target_level = _integer(payload, "target_level", 100, 1, 120)
+        max_batches = _integer(payload, "max_batches", 1, 1, 1000)
+        threshold = _number(payload, "threshold", 0.84, 0, 1)
+        grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
+        level_threshold = _number(payload, "level_threshold", 0.6, 0, 1)
+        timeout_seconds = _number(payload, "timeout_seconds", 180, 0.1, 3600)
+        poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
+        action_wait_seconds = _number(
+            payload,
+            "action_wait_seconds",
+            1,
+            0,
+            30,
+        )
+        max_idle_polls = _integer(payload, "max_idle_polls", 5, 1, 100)
+        plan = script_data.get_setting_plan(normalized_name)
+        server = str(plan["server"]).upper()
+        run_options = plan.get("run", {})
+        random_touch = bool(run_options.get("random_touch"))
+        random_time = configured_random_time(run_options.get("random_time", 0))
+        started = monotonic()
+        attempts = 0
+        batches_completed = 0
+        actions: list[str] = []
+        selected_slots: list[int] = []
+        materials_selected = False
+        grid_cards_tapped = False
+        pending_animation_skip = False
+        idle_polls = 0
+        last_report: dict[str, Any] | None = None
+        last_level_report: dict[str, Any] | None = None
+
+        def finish(
+            *,
+            completed: bool,
+            stopped: bool,
+            reason: str,
+            report: dict[str, Any],
+        ) -> dict[str, Any]:
+            context.checkpoint(
+                "complete",
+                progress=1.0,
+                message=(
+                    "Enhancement automation completed."
+                    if completed
+                    else "Enhancement automation stopped."
+                ),
+            )
+            return {
+                "setting_name": normalized_name,
+                "target": target,
+                "selection_mode": selection_mode,
+                "material_select_mode": selection_mode,
+                "target_level": target_level,
+                "max_batches": max_batches,
+                "batches_completed": batches_completed,
+                "completed": completed,
+                "stopped": stopped,
+                "reason": reason,
+                "attempts": attempts,
+                "actions": list(actions),
+                "selected_slots": list(selected_slots),
+                "selected_count": len(selected_slots),
+                "servant_level": last_level_report,
+                "last_level_report": last_level_report,
+                "last_report": report,
+            }
+
+        def tap_point(
+            point: list[int] | tuple[int, int],
+            role: str,
+            *,
+            size: list[int] | tuple[int, int] | None = None,
+            extra: dict[str, Any] | None = None,
+        ) -> bool:
+            x, y = randomized_touch_point(
+                point,
+                enabled=random_touch,
+                size=size,
+            )
+            operation = device_service.tap(x, y)
+            event_data: dict[str, Any] = {
+                "role": role,
+                "target": target,
+                "batches_completed": batches_completed,
+                "operation": operation.to_dict(),
+            }
+            if extra:
+                event_data.update(extra)
+            context.emit(
+                "device_action",
+                "Executed an enhancement automation action.",
+                data=event_data,
+            )
+            if not operation.ok:
+                return False
+            actions.append(role)
+            context.sleep(
+                randomized_wait_seconds(action_wait_seconds, random_time)
+            )
+            return True
+
+        def inspect_level_if_needed(
+            screenshot: bytes,
+            matches: dict[str, dict[str, Any]],
+        ) -> bool:
+            nonlocal last_level_report
+            if (
+                target != "servant"
+                or target_level is None
+                or any(
+                    overlay in matches
+                    for overlay in (
+                        "exlevel",
+                        "feedjd",
+                        "qhjd2",
+                        "xzdx",
+                        "tysd",
+                        "qhjd",
+                    )
+                )
+                or not ("help" in matches or "slot" in matches)
+            ):
+                return False
+            level_report = recognizer.recognize_servant_level(
+                screenshot,
+                threshold=level_threshold,
+            )
+            last_level_report = level_report
+            context.emit(
+                "expball_servant_level",
+                "Servant enhancement level digits were inspected.",
+                data={
+                    "server": server,
+                    "target_level": target_level,
+                    **level_report,
+                },
+            )
+            current_level = level_report.get("current_level")
+            valid = level_report.get("valid", True)
+            return bool(
+                valid
+                and isinstance(current_level, int)
+                and (
+                    current_level >= target_level
+                    or level_report.get("is_max_level") is True
+                )
+            )
+
+        while monotonic() - started <= timeout_seconds:
+            attempts += 1
+            context.checkpoint(
+                "enhance_expball",
+                progress=min((monotonic() - started) / timeout_seconds, 0.95),
+            )
+            screenshot = device_service.snapshot()
+            report = recognizer.recognize(
+                screenshot,
+                server,
+                threshold=threshold,
+            )
+            last_report = report
+            context.emit(
+                "expball_state",
+                "Enhancement workflow state was recognized.",
+                data={
+                    "attempt": attempts,
+                    "target": target,
+                    "batches_completed": batches_completed,
+                    **report,
+                },
+            )
+            status = str(report.get("status") or "unknown")
+            flow = str(report.get("flow") or "unknown")
+            matches = {
+                match.get("name"): match
+                for match in report.get("matches", [])
+                if isinstance(match, dict) and isinstance(match.get("name"), str)
+            }
+
+            if pending_animation_skip:
+                if any(
+                    name in matches for name in ("help", "slot", "exlevel")
+                ):
+                    pending_animation_skip = False
+                    materials_selected = False
+                    grid_cards_tapped = False
+                    if inspect_level_if_needed(screenshot, matches):
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="target_level_reached",
+                            report=report,
+                        )
+                    if batches_completed >= max_batches:
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="batch_limit",
+                            report=report,
+                        )
+                else:
+                    if not tap_point(
+                        _ENHANCE_SKIP_ANIMATION_POINT,
+                        "skip_enhancement_animation",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    idle_polls = 0
+                    continue
+
+            if status == "blocked":
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=str(report.get("reason") or "blocked"),
+                    report=report,
+                )
+            if "qpfull" in matches:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="qp_full",
+                    report=report,
+                )
+            if "ljzl" in matches:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="grail_limit",
+                    report=report,
+                )
+            if "sbzl" in matches:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="ascension_limit",
+                    report=report,
+                )
+            if "ljbhclose" in matches or "sure" in matches:
+                modal_key = "sure" if "sure" in matches else "ljbhclose"
+                close_target = matches[modal_key]
+                close_center = close_target.get("center") or (640, 563)
+                role = (
+                    "close_empty_materials_dialog"
+                    if modal_key == "sure"
+                    else "close_empty_materials"
+                )
+                if not tap_point(
+                    close_center,
+                    role,
+                    size=close_target.get("size"),
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason="materials_exhausted",
+                    report=report,
+                )
+
+            if flow in {"summon", "sell", "storage"}:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="outside_enhancement_flow",
+                    report=report,
+                )
+
+            if not materials_selected and inspect_level_if_needed(
+                screenshot, matches
+            ):
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason="target_level_reached",
+                    report=report,
+                )
+
+            acted = False
+            if "qhjd2" in matches:
+                confirm_target = matches["qhjd2"]
+                confirm_center = confirm_target.get("center") or (840, 590)
+                if not tap_point(
+                    confirm_center,
+                    "confirm_enhancement",
+                    size=confirm_target.get("size"),
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                batches_completed += 1
+                pending_animation_skip = True
+                materials_selected = False
+                grid_cards_tapped = False
+                acted = True
+            elif "feedjd" in matches:
+                feed_target = matches["feedjd"]
+                feed_center = feed_target.get("center") or (840, 633)
+                if not tap_point(
+                    feed_center,
+                    "confirm_auto_select",
+                    size=feed_target.get("size"),
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                materials_selected = True
+                acted = True
+            elif "xzdx" in matches:
+                if not tap_point(
+                    _ENHANCE_FIRST_CARD_POINT,
+                    "select_base_card",
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                materials_selected = False
+                grid_cards_tapped = False
+                acted = True
+            elif "tysd" in matches or "qhjd" in matches:
+                if not grid_cards_tapped:
+                    if stars is not None:
+                        grid_report = recognizer.recognize_storage_grid(
+                            screenshot,
+                            threshold=grid_threshold,
+                        )
+                        context.emit(
+                            "expball_storage_grid",
+                            "Visible experience-material cards were inspected.",
+                            data={
+                                "server": server,
+                                "stars": list(stars),
+                                **grid_report,
+                            },
+                        )
+                        matching_slots = [
+                            slot
+                            for slot in grid_report.get("slots", [])
+                            if isinstance(slot, dict)
+                            and slot.get("star") in stars
+                        ]
+                        if not matching_slots:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="no_matching_cards",
+                                report=report,
+                            )
+                        for slot in matching_slots:
+                            slot_center = slot.get("center")
+                            if (
+                                not isinstance(slot_center, list)
+                                or len(slot_center) != 2
+                            ):
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason="invalid_recognition_result",
+                                    report=report,
+                                )
+                            if not tap_point(
+                                slot_center,
+                                "select_material_card",
+                                extra={
+                                    "slot": slot.get("slot"),
+                                    "star": slot.get("star"),
+                                },
+                            ):
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason="device_action_failed",
+                                    report=report,
+                                )
+                            selected_slots.append(int(slot["slot"]))
+                    else:
+                        if not tap_point(
+                            _ENHANCE_FIRST_CARD_POINT,
+                            "select_material_card",
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                    grid_cards_tapped = True
+                    acted = True
+                if "qhjd" in matches:
+                    submit_target = matches["qhjd"]
+                    submit_center = submit_target.get("center") or (1155, 672)
+                    if not tap_point(
+                        submit_center,
+                        "confirm_material_selection",
+                        size=submit_target.get("size"),
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    materials_selected = True
+                    grid_cards_tapped = False
+                    acted = True
+            elif "exlevel" in matches:
+                if not tap_point(
+                    _ENHANCE_ADD_BASE_POINT,
+                    "open_base_selection",
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                materials_selected = False
+                grid_cards_tapped = False
+                acted = True
+            elif "slot" in matches and not materials_selected:
+                if selection_mode == "grid":
+                    slot_target = matches["slot"]
+                    slot_center = (
+                        slot_target.get("center") or _ENHANCE_OPEN_SLOTS_POINT
+                    )
+                    if not tap_point(
+                        slot_center,
+                        "open_material_slots",
+                        size=slot_target.get("size"),
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    grid_cards_tapped = False
+                    acted = True
+                else:
+                    recommend_point = (
+                        _ENHANCE_SERVANT_RECOMMEND_POINT
+                        if target == "servant" and server != "JP"
+                        else _ENHANCE_RECOMMEND_POINT
+                    )
+                    if not tap_point(
+                        recommend_point,
+                        "auto_select_materials",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    acted = True
+            elif "help" in matches or (
+                "slot" in matches and materials_selected
+            ):
+                if not tap_point(
+                    _ENHANCE_EXECUTE_POINT,
+                    "execute_enhancement",
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                acted = True
+
+            if acted:
+                idle_polls = 0
+                continue
+            idle_polls += 1
+            if idle_polls >= max_idle_polls:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="no_actionable_enhancement",
+                    report=report,
+                )
+            context.sleep(randomized_wait_seconds(poll_interval, random_time))
+
+        raise TimeoutError(
+            "Enhancement automation did not finish within "
+            f"{timeout_seconds:.2f} seconds. Last report: {last_report}"
+        )
+
+    return handler
+
+
+def register_expball_enhance_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_ENHANCE_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_ENHANCE_JOB_KIND,
+        create_expball_enhance_handler(
             script_data,
             device_service,
             recognizer,
