@@ -96,13 +96,17 @@ def test_operator_console_references_api_controls():
     assert 'id="lottery-star-3"' in index
     assert 'id="lottery-star-4"' in index
     assert 'id="lottery-star-5"' in index
+    assert 'id="lottery-overflow-action"' in index
     assert 'id="inspect-expball"' in index
     assert 'id="inspect-expball-grid"' in index
     assert 'id="expball-destination"' in index
     assert 'id="navigate-expball"' in index
+    assert 'id="expball-star-3"' in index
+    assert 'id="expball-star-4"' in index
+    assert 'id="expball-star-5"' in index
+    assert 'id="expball-overflow-action"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
-    assert 'id="expball-overflow-action"' not in index
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
     assert 'id="equip-template-name"' in index
@@ -182,6 +186,8 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.lottery.run"' in script
     assert "pay_slot: readNumber(els.lotteryPaySlot)" in script
     assert "stars: selectedLotteryStars()" in script
+    assert "overflow_action: overflowAction" in script
+    assert "selectedExpballStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script
     assert 'enqueueJob("event.expball.inspect-storage-grid"' in script
     assert 'enqueueJob("event.expball.navigate"' in script
@@ -190,7 +196,8 @@ def test_operator_console_references_api_controls():
     assert "max_summons: readNumber(els.fpSummonBatches)" in script
     assert 'enqueueJob("event.expball.storage"' in script
     assert 'enqueueJob("event.expball.sell"' in script
-    assert "overflowCycles" not in script
+    assert "result.overflow_cycles" in script
+    assert "result.selected_count" in script
     assert "/api/equip-templates" in script
     assert "/api/material-drops/catalog" in script
     assert "queryMaterialDrops" in script

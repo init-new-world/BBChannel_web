@@ -244,6 +244,14 @@
               <label><input id="lottery-star-4" type="checkbox" checked><span>4 star</span></label>
               <label><input id="lottery-star-5" type="checkbox" checked><span>5 star</span></label>
             </div>
+            <label class="input-row">
+              <span>Full box</span>
+              <select id="lottery-overflow-action" class="field" aria-label="Lottery inventory overflow action">
+                <option value="stop">Stop</option>
+                <option value="storage">Storage</option>
+                <option value="sell">Sell</option>
+              </select>
+            </label>
             <button id="inspect-lottery" class="ghost-button wide" type="button">Inspect Lottery</button>
             <button id="inspect-lottery-stacks" class="ghost-button wide" type="button">Inspect Giftbox Stacks</button>
             <button id="run-lottery" class="primary-button wide" type="button">Run Lottery Cycle</button>
@@ -262,6 +270,19 @@
             </label>
             <button id="navigate-expball" class="ghost-button wide" type="button">Navigate</button>
             <button id="inspect-expball-grid" class="ghost-button wide" type="button">Inspect Storage Grid</button>
+            <div class="inline-toggles" role="group" aria-label="EXP card rarity">
+              <label><input id="expball-star-3" type="checkbox" checked><span>3 star</span></label>
+              <label><input id="expball-star-4" type="checkbox" checked><span>4 star</span></label>
+              <label><input id="expball-star-5" type="checkbox"><span>5 star</span></label>
+            </div>
+            <label class="input-row">
+              <span>Full box</span>
+              <select id="expball-overflow-action" class="field" aria-label="EXP inventory overflow action">
+                <option value="stop">Stop</option>
+                <option value="storage">Storage</option>
+                <option value="sell">Sell</option>
+              </select>
+            </label>
             <label class="input-row">
               <span>FP batches</span>
               <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">

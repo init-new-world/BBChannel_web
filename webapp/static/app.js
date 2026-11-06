@@ -190,10 +190,15 @@ const els = {
   lotteryStar3: document.querySelector("#lottery-star-3"),
   lotteryStar4: document.querySelector("#lottery-star-4"),
   lotteryStar5: document.querySelector("#lottery-star-5"),
+  lotteryOverflowAction: document.querySelector("#lottery-overflow-action"),
   inspectExpball: document.querySelector("#inspect-expball"),
   expballDestination: document.querySelector("#expball-destination"),
   navigateExpball: document.querySelector("#navigate-expball"),
   inspectExpballGrid: document.querySelector("#inspect-expball-grid"),
+  expballStar3: document.querySelector("#expball-star-3"),
+  expballStar4: document.querySelector("#expball-star-4"),
+  expballStar5: document.querySelector("#expball-star-5"),
+  expballOverflowAction: document.querySelector("#expball-overflow-action"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
@@ -518,9 +523,14 @@ function bindEvents() {
   els.lotteryStar3.addEventListener("change", updateControls);
   els.lotteryStar4.addEventListener("change", updateControls);
   els.lotteryStar5.addEventListener("change", updateControls);
+  els.lotteryOverflowAction.addEventListener("change", updateControls);
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.navigateExpball.addEventListener("click", navigateExpball);
   els.inspectExpballGrid.addEventListener("click", inspectExpballGrid);
+  els.expballStar3.addEventListener("change", updateControls);
+  els.expballStar4.addEventListener("change", updateControls);
+  els.expballStar5.addEventListener("change", updateControls);
+  els.expballOverflowAction.addEventListener("change", updateControls);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
@@ -3075,6 +3085,16 @@ function selectedLotteryStars() {
     .map(([star]) => star);
 }
 
+function selectedExpballStars() {
+  return [
+    [3, els.expballStar3],
+    [4, els.expballStar4],
+    [5, els.expballStar5],
+  ]
+    .filter(([, input]) => input.checked)
+    .map(([star]) => star);
+}
+
 async function inspectLottery() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -3103,10 +3123,14 @@ async function runLottery() {
   if (!settingName || stars.length === 0) {
     return;
   }
+  const overflowAction = els.lotteryOverflowAction.value || "stop";
+  const overflowStars = selectedExpballStars();
   await enqueueJob("event.lottery.run", {
     setting_name: settingName,
     pay_slot: readNumber(els.lotteryPaySlot),
     stars: selectedLotteryStars(),
+    overflow_action: overflowAction,
+    ...(overflowStars.length ? { overflow_stars: overflowStars } : {}),
   });
 }
 
@@ -3146,9 +3170,13 @@ async function runExpballSummon() {
   if (!settingName) {
     return;
   }
+  const stars = selectedExpballStars();
+  const overflowAction = els.expballOverflowAction.value || "stop";
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
+    overflow_action: overflowAction,
+    ...(stars.length ? { stars } : {}),
   });
 }
 
@@ -3157,8 +3185,10 @@ async function runExpballStorage() {
   if (!settingName) {
     return;
   }
+  const stars = selectedExpballStars();
   await enqueueJob("event.expball.storage", {
     setting_name: settingName,
+    ...(stars.length ? { stars } : {}),
   });
 }
 
@@ -3167,8 +3197,10 @@ async function runExpballSell() {
   if (!settingName) {
     return;
   }
+  const stars = selectedExpballStars();
   await enqueueJob("event.expball.sell", {
     setting_name: settingName,
+    ...(stars.length ? { stars } : {}),
   });
 }
 
@@ -3515,12 +3547,16 @@ function renderJobResult(job) {
     return;
   }
   if (job.kind === "event.lottery.run") {
-    els.jobResult.textContent = [
+    const details = [
       result.completed ? "Lottery complete" : "Lottery stopped",
       humanizeResultValue(result.reason || "unknown"),
       `${result.giftbox_cycles || 0} gift box cycles`,
       `${result.receive_batches || 0} receive batches`,
-    ].join(" · ");
+    ];
+    if (result.overflow_cycles) {
+      details.push(`${result.overflow_cycles} overflow cycles`);
+    }
+    els.jobResult.textContent = details.join(" · ");
     return;
   }
   if (job.kind === "event.expball.inspect") {
@@ -3559,11 +3595,15 @@ function renderJobResult(job) {
     return;
   }
   if (job.kind === "event.expball.run") {
-    els.jobResult.textContent = [
+    const details = [
       `${result.summons || 0}/${result.max_summons || 0} FP batches`,
       result.completed ? "Completed" : "Stopped",
       humanizeResultValue(result.reason || "unknown"),
-    ].join(" · ");
+    ];
+    if (result.overflow_cycles) {
+      details.push(`${result.overflow_cycles} overflow cycles`);
+    }
+    els.jobResult.textContent = details.join(" · ");
     return;
   }
   if (job.kind === "event.expball.summon") {
@@ -3577,20 +3617,28 @@ function renderJobResult(job) {
   }
   if (job.kind === "event.expball.storage") {
     const actionCount = result.actions?.length || 0;
-    els.jobResult.textContent = [
+    const details = [
       result.completed ? "EXP stored" : "EXP storage stopped",
       humanizeResultValue(result.reason || "unknown"),
-      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
-    ].join(" · ");
+    ];
+    if (typeof result.selected_count === "number") {
+      details.push(`${result.selected_count} selected`);
+    }
+    details.push(`${actionCount} ${actionCount === 1 ? "action" : "actions"}`);
+    els.jobResult.textContent = details.join(" · ");
     return;
   }
   if (job.kind === "event.expball.sell") {
     const actionCount = result.actions?.length || 0;
-    els.jobResult.textContent = [
+    const details = [
       result.completed ? "EXP selection sold" : "EXP sale stopped",
       humanizeResultValue(result.reason || "unknown"),
-      `${actionCount} ${actionCount === 1 ? "action" : "actions"}`,
-    ].join(" · ");
+    ];
+    if (typeof result.selected_count === "number") {
+      details.push(`${result.selected_count} selected`);
+    }
+    details.push(`${actionCount} ${actionCount === 1 ? "action" : "actions"}`);
+    els.jobResult.textContent = details.join(" · ");
     return;
   }
   els.jobResult.textContent = "Completed";
@@ -3830,6 +3878,7 @@ function updateControls() {
   els.lotteryStar3.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar4.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar5.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOverflowAction.disabled = !supportsLottery || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
@@ -3843,6 +3892,10 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsExpball
     || hasRunningJob;
+  els.expballStar3.disabled = !supportsExpball || hasRunningJob;
+  els.expballStar4.disabled = !supportsExpball || hasRunningJob;
+  els.expballStar5.disabled = !supportsExpball || hasRunningJob;
+  els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
   els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
