@@ -45,6 +45,7 @@ from webapp.automation import (
     register_main_story_entry_job,
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
+    register_lottery_giftbox_stacks_inspect_job,
     register_lottery_inspect_job,
     register_lottery_navigate_job,
     register_lottery_run_job,
@@ -342,6 +343,12 @@ def create_app(
         expball_recognizer,
     )
     register_lottery_inspect_job(
+        job_manager,
+        script_data,
+        device_service,
+        lottery_recognizer,
+    )
+    register_lottery_giftbox_stacks_inspect_job(
         job_manager,
         script_data,
         device_service,

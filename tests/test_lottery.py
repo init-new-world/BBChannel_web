@@ -1,27 +1,34 @@
 from io import BytesIO
 
+from pathlib import Path
+
 from PIL import Image
 
 from webapp.automation.lottery import (
     LOTTERY_DRAW_JOB_KIND,
     LOTTERY_GIFTBOX_RECEIVE_JOB_KIND,
+    LOTTERY_GIFTBOX_STACKS_INSPECT_JOB_KIND,
     LOTTERY_INSPECT_JOB_KIND,
     LOTTERY_NAVIGATE_JOB_KIND,
     LOTTERY_RUN_JOB_KIND,
     create_lottery_draw_handler,
     create_lottery_giftbox_receive_handler,
+    create_lottery_giftbox_stacks_inspect_handler,
     create_lottery_inspect_handler,
     create_lottery_navigate_handler,
     create_lottery_run_handler,
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
+    register_lottery_giftbox_stacks_inspect_job,
     register_lottery_inspect_job,
     register_lottery_navigate_job,
     register_lottery_run_job,
 )
 from webapp.core.models import MatchResult, OperationResult
 from webapp.runtime import JobDatabase, JobManager
-from webapp.services.lottery import LotteryRecognizer
+from webapp.services.lottery import LotteryRecognizer, normalize_giftbox_max_counts
+from webapp.services.recognition import RecognitionService
+from webapp.services.resources import ResourceService
 
 
 def _match(template_path: str, matched: bool, confidence: float) -> MatchResult:
@@ -192,6 +199,7 @@ class _ScriptData:
 class _Device:
     def __init__(self):
         self.taps = []
+        self.swipes = []
 
     def snapshot(self):
         return b"lottery-screen"
@@ -199,6 +207,14 @@ class _Device:
     def tap(self, x, y):
         self.taps.append((x, y))
         return OperationResult(ok=True, action="tap", data={"x": x, "y": y})
+
+    def swipe(self, x1, y1, x2, y2, duration_ms=300):
+        self.swipes.append((x1, y1, x2, y2, duration_ms))
+        return OperationResult(
+            ok=True,
+            action="swipe",
+            data={"x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration_ms": duration_ms},
+        )
 
 
 class _Context:
@@ -677,9 +693,256 @@ def test_lottery_giftbox_receive_configures_filters_and_receives_batches():
     ]
 
 
+def test_lottery_recognizer_recognizes_giftbox_exp_stacks_and_scrollbar():
+    project_root = Path(__file__).resolve().parents[1]
+    resources = ResourceService(project_root / "assets", project_root / "data")
+    recognition = RecognitionService(resources)
+    recognizer = LotteryRecognizer(resources, recognition)
+
+    canvas = Image.new("RGB", (1920, 1080), (245, 245, 245))
+    df4 = Image.open(project_root / "assets/unlimitedPool/CH/df1.png").convert("RGB")
+    df5 = Image.open(project_root / "assets/unlimitedPool/CH/df2.png").convert("RGB")
+    d2 = Image.open(project_root / "assets/unlimitedPool/CH/digits/2.png").convert("RGB")
+    d5 = Image.open(project_root / "assets/unlimitedPool/CH/digits/5.png").convert("RGB")
+    d8 = Image.open(project_root / "assets/unlimitedPool/CH/digits/8.png").convert("RGB")
+    unchosen = Image.open(project_root / "assets/unlimitedPool/CH/unchosen.png").convert("RGB")
+    chosen = Image.open(project_root / "assets/unlimitedPool/CH/chosen.png").convert("RGB")
+    scrollbar = Image.open(project_root / "assets/unlimitedPool/CH/scrollbar.png").convert("RGB")
+
+    # Row 1: 4-star EXP stack x25, unselected (df4 size 100x100 -> center 231, 399)
+    canvas.paste(df4, (181, 349))
+    canvas.paste(d2, (533, 329))
+    canvas.paste(d5, (557, 329))
+    canvas.paste(unchosen, (1231, 399))
+
+    # Row 2: 5-star EXP stack x8, already selected (df5 size 100x100 -> center 231, 599)
+    canvas.paste(df5, (181, 549))
+    canvas.paste(d8, (533, 529))
+    canvas.paste(chosen, (1231, 599))
+
+    # Scrollbar near bottom
+    canvas.paste(scrollbar, (1390, 995))
+
+    canvas_720 = canvas.resize((1280, 720), Image.Resampling.BILINEAR)
+    buf = BytesIO()
+    canvas_720.save(buf, format="PNG")
+
+    report = recognizer.recognize_giftbox_stacks(
+        buf.getvalue(),
+        "CH",
+        stars=[3, 4, 5],
+        max_counts={4: 30, 5: 10},
+    )
+
+    assert report["stack_count"] == 2
+    assert report["selectable_count"] == 1
+    assert report["scrollbar"]["matched"] is True
+    assert report["scrollbar"]["at_bottom"] is True
+    assert report["stacks"][0]["star"] == 4
+    assert report["stacks"][0]["count"] == 25
+    assert report["stacks"][0]["selected"] is False
+    assert report["stacks"][0]["should_select"] is True
+    assert report["stacks"][0]["touch_point"] == [851, 266]
+    assert report["stacks"][1]["star"] == 5
+    assert report["stacks"][1]["count"] == 8
+    assert report["stacks"][1]["selected"] is True
+    assert report["stacks"][1]["should_select"] is False
+    assert report["touch_points"] == [[851, 266]]
+
+
+def test_normalize_giftbox_max_counts_parses_star_limits():
+    assert normalize_giftbox_max_counts(None) == {3: None, 4: None, 5: None}
+    assert normalize_giftbox_max_counts({"3": 99, 4: 20, "5": None}) == {
+        3: 99,
+        4: 20,
+        5: None,
+    }
+
+
+def test_lottery_giftbox_stacks_inspect_handler_reports_stacks():
+    class Recognizer:
+        def recognize_giftbox_stacks(
+            self,
+            screenshot,
+            server,
+            *,
+            stars,
+            max_counts,
+            threshold,
+        ):
+            assert screenshot == b"lottery-screen"
+            assert server == "CH"
+            assert stars == [3, 4]
+            assert max_counts == {3: 50, 4: 20, 5: None}
+            assert threshold == 0.75
+            return {
+                "server": "CH",
+                "stars": [3, 4],
+                "max_counts": {"3": 50, "4": 20, "5": None},
+                "scrollbar": {"matched": True, "center": [930, 200], "at_bottom": False},
+                "stack_count": 1,
+                "selectable_count": 1,
+                "stacks": [{"star": 4, "count": 15, "touch_point": [851, 266]}],
+                "touch_points": [[851, 266]],
+            }
+
+    context = _Context()
+    result = create_lottery_giftbox_stacks_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "stars": [3, 4],
+            "max_stack_counts": {"3": 50, "4": 20},
+            "threshold": 0.75,
+        },
+    )
+
+    assert result["setting_name"] == "demo"
+    assert result["stack_count"] == 1
+    assert result["touch_points"] == [[851, 266]]
+    assert [event[0] for event in context.events] == [
+        "checkpoint",
+        "lottery_giftbox_stacks",
+        "checkpoint",
+    ]
+
+
+def test_lottery_giftbox_receive_filters_stacks_by_max_stack_counts():
+    giftbox_reports = iter(
+        (
+            {
+                "state": "giftbox_loaded",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: False, 4: True, 5: False},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: False, 4: True, 5: False},
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+        )
+    )
+    stack_reports = iter(
+        (
+            {
+                "server": "CH",
+                "stars": [4],
+                "max_counts": {"3": None, "4": 25, "5": None},
+                "scrollbar": {"matched": True, "center": [930, 300], "at_bottom": False},
+                "stack_count": 2,
+                "selectable_count": 1,
+                "stacks": [],
+                "touch_points": [[851, 266]],
+            },
+            {
+                "server": "CH",
+                "stars": [4],
+                "max_counts": {"3": None, "4": 25, "5": None},
+                "scrollbar": {"matched": True, "center": [930, 680], "at_bottom": True},
+                "stack_count": 1,
+                "selectable_count": 1,
+                "stacks": [],
+                "touch_points": [[851, 400]],
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize_giftbox(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(giftbox_reports)
+
+        def recognize_giftbox_stacks(
+            self,
+            _screenshot,
+            server,
+            *,
+            stars,
+            max_counts,
+            threshold,
+        ):
+            assert server == "CH"
+            assert stars == [4]
+            assert max_counts == {3: None, 4: 25, 5: None}
+            assert threshold == 0.7
+            return next(stack_reports)
+
+    device = _Device()
+    result = create_lottery_giftbox_receive_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_stack_counts": {"4": 25},
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "giftbox_filtered_complete"
+    assert result["stars"] == [4]
+    assert result["selected_stacks"] == 2
+    assert result["receive_batches"] == 1
+    assert result["actions"] == [
+        "open_filter",
+        "clear_filters",
+        "apply_filter",
+        "select_giftbox_stack",
+        "scroll_giftbox",
+        "select_giftbox_stack",
+        "receive_selected",
+    ]
+    assert device.swipes == [(467, 667, 467, 267, 500)]
+    assert device.taps[-1] == (1149, 372)
+
+
 def test_lottery_jobs_require_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_lottery_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+        )
+        register_lottery_giftbox_stacks_inspect_job(
             manager,
             _ScriptData(),
             _Device(),
@@ -712,6 +975,8 @@ def test_lottery_jobs_require_connected_device(tmp_path):
 
         assert manager.has_kind(LOTTERY_INSPECT_JOB_KIND)
         assert manager.requires_device(LOTTERY_INSPECT_JOB_KIND) is True
+        assert manager.has_kind(LOTTERY_GIFTBOX_STACKS_INSPECT_JOB_KIND)
+        assert manager.requires_device(LOTTERY_GIFTBOX_STACKS_INSPECT_JOB_KIND) is True
         assert manager.has_kind(LOTTERY_DRAW_JOB_KIND)
         assert manager.requires_device(LOTTERY_DRAW_JOB_KIND) is True
         assert manager.has_kind(LOTTERY_GIFTBOX_RECEIVE_JOB_KIND)

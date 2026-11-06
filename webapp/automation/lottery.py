@@ -10,11 +10,16 @@ from webapp.automation.interaction import (
 )
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
-from webapp.services.lottery import LotteryRecognizer
+from webapp.services.lottery import (
+    RECEIVE_SELECTED_POINT,
+    LotteryRecognizer,
+    normalize_giftbox_max_counts,
+)
 from webapp.services.script_data import ScriptDataService
 
 
 LOTTERY_INSPECT_JOB_KIND = "event.lottery.inspect"
+LOTTERY_GIFTBOX_STACKS_INSPECT_JOB_KIND = "event.lottery.inspect-giftbox-stacks"
 LOTTERY_DRAW_JOB_KIND = "event.lottery.draw"
 LOTTERY_GIFTBOX_RECEIVE_JOB_KIND = "event.lottery.receive-giftbox"
 LOTTERY_NAVIGATE_JOB_KIND = "event.lottery.navigate"
@@ -28,6 +33,9 @@ APPLY_FILTER_POINT = (1060, 635)
 RECEIVE_ALL_POINT = (1150, 222)
 CONFIRM_RECEIVE_POINT = (837, 563)
 CLOSE_GIFTBOX_POINT = (105, 43)
+GIFTBOX_SCROLL_START = (467, 667)
+GIFTBOX_SCROLL_END = (467, 267)
+GIFTBOX_SCROLL_DURATION_MS = 500
 OPEN_MENU_POINT = (1183, 650)
 OPEN_TERMINAL_POINT = (137, 597)
 OPEN_REWARDS_POINT = (1183, 40)
@@ -90,6 +98,65 @@ def register_lottery_inspect_job(
     job_manager.register(
         LOTTERY_INSPECT_JOB_KIND,
         create_lottery_inspect_handler(script_data, device_service, recognizer),
+        requires_device=True,
+    )
+
+
+def create_lottery_giftbox_stacks_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: LotteryRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = _setting_name(payload)
+        threshold = _number(payload, "threshold", 0.7, 0, 1)
+        stars = _stars(payload.get("stars", [3, 4, 5]))
+        max_stack_counts = normalize_giftbox_max_counts(
+            payload.get("max_stack_counts")
+        )
+        server = str(script_data.get_setting_plan(setting_name)["server"]).upper()
+        context.checkpoint(
+            "inspect_lottery_giftbox_stacks",
+            progress=0.2,
+            message="Inspecting unlimited lottery giftbox EXP stacks.",
+        )
+        report = recognizer.recognize_giftbox_stacks(
+            device_service.snapshot(),
+            server,
+            stars=stars,
+            max_counts=max_stack_counts,
+            threshold=threshold,
+        )
+        context.emit(
+            "lottery_giftbox_stacks",
+            "Unlimited lottery giftbox EXP stacks were inspected.",
+            data=report,
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Unlimited lottery giftbox stack inspection completed.",
+        )
+        return {"setting_name": setting_name, **report}
+
+    return handler
+
+
+def register_lottery_giftbox_stacks_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: LotteryRecognizer,
+) -> None:
+    if job_manager.has_kind(LOTTERY_GIFTBOX_STACKS_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        LOTTERY_GIFTBOX_STACKS_INSPECT_JOB_KIND,
+        create_lottery_giftbox_stacks_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
         requires_device=True,
     )
 
@@ -441,8 +508,26 @@ def create_lottery_giftbox_receive_handler(
 ):
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
-        stars = _stars(payload.get("stars", [3, 4, 5]))
+        max_stack_counts = normalize_giftbox_max_counts(
+            payload.get("max_stack_counts")
+        )
+        has_active_max_counts = any(
+            limit is not None for limit in max_stack_counts.values()
+        )
+        if "stars" in payload:
+            stars = _stars(payload.get("stars"))
+        elif has_active_max_counts:
+            stars = [
+                star
+                for star, limit in sorted(max_stack_counts.items())
+                if limit is not None
+            ]
+        else:
+            stars = [3, 4, 5]
         threshold = _number(payload, "threshold", 0.8, 0, 1)
+        stack_threshold = _number(payload, "stack_threshold", 0.7, 0, 1)
+        max_select_batch = _integer(payload, "max_select_batch", 40, 1, 99)
+        max_empty_pages = _integer(payload, "max_empty_pages", 6, 1, 50)
         timeout_seconds = _number(payload, "timeout_seconds", 600, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.25, 0, 10)
         action_wait_seconds = _number(
@@ -463,6 +548,10 @@ def create_lottery_giftbox_receive_handler(
         attempts = 0
         idle_polls = 0
         receive_batches = 0
+        selected_stacks = 0
+        selected_in_batch = 0
+        empty_page_count = 0
+        final_receive_submitted = False
         filter_reset = False
         filter_applied = False
         actions: list[str] = []
@@ -490,8 +579,12 @@ def create_lottery_giftbox_receive_handler(
                 "stopped": stopped,
                 "reason": reason,
                 "stars": stars,
+                "max_stack_counts": {
+                    str(star): max_stack_counts[star] for star in (3, 4, 5)
+                },
                 "attempts": attempts,
                 "receive_batches": receive_batches,
+                "selected_stacks": selected_stacks,
                 "actions": list(actions),
                 "last_report": report,
             }
@@ -502,8 +595,9 @@ def create_lottery_giftbox_receive_handler(
                 "receive_lottery_giftbox",
                 progress=min((monotonic() - started) / timeout_seconds, 0.95),
             )
+            screenshot = device_service.snapshot()
             report = recognizer.recognize_giftbox(
-                device_service.snapshot(),
+                screenshot,
                 server,
                 threshold=threshold,
             )
@@ -524,7 +618,7 @@ def create_lottery_giftbox_receive_handler(
                     reason=reason,
                     report=report,
                 )
-            if status == "complete" and filter_applied:
+            if status == "complete" and filter_applied and not has_active_max_counts:
                 return finish(
                     completed=True,
                     stopped=False,
@@ -539,6 +633,118 @@ def create_lottery_giftbox_receive_handler(
             elif state in {"giftbox", "giftbox_loaded", "receive_all_on", "receive_all_off"}:
                 if not filter_applied:
                     action, point = "open_filter", OPEN_FILTER_POINT
+                elif has_active_max_counts:
+                    if final_receive_submitted:
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="giftbox_filtered_complete",
+                            report=report,
+                        )
+                    if report.get("receive_all_enabled") is False and selected_in_batch == 0:
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="giftbox_empty",
+                            report=report,
+                        )
+                    stack_report = recognizer.recognize_giftbox_stacks(
+                        screenshot,
+                        server,
+                        stars=stars,
+                        max_counts=max_stack_counts,
+                        threshold=stack_threshold,
+                    )
+                    report["stack_report"] = stack_report
+                    context.emit(
+                        "lottery_giftbox_stacks",
+                        "Unlimited lottery giftbox EXP stacks were recognized.",
+                        data={"attempt": attempts, **stack_report},
+                    )
+                    touch_points = [
+                        pt
+                        for pt in stack_report.get("touch_points", [])
+                        if isinstance(pt, list) and len(pt) == 2
+                    ]
+                    if touch_points:
+                        empty_page_count = 0
+                        for pt in touch_points:
+                            if len(actions) >= max_actions:
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason="action_limit",
+                                    report=report,
+                                )
+                            tx, ty = randomized_touch_point(pt, enabled=random_touch)
+                            op = device_service.tap(tx, ty)
+                            actions.append("select_giftbox_stack")
+                            selected_stacks += 1
+                            selected_in_batch += 1
+                            context.emit(
+                                "device_action",
+                                "Selected an EXP stack in the giftbox.",
+                                data={
+                                    "role": "select_giftbox_stack",
+                                    "state": state,
+                                    "operation": op.to_dict(),
+                                },
+                            )
+                            context.sleep(
+                                randomized_wait_seconds(0.1, random_time)
+                            )
+                    else:
+                        empty_page_count += 1
+
+                    scrollbar = stack_report.get("scrollbar") or {}
+                    at_bottom = bool(scrollbar.get("at_bottom")) or not bool(
+                        scrollbar.get("matched")
+                    )
+                    if selected_in_batch >= max_select_batch:
+                        action, point = "receive_selected", RECEIVE_SELECTED_POINT
+                        receive_batches += 1
+                        selected_in_batch = 0
+                    elif at_bottom or empty_page_count >= max_empty_pages:
+                        if selected_in_batch > 0:
+                            action, point = "receive_selected", RECEIVE_SELECTED_POINT
+                            receive_batches += 1
+                            selected_in_batch = 0
+                            final_receive_submitted = True
+                        else:
+                            return finish(
+                                completed=True,
+                                stopped=False,
+                                reason="giftbox_filtered_complete",
+                                report=report,
+                            )
+                    else:
+                        if len(actions) >= max_actions:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="action_limit",
+                                report=report,
+                            )
+                        idle_polls = 0
+                        swipe_op = device_service.swipe(
+                            *GIFTBOX_SCROLL_START,
+                            *GIFTBOX_SCROLL_END,
+                            duration_ms=GIFTBOX_SCROLL_DURATION_MS,
+                        )
+                        actions.append("scroll_giftbox")
+                        context.emit(
+                            "device_action",
+                            "Scrolled the giftbox list.",
+                            data={
+                                "role": "scroll_giftbox",
+                                "state": state,
+                                "operation": swipe_op.to_dict(),
+                            },
+                        )
+                        context.sleep(
+                            randomized_wait_seconds(action_wait_seconds, random_time)
+                        )
+                        continue
                 elif report.get("receive_all_enabled") is True:
                     action, point = "receive_all", RECEIVE_ALL_POINT
                 elif report.get("receive_all_enabled") is False:
@@ -714,12 +920,21 @@ def create_lottery_run_handler(
         )
         if "stars" in payload:
             giftbox_payload["stars"] = payload["stars"]
+        for key in (
+            "max_stack_counts",
+            "stack_threshold",
+            "max_select_batch",
+            "max_empty_pages",
+        ):
+            if key in payload:
+                giftbox_payload[key] = payload[key]
         if "pay_slot" in payload:
             navigate_payload["pay_slot"] = payload["pay_slot"]
 
         giftbox_cycles = 0
         draw_count = 0
         receive_batches = 0
+        selected_stacks = 0
         stages: list[dict[str, Any]] = []
 
         def record(stage: str, result: dict[str, Any]) -> None:
@@ -748,6 +963,7 @@ def create_lottery_run_handler(
                 "giftbox_cycles": giftbox_cycles,
                 "draw_count": draw_count,
                 "receive_batches": receive_batches,
+                "selected_stacks": selected_stacks,
                 "stages": stages,
             }
 
@@ -781,6 +997,7 @@ def create_lottery_run_handler(
 
             giftbox_result = giftbox_handler(context, giftbox_payload)
             receive_batches += int(giftbox_result.get("receive_batches") or 0)
+            selected_stacks += int(giftbox_result.get("selected_stacks") or 0)
             record("receive_giftbox", giftbox_result)
             if giftbox_result.get("completed") is not True:
                 return finish(

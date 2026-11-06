@@ -184,6 +184,7 @@ const els = {
   executeDigdig: document.querySelector("#execute-digdig"),
   runDigdig: document.querySelector("#run-digdig"),
   inspectLottery: document.querySelector("#inspect-lottery"),
+  inspectLotteryStacks: document.querySelector("#inspect-lottery-stacks"),
   runLottery: document.querySelector("#run-lottery"),
   lotteryPaySlot: document.querySelector("#lottery-pay-slot"),
   lotteryStar3: document.querySelector("#lottery-star-3"),
@@ -512,6 +513,7 @@ function bindEvents() {
   els.executeDigdig.addEventListener("click", executeDigdig);
   els.runDigdig.addEventListener("click", runDigdig);
   els.inspectLottery.addEventListener("click", inspectLottery);
+  els.inspectLotteryStacks.addEventListener("click", inspectLotteryStacks);
   els.runLottery.addEventListener("click", runLottery);
   els.lotteryStar3.addEventListener("change", updateControls);
   els.lotteryStar4.addEventListener("change", updateControls);
@@ -3083,6 +3085,18 @@ async function inspectLottery() {
   });
 }
 
+async function inspectLotteryStacks() {
+  const settingName = els.settingSelect.value;
+  const stars = selectedLotteryStars();
+  if (!settingName || stars.length === 0) {
+    return;
+  }
+  await enqueueJob("event.lottery.inspect-giftbox-stacks", {
+    setting_name: settingName,
+    stars,
+  });
+}
+
 async function runLottery() {
   const settingName = els.settingSelect.value;
   const stars = selectedLotteryStars();
@@ -3487,6 +3501,19 @@ function renderJobResult(job) {
     els.jobResult.textContent = details.join(" · ");
     return;
   }
+  if (job.kind === "event.lottery.inspect-giftbox-stacks") {
+    const stackCount = result.stack_count || 0;
+    const selectableCount = result.selectable_count || 0;
+    const details = [
+      `${stackCount} EXP ${stackCount === 1 ? "stack" : "stacks"}`,
+      `${selectableCount} selectable`,
+    ];
+    if (result.scrollbar?.at_bottom) {
+      details.push("at bottom");
+    }
+    els.jobResult.textContent = details.join(" · ");
+    return;
+  }
   if (job.kind === "event.lottery.run") {
     els.jobResult.textContent = [
       result.completed ? "Lottery complete" : "Lottery stopped",
@@ -3788,6 +3815,11 @@ function updateControls() {
   els.inspectLottery.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsLottery
+    || hasRunningJob;
+  els.inspectLotteryStacks.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsLottery
+    || !hasLotteryStars
     || hasRunningJob;
   els.runLottery.disabled = !state.connected
     || !els.settingSelect.value

@@ -163,6 +163,7 @@ const zh = {
   "Dig cycles": "挖掘轮数",
   "Run Auto Dig": "运行自动挖掘",
   "Inspect EXP Flow": "检查经验素材流程",
+  "Inspect Giftbox Stacks": "检查礼盒堆叠",
   "Inspect Lottery": "检查奖池",
   "Inspect State": "检查状态",
   "Inspect Storage Grid": "检查仓库网格",
