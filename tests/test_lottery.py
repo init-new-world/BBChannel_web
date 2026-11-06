@@ -934,6 +934,157 @@ def test_lottery_giftbox_receive_filters_stacks_by_max_stack_counts():
     assert device.taps[-1] == (1149, 372)
 
 
+def test_lottery_run_handles_inventory_full_via_configured_storage_and_resumes():
+    draw_reports = iter(
+        (
+            _report("giftbox_full", "blocked", reason="giftbox_full"),
+            _report("unknown", "unknown"),
+            _report(
+                "draw_10",
+                "actionable",
+                action="draw",
+                action_point=(413, 435),
+            ),
+            _report("pool_empty", "complete", reason="pool_empty"),
+        )
+    )
+    giftbox_reports = iter(
+        (
+            {
+                "state": "inventory_full",
+                "status": "blocked",
+                "reason": "inventory_full",
+                "receive_all_enabled": None,
+            },
+        )
+    )
+    navigation_reports = iter(
+        (
+            {"state": "menu_available", "status": "actionable"},
+        )
+    )
+    expball_reports = iter(
+        (
+            {
+                "server": "CH",
+                "state": "in_store",
+                "flow": "storage",
+                "status": "observed",
+                "reason": None,
+                "recommended_action": None,
+                "matches": [
+                    {"name": "in_store", "center": [310, 120], "size": [120, 60]},
+                ],
+            },
+            {
+                "server": "CH",
+                "state": "in_store",
+                "flow": "storage",
+                "status": "observed",
+                "reason": None,
+                "recommended_action": None,
+                "matches": [
+                    {"name": "in_store", "center": [310, 120], "size": [120, 60]},
+                    {"name": "jd", "center": [1120, 650], "size": [120, 60]},
+                ],
+            },
+            {
+                "server": "CH",
+                "state": "zxStore",
+                "flow": "storage",
+                "status": "actionable",
+                "reason": None,
+                "recommended_action": "execute_storage",
+                "matches": [
+                    {"name": "zxStore", "center": [980, 620], "size": [120, 60]},
+                ],
+            },
+            {
+                "server": "CH",
+                "state": "ljbhclose",
+                "flow": "confirmation",
+                "status": "actionable",
+                "reason": None,
+                "recommended_action": "close_result",
+                "matches": [
+                    {"name": "ljbhclose", "center": [640, 610], "size": [120, 60]},
+                ],
+            },
+            {
+                "server": "CH",
+                "state": "in_store",
+                "flow": "storage",
+                "status": "observed",
+                "reason": None,
+                "recommended_action": None,
+                "matches": [
+                    {"name": "in_store", "center": [310, 120], "size": [120, 60]},
+                ],
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(draw_reports)
+
+        def recognize_giftbox(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(giftbox_reports)
+
+        def recognize_navigation(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(navigation_reports)
+
+    class ExpBallRec:
+        def recognize(self, *_args, **_kwargs):
+            return next(expball_reports)
+
+        def recognize_storage_grid(self, *_args, **_kwargs):
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 1,
+                "slots": [{"slot": 0, "star": 5, "center": [136, 248]}],
+            }
+
+    device = _Device()
+    result = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        expball_recognizer=ExpBallRec(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "overflow_action": "storage",
+            "overflow_stars": [4, 5],
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "pool_empty"
+    assert result["giftbox_cycles"] == 1
+    assert result["overflow_action"] == "storage"
+    assert result["overflow_cycles"] == 1
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "draw",
+        "receive_giftbox",
+        "overflow_storage",
+        "navigate",
+        "draw",
+    ]
+    assert device.taps[0] == (933, 463)
+
+
 def test_lottery_jobs_require_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_lottery_inspect_job(

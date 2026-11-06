@@ -377,6 +377,7 @@ def create_app(
         script_data,
         device_service,
         lottery_recognizer,
+        expball_recognizer=expball_recognizer,
     )
     register_assist_job(
         job_manager,
