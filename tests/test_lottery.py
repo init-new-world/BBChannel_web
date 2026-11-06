@@ -1085,6 +1085,107 @@ def test_lottery_run_handles_inventory_full_via_configured_storage_and_resumes()
     assert device.taps[0] == (933, 463)
 
 
+def test_lottery_run_recovers_from_inventory_full_via_servant_enhancement():
+    draw_reports = iter(
+        (
+            _report("giftbox_full", "blocked", reason="giftbox_full"),
+            _report("unknown", "unknown"),
+            _report(
+                "draw_10",
+                "actionable",
+                action="draw",
+                action_point=(413, 435),
+            ),
+            _report("pool_empty", "complete", reason="pool_empty"),
+        )
+    )
+    giftbox_reports = iter(
+        (
+            {
+                "state": "inventory_full",
+                "status": "blocked",
+                "reason": "inventory_full",
+                "receive_all_enabled": None,
+            },
+        )
+    )
+    navigation_reports = iter(
+        (
+            {"state": "menu_available", "status": "actionable"},
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(draw_reports)
+
+        def recognize_giftbox(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(giftbox_reports)
+
+        def recognize_navigation(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(navigation_reports)
+
+    class ExpBallRec:
+        def recognize(self, *_args, **_kwargs):
+            return {
+                "server": "CH",
+                "state": "slot",
+                "flow": "enhancement",
+                "status": "actionable",
+                "reason": None,
+                "recommended_action": None,
+                "matches": [
+                    {"name": "slot", "center": [823, 283], "size": [120, 60]},
+                    {"name": "help", "center": [1180, 110], "size": [120, 60]},
+                ],
+            }
+
+        def recognize_servant_level(self, *_args, **_kwargs):
+            return {
+                "valid": True,
+                "current_level": 100,
+                "max_level": 100,
+                "is_max_level": True,
+            }
+
+    device = _Device()
+    result = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        expball_recognizer=ExpBallRec(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "overflow_action": "servant_enhancement",
+            "target_level": 100,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "pool_empty"
+    assert result["overflow_action"] == "servant_enhancement"
+    assert result["overflow_cycles"] == 1
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "draw",
+        "receive_giftbox",
+        "overflow_servant_enhancement",
+        "navigate",
+        "draw",
+    ]
+    assert device.taps[0] == (636, 463)
+
+
 def test_lottery_jobs_require_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_lottery_inspect_job(

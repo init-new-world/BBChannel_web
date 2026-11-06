@@ -3,7 +3,10 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any
 
-from webapp.automation.expball import create_expball_storage_handler
+from webapp.automation.expball import (
+    create_expball_enhance_handler,
+    create_expball_storage_handler,
+)
 from webapp.automation.expball_sell import create_expball_sell_handler
 from webapp.automation.interaction import (
     configured_random_time,
@@ -47,7 +50,12 @@ OPEN_TERMINAL_POINT = (137, 597)
 OPEN_REWARDS_POINT = (1183, 40)
 OPEN_EVENT_POINT = (743, 140)
 REWARD_SLOT_POINTS = {0: (640, 183), 1: (640, 370), 2: (640, 527)}
-_LOTTERY_OVERFLOW_ACTIONS = {"stop", "storage", "sell"}
+_LOTTERY_OVERFLOW_ACTIONS = {
+    "stop",
+    "storage",
+    "sell",
+    "servant_enhancement",
+}
 _DRAW_PAGE_STATES = {
     "confirm_reset",
     "close_dialog",
@@ -890,6 +898,15 @@ def create_lottery_run_handler(
         if expball_recognizer is not None
         else None
     )
+    enhance_handler = (
+        create_expball_enhance_handler(
+            script_data,
+            device_service,
+            expball_recognizer,
+        )
+        if expball_recognizer is not None
+        else None
+    )
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
@@ -909,7 +926,9 @@ def create_lottery_run_handler(
         )
         overflow_action = str(payload.get("overflow_action") or "stop").strip().lower()
         if overflow_action not in _LOTTERY_OVERFLOW_ACTIONS:
-            raise ValueError("overflow_action must be stop, storage, or sell.")
+            raise ValueError(
+                "overflow_action must be stop, storage, sell, or servant_enhancement."
+            )
         overflow_stars = (
             _stars(payload.get("overflow_stars"))
             if "overflow_stars" in payload and payload["overflow_stars"] is not None
@@ -920,10 +939,10 @@ def create_lottery_run_handler(
                 raise ValueError(
                     "overflow_action requires overflow_stars to be configured for storage or sell."
                 )
-            if expball_recognizer is None:
-                raise ValueError(
-                    "overflow_action requires expball_recognizer to be configured."
-                )
+        if overflow_action != "stop" and expball_recognizer is None:
+            raise ValueError(
+                "overflow_action requires expball_recognizer to be configured."
+            )
         action_wait_seconds = _number(
             payload,
             "action_wait_seconds",
@@ -957,6 +976,21 @@ def create_lottery_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        if overflow_action == "servant_enhancement":
+            overflow_payload["target"] = "servant"
+            overflow_payload["selection_mode"] = str(
+                payload.get("material_select_mode")
+                or payload.get("selection_mode")
+                or "auto"
+            )
+            for key in (
+                "material_select_mode",
+                "select_base_first",
+                "max_batches",
+                "target_level",
+                "level_threshold",
+            ):
+                _copy_option(payload, overflow_payload, key, key)
         _copy_option(
             payload,
             draw_payload,
@@ -1078,7 +1112,7 @@ def create_lottery_run_handler(
                 )
                 if (
                     giftbox_reason == "inventory_full"
-                    and overflow_action in {"storage", "sell"}
+                    and overflow_action != "stop"
                 ):
                     if overflow_cycles >= max_overflow_cycles:
                         return finish(
@@ -1086,11 +1120,15 @@ def create_lottery_run_handler(
                             stopped=True,
                             reason="overflow_limit",
                         )
-                    overflow_point = (
-                        BOX_FULL_STORAGE_POINT
-                        if overflow_action == "storage"
-                        else BOX_FULL_SELL_POINT
-                    )
+                    if overflow_action == "storage":
+                        overflow_point = BOX_FULL_STORAGE_POINT
+                        active_overflow_handler = storage_handler
+                    elif overflow_action == "sell":
+                        overflow_point = BOX_FULL_SELL_POINT
+                        active_overflow_handler = sell_handler
+                    else:
+                        overflow_point = BOX_FULL_ENHANCE_POINT
+                        active_overflow_handler = enhance_handler
                     overflow_role = f"open_overflow_{overflow_action}"
                     tx, ty = randomized_touch_point(
                         overflow_point,
@@ -1114,11 +1152,6 @@ def create_lottery_run_handler(
                         )
                     context.sleep(
                         randomized_wait_seconds(action_wait_seconds, random_time)
-                    )
-                    active_overflow_handler = (
-                        storage_handler
-                        if overflow_action == "storage"
-                        else sell_handler
                     )
                     assert active_overflow_handler is not None
                     overflow_result = active_overflow_handler(

@@ -3141,6 +3141,11 @@ async function runLottery() {
     stars: selectedLotteryStars(),
     overflow_action: overflowAction,
     ...(overflowStars.length ? { overflow_stars: overflowStars } : {}),
+    ...(overflowAction === "servant_enhancement" ? {
+      material_select_mode: els.expballMaterialSelectMode.value || "auto",
+      max_batches: readNumber(els.expballMaxBatches),
+      target_level: readNumber(els.expballTargetLevel),
+    } : {}),
   });
 }
 
