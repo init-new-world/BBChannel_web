@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
+
+from PIL import Image, UnidentifiedImageError
 
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
@@ -69,6 +72,13 @@ _SERVANT_LEVEL_RIGHT_ROIS = tuple(
     for index in range(3)
 )
 _STORAGE_STARS = (3, 4, 5)
+_FP_GOLD_SERVANTS = ("lily", "habe", "hakuno_0", "hakuno_1")
+_SERVANT_FRAME_SPECS = (
+    ("bronze", "1-2", False, (145, 128, 98)),
+    ("silver", "3", False, (181, 181, 181)),
+    ("gold_locked", "4-5", True, (120, 97, 18)),
+    ("gold_unlocked", "4-5", False, (226, 181, 34)),
+)
 _STORAGE_CARD_ROIS = tuple(
     (
         round((112 + column * 200) * 2 / 3),
@@ -300,6 +310,117 @@ class ExpBallRecognizer:
             "slots": slots,
         }
 
+    def recognize_servant_sale_grid(
+        self,
+        screenshot: bytes,
+        *,
+        fp_gold_threshold: float = 0.85,
+    ) -> dict[str, Any]:
+        if not 0 <= fp_gold_threshold <= 1:
+            raise ValueError("fp_gold_threshold must be between 0 and 1.")
+
+        root = "expball/FPgold"
+        page = self._resources.template_index(prefix=root, limit=20)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+        fp_gold_templates = [
+            (name, f"{root}/{name}.png")
+            for name in _FP_GOLD_SERVANTS
+            if f"{root}/{name}.png" in available_paths
+        ]
+        specs = [
+            (slot, name, roi, template_path)
+            for slot, roi in enumerate(_STORAGE_CARD_ROIS)
+            for name, template_path in fp_gold_templates
+        ]
+        candidates = [
+            {
+                "template_path": template_path,
+                "threshold": fp_gold_threshold,
+                "roi": roi,
+                "scales": _SCALES,
+            }
+            for _slot, _name, roi, template_path in specs
+        ]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        best_fp_gold_by_slot: dict[int, tuple[str, Any]] = {}
+        for result, (slot, name, _roi, _template_path) in zip(
+            results,
+            specs,
+            strict=True,
+        ):
+            if not result.matched:
+                continue
+            current = best_fp_gold_by_slot.get(slot)
+            if current is None or result.confidence > current[1].confidence:
+                best_fp_gold_by_slot[slot] = (name, result)
+
+        frame_by_slot = _inspect_servant_frame_colors(screenshot)
+        slots: list[dict[str, Any]] = []
+        fp_gold_slots: list[int] = []
+        need_lock_slots: list[int] = []
+        sellable_slots: list[int] = []
+        for slot, roi in enumerate(_STORAGE_CARD_ROIS):
+            x, y, width, height = roi
+            frame_info = frame_by_slot.get(slot, {})
+            frame_type = frame_info.get("frame_type")
+            rarity_group = frame_info.get("rarity_group")
+            locked = bool(frame_info.get("locked", False))
+            fp_best = best_fp_gold_by_slot.get(slot)
+            fp_gold = fp_best[0] if fp_best is not None else None
+            if fp_gold is not None:
+                fp_gold_slots.append(slot)
+            need_lock = bool(
+                frame_type == "gold_unlocked" and fp_gold is None
+            )
+            if need_lock:
+                need_lock_slots.append(slot)
+            sellable_servant = bool(
+                frame_type in {"bronze", "silver"}
+                or (frame_type == "gold_unlocked" and fp_gold is not None)
+                or (frame_type is None and fp_gold is not None)
+            )
+            if sellable_servant:
+                sellable_slots.append(slot)
+            slots.append(
+                {
+                    "slot": slot,
+                    "row": slot // 7,
+                    "column": slot % 7,
+                    "roi": list(roi),
+                    "center": [x + width // 2, y + height // 2],
+                    "frame_type": frame_type,
+                    "rarity_group": rarity_group,
+                    "locked": locked,
+                    "rgb": frame_info.get("rgb"),
+                    "fp_gold": fp_gold,
+                    "fp_gold_confidence": (
+                        fp_best[1].confidence if fp_best is not None else None
+                    ),
+                    "fp_gold_match": (
+                        fp_best[1].to_dict() if fp_best is not None else None
+                    ),
+                    "need_lock": need_lock,
+                    "sellable_servant": sellable_servant,
+                }
+            )
+        return {
+            "rows": 3,
+            "columns": 7,
+            "available_fp_gold_template_count": len(fp_gold_templates),
+            "candidate_count": len(candidates),
+            "fp_gold_count": len(fp_gold_slots),
+            "fp_gold_slots": fp_gold_slots,
+            "need_lock_count": len(need_lock_slots),
+            "need_lock_slots": need_lock_slots,
+            "sellable_count": len(sellable_slots),
+            "sellable_slots": sellable_slots,
+            "slots": slots,
+        }
+
     def recognize_servant_level(
         self,
         screenshot: bytes,
@@ -413,3 +534,79 @@ class ExpBallRecognizer:
             "candidate_count": len(candidates),
             "slots": slots,
         }
+
+
+def _inspect_servant_frame_colors(
+    screenshot: bytes,
+) -> dict[int, dict[str, Any]]:
+    try:
+        with Image.open(BytesIO(screenshot)) as source:
+            image = source.convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError):
+        return {}
+
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        return {}
+    scale = min(width / 1920, height / 1080)
+    dx = (width - 1920 * scale) / 2
+    dy = (height - 1080 * scale) / 2
+    result: dict[int, dict[str, Any]] = {}
+
+    for slot in range(21):
+        row = slot // 7
+        column = slot % 7
+        left_1080 = 112 + column * 200
+        top_1080 = 271 + row * 213
+        crop_left = max(0, min(width, round((left_1080 + 10) * scale + dx)))
+        crop_top = max(0, min(height, round((top_1080 + 180) * scale + dy)))
+        crop_right = max(
+            crop_left,
+            min(width, round((left_1080 + 50) * scale + dx)),
+        )
+        crop_bottom = max(
+            crop_top,
+            min(height, round((top_1080 + 190) * scale + dy)),
+        )
+        if crop_right <= crop_left or crop_bottom <= crop_top:
+            continue
+        patch = image.crop((crop_left, crop_top, crop_right, crop_bottom))
+        raw_bytes = patch.tobytes()
+        if not raw_bytes:
+            continue
+        count = len(raw_bytes) // 3
+        if count <= 0:
+            continue
+        mean_r = sum(raw_bytes[0::3]) / count
+        mean_g = sum(raw_bytes[1::3]) / count
+        mean_b = sum(raw_bytes[2::3]) / count
+        distances = [
+            (
+                (mean_r - target_rgb[0]) ** 2
+                + (mean_g - target_rgb[1]) ** 2
+                + (mean_b - target_rgb[2]) ** 2,
+                frame_type,
+                rarity_group,
+                locked,
+            )
+            for frame_type, rarity_group, locked, target_rgb in _SERVANT_FRAME_SPECS
+        ]
+        min_distance, best_frame, best_rarity, best_locked = min(
+            distances,
+            key=lambda item: item[0],
+        )
+        if min_distance > 8000:
+            result[slot] = {
+                "frame_type": None,
+                "rarity_group": None,
+                "locked": False,
+                "rgb": [round(mean_r, 1), round(mean_g, 1), round(mean_b, 1)],
+            }
+        else:
+            result[slot] = {
+                "frame_type": best_frame,
+                "rarity_group": best_rarity,
+                "locked": best_locked,
+                "rgb": [round(mean_r, 1), round(mean_g, 1), round(mean_b, 1)],
+            }
+    return result

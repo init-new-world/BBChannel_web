@@ -74,7 +74,12 @@ def create_expball_run_handler(
                 "equipment_enhancement, or servant_enhancement."
             )
         stars = _parse_card_stars(payload)
-        if overflow_action in {"storage", "sell"} and stars is None:
+        sell_target = str(payload.get("sell_target") or "exp").strip().lower()
+        if overflow_action == "storage" and stars is None:
+            raise ValueError(
+                "overflow_action requires stars to be configured for automatic storage or sell."
+            )
+        if overflow_action == "sell" and sell_target != "servant" and stars is None:
             raise ValueError(
                 "overflow_action requires stars to be configured for automatic storage or sell."
             )
@@ -100,6 +105,15 @@ def create_expball_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        if overflow_action == "sell":
+            for key in (
+                "sell_target",
+                "lock_gold_servants",
+                "include_fp_gold",
+                "select_servant_cards",
+                "fp_gold_threshold",
+            ):
+                _copy_option(payload, overflow_payload, key, key)
         if overflow_action in {"equipment_enhancement", "servant_enhancement"}:
             overflow_payload["target"] = (
                 "equipment"

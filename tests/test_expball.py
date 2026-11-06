@@ -1,18 +1,21 @@
 from webapp.automation.expball import (
     EXPBALL_ENHANCE_JOB_KIND,
     EXPBALL_INSPECT_JOB_KIND,
+    EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND,
     EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
     create_expball_enhance_handler,
     create_expball_inspect_handler,
+    create_expball_servant_grid_inspect_handler,
     create_expball_servant_level_inspect_handler,
     create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
     register_expball_enhance_job,
     register_expball_inspect_job,
+    register_expball_servant_grid_inspect_job,
     register_expball_servant_level_inspect_job,
     register_expball_storage_grid_inspect_job,
     register_expball_storage_job,
@@ -1408,5 +1411,129 @@ def test_expball_enhance_stops_at_limit_break_when_auto_limit_break_disabled():
     assert result["reason"] == "grail_limit"
     assert result["limit_breaks_completed"] == 0
     assert device.taps == []
+
+
+def test_expball_recognizer_recognizes_servant_sale_grid_and_fp_gold():
+    import cv2
+    import numpy as np
+    from webapp.services.expball import _STORAGE_CARD_ROIS
+
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+    def paint_slot_frame(slot_idx: int, rgb: tuple[int, int, int]) -> None:
+        rx, ry, rw, rh = _STORAGE_CARD_ROIS[slot_idx]
+        x1 = rx + round(rw * 10 / 185)
+        x2 = rx + round(rw * 50 / 185)
+        y1 = ry + round(rh * 180 / 201)
+        y2 = ry + round(rh * 190 / 201)
+        bgr = (rgb[2], rgb[1], rgb[0])
+        image[y1:y2, x1:x2] = bgr
+
+    # Slot 0: unlocked gold servant, NOT FP gold -> need_lock=True
+    paint_slot_frame(0, (226, 181, 34))
+    # Slot 1: unlocked gold servant, FP gold (lily) -> need_lock=False
+    paint_slot_frame(1, (226, 181, 34))
+    # Slot 2: locked gold servant -> need_lock=False
+    paint_slot_frame(2, (120, 97, 18))
+    # Slot 3: silver 3-star servant -> need_lock=False
+    paint_slot_frame(3, (181, 181, 181))
+    # Slot 4: bronze 1-2 star servant -> need_lock=False
+    paint_slot_frame(4, (145, 128, 98))
+
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    screenshot = encoded.tobytes()
+
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/FPgold"
+            return {
+                "entries": [
+                    {"path": "expball/FPgold/lily.png"},
+                    {"path": "expball/FPgold/habe.png"},
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            results = []
+            for candidate in candidates:
+                is_slot_1_lily = (
+                    candidate["roi"] == _STORAGE_CARD_ROIS[1]
+                    and candidate["template_path"] == "expball/FPgold/lily.png"
+                )
+                results.append(
+                    MatchResult(
+                        template_path=candidate["template_path"],
+                        matched=is_slot_1_lily,
+                        confidence=0.92 if is_slot_1_lily else 0.12,
+                        threshold=candidate["threshold"],
+                        top_left=[208, 181],
+                        size=[80, 80],
+                        center=[248, 221],
+                        scale=2 / 3,
+                        roi=list(candidate["roi"]),
+                    )
+                )
+            return results
+
+    report = ExpBallRecognizer(Resources(), Recognition()).recognize_servant_sale_grid(
+        screenshot,
+        fp_gold_threshold=0.85,
+    )
+
+    assert report["need_lock_slots"] == [0]
+    assert report["need_lock_count"] == 1
+    assert report["fp_gold_slots"] == [1]
+    assert report["fp_gold_count"] == 1
+    assert report["slots"][0]["frame_type"] == "gold_unlocked"
+    assert report["slots"][0]["need_lock"] is True
+    assert report["slots"][1]["frame_type"] == "gold_unlocked"
+    assert report["slots"][1]["fp_gold"] == "lily"
+    assert report["slots"][1]["need_lock"] is False
+    assert report["slots"][2]["frame_type"] == "gold_locked"
+    assert report["slots"][2]["locked"] is True
+    assert report["slots"][3]["frame_type"] == "silver"
+    assert report["slots"][4]["frame_type"] == "bronze"
+
+
+def test_expball_servant_grid_inspect_job_emits_report(tmp_path):
+    class Recognizer:
+        def recognize_servant_sale_grid(self, _screenshot, *, fp_gold_threshold):
+            assert fp_gold_threshold == 0.85
+            return {
+                "rows": 3,
+                "columns": 7,
+                "fp_gold_threshold": 0.85,
+                "need_lock_slots": [2],
+                "need_lock_count": 1,
+                "fp_gold_slots": [0],
+                "fp_gold_count": 1,
+                "slots": [],
+            }
+
+    context = _Context()
+    handler = create_expball_servant_grid_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )
+    result = handler(context, {"setting_name": "demo"})
+
+    assert result["setting_name"] == "demo"
+    assert result["server"] == "CH"
+    assert result["need_lock_slots"] == [2]
+    assert result["fp_gold_slots"] == [0]
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_servant_grid_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            Recognizer(),
+        )
+        assert manager.has_kind(EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND)
+        assert manager.requires_device(EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND) is True
+
 
 

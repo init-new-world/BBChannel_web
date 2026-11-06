@@ -16,6 +16,7 @@ from webapp.services.script_data import ScriptDataService
 
 EXPBALL_INSPECT_JOB_KIND = "event.expball.inspect"
 EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND = "event.expball.inspect-storage-grid"
+EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND = "event.expball.inspect-servant-grid"
 EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND = "event.expball.inspect-servant-level"
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
@@ -151,6 +152,67 @@ def register_expball_storage_grid_inspect_job(
     job_manager.register(
         EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
         create_expball_storage_grid_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_servant_grid_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        fp_gold_threshold = _number(payload, "fp_gold_threshold", 0.85, 0, 1)
+        server = str(
+            script_data.get_setting_plan(normalized_name)["server"]
+        ).upper()
+        context.checkpoint(
+            "inspect_expball_servant_grid",
+            progress=0.2,
+            message="Inspecting visible servant sale grid cards.",
+        )
+        report = recognizer.recognize_servant_sale_grid(
+            device_service.snapshot(),
+            fp_gold_threshold=fp_gold_threshold,
+        )
+        context.emit(
+            "expball_servant_grid",
+            "Visible servant sale grid cards were inspected.",
+            data={"server": server, **report},
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Servant sale grid inspection completed.",
+        )
+        return {
+            "setting_name": normalized_name,
+            "server": server,
+            **report,
+        }
+
+    return handler
+
+
+def register_expball_servant_grid_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND,
+        create_expball_servant_grid_inspect_handler(
             script_data,
             device_service,
             recognizer,

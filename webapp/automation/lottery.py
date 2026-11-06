@@ -934,11 +934,19 @@ def create_lottery_run_handler(
             if "overflow_stars" in payload and payload["overflow_stars"] is not None
             else None
         )
-        if overflow_action in {"storage", "sell"}:
-            if overflow_stars is None:
-                raise ValueError(
-                    "overflow_action requires overflow_stars to be configured for storage or sell."
-                )
+        sell_target = str(payload.get("sell_target") or "exp").strip().lower()
+        if overflow_action == "storage" and overflow_stars is None:
+            raise ValueError(
+                "overflow_action requires overflow_stars to be configured for storage or sell."
+            )
+        if (
+            overflow_action == "sell"
+            and sell_target != "servant"
+            and overflow_stars is None
+        ):
+            raise ValueError(
+                "overflow_action requires overflow_stars to be configured for storage or sell."
+            )
         if overflow_action != "stop" and expball_recognizer is None:
             raise ValueError(
                 "overflow_action requires expball_recognizer to be configured."
@@ -976,6 +984,15 @@ def create_lottery_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        if overflow_action == "sell":
+            for key in (
+                "sell_target",
+                "lock_gold_servants",
+                "include_fp_gold",
+                "select_servant_cards",
+                "fp_gold_threshold",
+            ):
+                _copy_option(payload, overflow_payload, key, key)
         if overflow_action == "servant_enhancement":
             overflow_payload["target"] = "servant"
             overflow_payload["selection_mode"] = str(

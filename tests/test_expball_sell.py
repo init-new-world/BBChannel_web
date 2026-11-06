@@ -263,3 +263,132 @@ def test_expball_sell_job_requires_connected_device(tmp_path):
 
         assert manager.has_kind(EXPBALL_SELL_JOB_KIND)
         assert manager.requires_device(EXPBALL_SELL_JOB_KIND) is True
+
+
+def test_expball_sell_servant_locks_non_fp_gold_and_sells_eligible_servants():
+    reports = iter(
+        (
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report("destroy", "sell", "actionable", "destroy"),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                "ljbhclose",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                action="open_auto_sell",
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return next(reports)
+
+        def recognize_servant_sale_grid(self, _screenshot, *, fp_gold_threshold):
+            assert fp_gold_threshold == 0.85
+            return {
+                "rows": 3,
+                "columns": 7,
+                "need_lock_slots": [0],
+                "need_lock_count": 1,
+                "fp_gold_slots": [1],
+                "fp_gold_count": 1,
+                "slots": [
+                    {
+                        "slot": 0,
+                        "frame_type": "gold_unlocked",
+                        "fp_gold": None,
+                        "need_lock": True,
+                        "center": [136, 248],
+                    },
+                    {
+                        "slot": 1,
+                        "frame_type": "gold_unlocked",
+                        "fp_gold": "lily",
+                        "need_lock": False,
+                        "center": [269, 248],
+                    },
+                    {
+                        "slot": 2,
+                        "frame_type": "silver",
+                        "fp_gold": None,
+                        "need_lock": False,
+                        "center": [403, 248],
+                    },
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_sell_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "sell_target": "servant",
+            "lock_gold_servants": True,
+            "include_fp_gold": True,
+            "select_servant_cards": True,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["sell_target"] == "servant"
+    assert result["locked_slots"] == [0]
+    assert result["locked_count"] == 1
+    assert result["selected_slots"] == [1, 2]
+    assert result["selected_count"] == 2
+    assert result["actions"] == [
+        "enable_unified_lock",
+        "lock_gold_servant",
+        "disable_unified_lock",
+        "select_sell_servant_card",
+        "select_sell_servant_card",
+        "submit_sell_selection",
+        "execute_sell",
+        "close_sell_result",
+    ]
+    assert device.taps == [
+        (32, 368),
+        (136, 248),
+        (32, 368),
+        (269, 248),
+        (403, 248),
+        (1120, 650),
+        (980, 620),
+        (640, 610),
+    ]
+

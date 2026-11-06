@@ -15,6 +15,8 @@ from webapp.services.script_data import ScriptDataService
 
 EXPBALL_SELL_JOB_KIND = "event.expball.sell"
 _VALID_CARD_STARS = {3, 4, 5}
+_SELL_TARGETS = {"exp", "servant"}
+_UNIFIED_LOCK_POINT = (32, 368)
 
 
 def create_expball_sell_handler(
@@ -29,6 +31,13 @@ def create_expball_sell_handler(
         normalized_name = setting_name.strip()
         threshold = _number(payload, "threshold", 0.84, 0, 1)
         grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
+        fp_gold_threshold = _number(payload, "fp_gold_threshold", 0.85, 0, 1)
+        sell_target = str(payload.get("sell_target") or "exp").strip().lower()
+        if sell_target not in _SELL_TARGETS:
+            raise ValueError("sell_target must be exp or servant.")
+        lock_gold_servants = _boolean(payload, "lock_gold_servants", True)
+        include_fp_gold = _boolean(payload, "include_fp_gold", True)
+        select_servant_cards = _boolean(payload, "select_servant_cards", False)
         stars = _parse_card_stars(payload)
         action_wait_seconds = _number(
             payload,
@@ -45,6 +54,7 @@ def create_expball_sell_handler(
         attempts = 0
         actions: list[str] = []
         selected_slots: list[int] = []
+        locked_slots: list[int] = []
         last_screenshot = b""
 
         def inspect(phase: str) -> dict[str, Any]:
@@ -82,6 +92,7 @@ def create_expball_sell_handler(
             )
             return {
                 "setting_name": normalized_name,
+                "sell_target": sell_target,
                 "completed": completed,
                 "stopped": stopped,
                 "reason": reason,
@@ -89,8 +100,34 @@ def create_expball_sell_handler(
                 "actions": list(actions),
                 "selected_slots": list(selected_slots),
                 "selected_count": len(selected_slots),
+                "locked_slots": list(locked_slots),
+                "locked_count": len(locked_slots),
                 "last_report": report,
             }
+
+        def tap_point(
+            point: tuple[int, int] | list[int],
+            action: str,
+            extra: dict[str, Any] | None = None,
+        ) -> bool:
+            x, y = randomized_touch_point(point, enabled=random_touch)
+            operation = device_service.tap(x, y)
+            context.emit(
+                "device_action",
+                "Executed an experience-material sale action.",
+                data={
+                    "role": action,
+                    **(extra or {}),
+                    "operation": operation.to_dict(),
+                },
+            )
+            if not operation.ok:
+                return False
+            actions.append(action)
+            context.sleep(
+                randomized_wait_seconds(action_wait_seconds, random_time)
+            )
+            return True
 
         def tap_match(
             report: dict[str, Any],
@@ -137,7 +174,123 @@ def create_expball_sell_handler(
                 reason="outside_sell_flow",
                 report=report,
             )
-        if stars is not None:
+        if sell_target == "servant":
+            servant_grid = recognizer.recognize_servant_sale_grid(
+                last_screenshot,
+                fp_gold_threshold=fp_gold_threshold,
+            )
+            context.emit(
+                "expball_servant_grid",
+                "Visible servant sale grid cards were inspected.",
+                data={"server": server, **servant_grid},
+            )
+            if lock_gold_servants:
+                slots_to_lock = [
+                    slot
+                    for slot in servant_grid.get("slots", [])
+                    if isinstance(slot, dict) and slot.get("need_lock") is True
+                ]
+                if slots_to_lock:
+                    if not tap_point(
+                        _UNIFIED_LOCK_POINT,
+                        "enable_unified_lock",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    for slot in slots_to_lock:
+                        slot_center = slot.get("center")
+                        if not isinstance(slot_center, list) or len(slot_center) != 2:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="invalid_recognition_result",
+                                report=report,
+                            )
+                        if not tap_point(
+                            slot_center,
+                            "lock_gold_servant",
+                            {"slot": slot.get("slot")},
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        locked_slots.append(int(slot["slot"]))
+                    if not tap_point(
+                        _UNIFIED_LOCK_POINT,
+                        "disable_unified_lock",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    report = inspect("submit")
+                    if report.get("flow") != "sell":
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="outside_sell_flow",
+                            report=report,
+                        )
+            if select_servant_cards:
+                sellable_slots = [
+                    slot
+                    for slot in servant_grid.get("slots", [])
+                    if isinstance(slot, dict)
+                    and (
+                        slot.get("frame_type") in {"bronze", "silver"}
+                        or (include_fp_gold and slot.get("fp_gold") is not None)
+                    )
+                ]
+                if not sellable_slots:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="no_matching_servants",
+                        report=report,
+                    )
+                for slot in sellable_slots:
+                    slot_center = slot.get("center")
+                    if not isinstance(slot_center, list) or len(slot_center) != 2:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="invalid_recognition_result",
+                            report=report,
+                        )
+                    if not tap_point(
+                        slot_center,
+                        "select_sell_servant_card",
+                        {
+                            "slot": slot.get("slot"),
+                            "frame_type": slot.get("frame_type"),
+                            "fp_gold": slot.get("fp_gold"),
+                        },
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    selected_slots.append(int(slot["slot"]))
+                report = inspect("submit")
+                if report.get("flow") != "sell":
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="outside_sell_flow",
+                        report=report,
+                    )
+        elif stars is not None:
             grid_report = recognizer.recognize_storage_grid(
                 last_screenshot,
                 threshold=grid_threshold,
@@ -329,6 +482,13 @@ def _number(
     if not minimum <= result <= maximum:
         raise ValueError(f"{key} must be between {minimum} and {maximum}.")
     return result
+
+
+def _boolean(payload: dict[str, Any], key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean.")
+    return value
 
 
 def _parse_card_stars(payload: dict[str, Any]) -> tuple[int, ...] | None:
