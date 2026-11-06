@@ -1,4 +1,5 @@
 from webapp.automation.expball import (
+    EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND,
     EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND,
     EXPBALL_ENHANCE_JOB_KIND,
     EXPBALL_INSPECT_JOB_KIND,
@@ -7,6 +8,7 @@ from webapp.automation.expball import (
     EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
+    create_expball_ce_bomb_grid_inspect_handler,
     create_expball_command_code_grid_inspect_handler,
     create_expball_enhance_handler,
     create_expball_inspect_handler,
@@ -15,6 +17,7 @@ from webapp.automation.expball import (
     create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
+    register_expball_ce_bomb_grid_inspect_job,
     register_expball_command_code_grid_inspect_job,
     register_expball_enhance_job,
     register_expball_inspect_job,
@@ -1651,6 +1654,295 @@ def test_expball_command_code_grid_inspect_job_emits_report(tmp_path):
             manager.requires_device(EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND)
             is True
         )
+
+
+def test_expball_recognizer_recognizes_ce_bomb_grid():
+    import cv2
+    import numpy as np
+    from webapp.services.expball import (
+        _CE_BOMB_CARD_ROIS,
+        _CE_BOMB_LOCK_ROIS,
+        _CE_BOMB_MARK_ROIS,
+    )
+
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    for idx in range(len(_CE_BOMB_CARD_ROIS)):
+        rx, ry, rw, rh = _CE_BOMB_CARD_ROIS[idx]
+        x1 = rx + round(rw * 30 / 206)
+        x2 = rx + round(rw * 70 / 206)
+        y1 = ry + round(rh * 185 / 211)
+        y2 = ry + round(rh * 195 / 211)
+        rgb = (60, 54, 41) if idx in {0, 1, 2} else (147, 130, 100)
+        image[y1:y2, x1:x2] = (rgb[2], rgb[1], rgb[0])
+
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+    screenshot = encoded.tobytes()
+
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/CH"
+            return {
+                "entries": [
+                    {"path": "expball/CH/locker.png"},
+                    {"path": "expball/CH/biaoji.png"},
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            results = []
+            for candidate in candidates:
+                is_locked = (
+                    candidate["template_path"] == "expball/CH/locker.png"
+                    and candidate["roi"] in {
+                        _CE_BOMB_LOCK_ROIS[0],
+                        _CE_BOMB_LOCK_ROIS[1],
+                    }
+                )
+                is_marked = (
+                    candidate["template_path"] == "expball/CH/biaoji.png"
+                    and candidate["roi"] == _CE_BOMB_MARK_ROIS[0]
+                )
+                matched = is_locked or is_marked
+                results.append(
+                    MatchResult(
+                        template_path=candidate["template_path"],
+                        matched=matched,
+                        confidence=0.92 if matched else 0.1,
+                        threshold=candidate["threshold"],
+                        top_left=[60, 220],
+                        size=[34, 40],
+                        center=[77, 240],
+                        scale=2 / 3,
+                        roi=list(candidate["roi"]),
+                    )
+                )
+            return results
+
+    report = ExpBallRecognizer(
+        Resources(),
+        Recognition(),
+    ).recognize_ce_bomb_grid(screenshot, "CH")
+
+    assert report["server"] == "CH"
+    assert report["full_level_slots"] == [0, 1, 2]
+    assert report["full_level_count"] == 3
+    assert report["need_lock_slots"] == [2]
+    assert report["need_lock_count"] == 1
+    assert report["need_mark_slots"] == [1, 2]
+    assert report["need_mark_count"] == 2
+    assert report["need_store_slots"] == [0]
+    assert report["need_store_count"] == 1
+    assert report["slots"][0]["need_store"] is True
+    assert report["slots"][1]["need_mark"] is True
+    assert report["slots"][2]["need_lock"] is True
+
+
+def test_expball_ce_bomb_grid_inspect_job_emits_report(tmp_path):
+    class Recognizer:
+        def recognize_ce_bomb_grid(
+            self,
+            _screenshot,
+            server,
+            *,
+            locker_threshold,
+            mark_threshold,
+        ):
+            assert server == "CH"
+            assert locker_threshold == 0.7
+            assert mark_threshold == 0.6
+            return {
+                "server": "CH",
+                "rows": 3,
+                "columns": 7,
+                "full_level_slots": [0],
+                "full_level_count": 1,
+                "need_lock_slots": [],
+                "need_lock_count": 0,
+                "need_mark_slots": [],
+                "need_mark_count": 0,
+                "need_store_slots": [0],
+                "need_store_count": 1,
+                "slots": [],
+            }
+
+    context = _Context()
+    handler = create_expball_ce_bomb_grid_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )
+    result = handler(context, {"setting_name": "demo"})
+
+    assert result["setting_name"] == "demo"
+    assert result["server"] == "CH"
+    assert result["need_store_slots"] == [0]
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_ce_bomb_grid_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            Recognizer(),
+        )
+        assert manager.has_kind(EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND)
+        assert (
+            manager.requires_device(EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND)
+            is True
+        )
+
+
+def test_expball_storage_stores_locked_and_marked_ce_bombs():
+    reports = iter(
+        (
+            _storage_report("in_store", "jd"),
+            _storage_report("in_store", "jd"),
+            _storage_report("zxStore"),
+            _storage_report("ljbhclose"),
+            _storage_report("in_store", "jd"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_ce_bomb_grid(self, *_args, **_kwargs):
+            return {
+                "server": "CH",
+                "slots": [
+                    {
+                        "slot": 1,
+                        "center": [128, 254],
+                        "full_level": True,
+                        "locked": True,
+                        "marked": True,
+                        "need_store": True,
+                    },
+                    {
+                        "slot": 2,
+                        "center": [262, 254],
+                        "full_level": True,
+                        "locked": True,
+                        "marked": False,
+                        "need_store": False,
+                    },
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "storage_target": "ce_bomb",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "stored"
+    assert result["storage_target"] == "ce_bomb"
+    assert result["selected_slots"] == [1]
+    assert result["actions"] == [
+        "select_ce_bomb_storage_card",
+        "submit_storage_selection",
+        "execute_storage",
+        "close_storage_result",
+    ]
+
+
+def test_expball_enhance_locks_and_marks_full_level_ce_bombs():
+    reports = iter(
+        (
+            _enhance_report("tysd", "qhjd"),
+            _enhance_report("help"),
+            _enhance_report("qhjd2"),
+            _enhance_report("slot", "help"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_ce_bomb_grid(self, *_args, **_kwargs):
+            return {
+                "server": "CH",
+                "slots": [
+                    {
+                        "slot": 1,
+                        "center": [128, 254],
+                        "full_level": True,
+                        "locked": False,
+                        "marked": False,
+                        "need_lock": True,
+                        "need_mark": True,
+                        "need_store": False,
+                    },
+                    {
+                        "slot": 2,
+                        "center": [262, 254],
+                        "full_level": False,
+                        "locked": False,
+                        "marked": False,
+                        "need_lock": False,
+                        "need_mark": False,
+                        "need_store": False,
+                    },
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "equipment",
+            "lock_full_ce_bombs": True,
+            "mark_full_ce_bombs": True,
+            "max_batches": 1,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "batch_limit"
+    assert result["locked_ce_bomb_slots"] == [1]
+    assert result["marked_ce_bomb_slots"] == [1]
+    assert result["actions"] == [
+        "enable_ce_unified_lock",
+        "lock_full_ce_bomb",
+        "enable_ce_unified_mark",
+        "mark_full_ce_bomb",
+        "disable_ce_unified_mark",
+        "select_material_card",
+        "confirm_material_selection",
+        "execute_enhancement",
+        "confirm_enhancement",
+    ]
+    assert device.taps[:6] == [
+        (32, 358),
+        (128, 254),
+        (32, 477),
+        (128, 254),
+        (32, 477),
+        (262, 254),
+    ]
+
 
 
 

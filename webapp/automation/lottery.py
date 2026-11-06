@@ -934,8 +934,15 @@ def create_lottery_run_handler(
             if "overflow_stars" in payload and payload["overflow_stars"] is not None
             else None
         )
+        storage_target = (
+            str(payload.get("storage_target") or "exp").strip().lower()
+        )
         sell_target = str(payload.get("sell_target") or "exp").strip().lower()
-        if overflow_action == "storage" and overflow_stars is None:
+        if (
+            overflow_action == "storage"
+            and storage_target != "ce_bomb"
+            and overflow_stars is None
+        ):
             raise ValueError(
                 "overflow_action requires overflow_stars to be configured for storage or sell."
             )
@@ -984,6 +991,14 @@ def create_lottery_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        if overflow_action == "storage":
+            for key in (
+                "storage_target",
+                "require_locked_and_marked",
+                "locker_threshold",
+                "mark_threshold",
+            ):
+                _copy_option(payload, overflow_payload, key, key)
         if overflow_action == "sell":
             for key in (
                 "sell_target",

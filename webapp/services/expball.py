@@ -109,6 +109,44 @@ _COMMAND_CODE_CARD_ROIS = tuple(
 )
 _NO_COMMAND_CODE_ROI = (300, 400, 233, 67)
 _FIRST_CARD_LOCKER_ROI = (60, 220, 33, 40)
+_CE_BOMB_CARD_ROIS = tuple(
+    (
+        round((90 + column * 200) * 2 / 3),
+        round((275 + row * 213) * 2 / 3),
+        round((296 + column * 200) * 2 / 3)
+        - round((90 + column * 200) * 2 / 3),
+        round((486 + row * 213) * 2 / 3)
+        - round((275 + row * 213) * 2 / 3),
+    )
+    for row in range(3)
+    for column in range(7)
+)
+_CE_BOMB_LOCK_ROIS = tuple(
+    (
+        round((90 + column * 200) * 2 / 3),
+        round((275 + row * 213 + 60) * 2 / 3),
+        round((90 + column * 200 + 50) * 2 / 3)
+        - round((90 + column * 200) * 2 / 3),
+        round((275 + row * 213 + 120) * 2 / 3)
+        - round((275 + row * 213 + 60) * 2 / 3),
+    )
+    for row in range(3)
+    for column in range(7)
+)
+_CE_BOMB_MARK_ROIS = tuple(
+    (
+        round((90 + column * 200) * 2 / 3),
+        round((275 + row * 213 + 120) * 2 / 3),
+        round((90 + column * 200 + 50) * 2 / 3)
+        - round((90 + column * 200) * 2 / 3),
+        round((275 + row * 213 + 170) * 2 / 3)
+        - round((275 + row * 213 + 120) * 2 / 3),
+    )
+    for row in range(3)
+    for column in range(7)
+)
+_CE_FULL_LV_RGB = (60, 54, 41)
+_CE_NON_FULL_LV_RGB = (147, 130, 100)
 
 _NAVIGATION_STATE_SPECS = (
     ("summon_page", "friendpointcall.png", (507, 333, 263, 133)),
@@ -689,6 +727,144 @@ class ExpBallRecognizer:
             "slots": slots,
         }
 
+    def recognize_ce_bomb_grid(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        locker_threshold: float = 0.7,
+        mark_threshold: float = 0.6,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+        if not 0 <= locker_threshold <= 1:
+            raise ValueError("locker_threshold must be between 0 and 1.")
+        if not 0 <= mark_threshold <= 1:
+            raise ValueError("mark_threshold must be between 0 and 1.")
+
+        frame_colors = _inspect_ce_bomb_frame_colors(screenshot)
+        root = f"expball/{normalized_server}"
+        page = self._resources.template_index(prefix=root, limit=200)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+
+        specs: list[tuple[str, int, dict[str, Any]]] = []
+        locker_path = f"{root}/locker.png"
+        if locker_path in available_paths:
+            for slot, roi in enumerate(_CE_BOMB_LOCK_ROIS):
+                specs.append(
+                    (
+                        "locker",
+                        slot,
+                        {
+                            "template_path": locker_path,
+                            "threshold": locker_threshold,
+                            "roi": roi,
+                            "scales": _SCALES,
+                        },
+                    )
+                )
+        mark_path = f"{root}/biaoji.png"
+        if mark_path in available_paths:
+            for slot, roi in enumerate(_CE_BOMB_MARK_ROIS):
+                specs.append(
+                    (
+                        "mark",
+                        slot,
+                        {
+                            "template_path": mark_path,
+                            "threshold": mark_threshold,
+                            "roi": roi,
+                            "scales": _SCALES,
+                        },
+                    )
+                )
+
+        candidates = [candidate for _kind, _slot, candidate in specs]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+
+        locked_by_slot: dict[int, Any] = {}
+        marked_by_slot: dict[int, Any] = {}
+        for result, (kind, slot, _candidate) in zip(
+            results,
+            specs,
+            strict=True,
+        ):
+            if not result.matched:
+                continue
+            if kind == "locker":
+                locked_by_slot[slot] = result
+            elif kind == "mark":
+                marked_by_slot[slot] = result
+
+        slots: list[dict[str, Any]] = []
+        full_level_slots: list[int] = []
+        need_lock_slots: list[int] = []
+        need_mark_slots: list[int] = []
+        need_store_slots: list[int] = []
+
+        for slot, roi in enumerate(_CE_BOMB_CARD_ROIS):
+            row = slot // 7
+            column = slot % 7
+            color_info = frame_colors.get(slot)
+            full_level = bool(color_info and color_info.get("full_level"))
+            locked = slot in locked_by_slot
+            marked = slot in marked_by_slot
+            need_lock = bool(full_level and not locked)
+            need_mark = bool(full_level and not marked)
+            need_store = bool(locked and marked)
+            if full_level:
+                full_level_slots.append(slot)
+            if need_lock:
+                need_lock_slots.append(slot)
+            if need_mark:
+                need_mark_slots.append(slot)
+            if need_store:
+                need_store_slots.append(slot)
+            center = [
+                round((90 + column * 200 + 113) * 2 / 3),
+                round((275 + row * 213 + 105.5) * 2 / 3),
+            ]
+            slots.append(
+                {
+                    "slot": slot,
+                    "row": row,
+                    "column": column,
+                    "roi": list(roi),
+                    "center": center,
+                    "full_level": full_level,
+                    "locked": locked,
+                    "marked": marked,
+                    "need_lock": need_lock,
+                    "need_mark": need_mark,
+                    "need_store": need_store,
+                    "frame_rgb": color_info.get("rgb") if color_info else None,
+                    "full_distance": (
+                        color_info.get("full_distance") if color_info else None
+                    ),
+                }
+            )
+        return {
+            "server": normalized_server,
+            "rows": 3,
+            "columns": 7,
+            "locker_threshold": locker_threshold,
+            "mark_threshold": mark_threshold,
+            "full_level_slots": full_level_slots,
+            "full_level_count": len(full_level_slots),
+            "need_lock_slots": need_lock_slots,
+            "need_lock_count": len(need_lock_slots),
+            "need_mark_slots": need_mark_slots,
+            "need_mark_count": len(need_mark_slots),
+            "need_store_slots": need_store_slots,
+            "need_store_count": len(need_store_slots),
+            "slots": slots,
+        }
+
 
 def _inspect_servant_frame_colors(
     screenshot: bytes,
@@ -763,4 +939,67 @@ def _inspect_servant_frame_colors(
                 "locked": best_locked,
                 "rgb": [round(mean_r, 1), round(mean_g, 1), round(mean_b, 1)],
             }
+    return result
+
+
+def _inspect_ce_bomb_frame_colors(
+    screenshot: bytes,
+) -> dict[int, dict[str, Any]]:
+    try:
+        with Image.open(BytesIO(screenshot)) as source:
+            image = source.convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError):
+        return {}
+
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        return {}
+    scale = min(width / 1920, height / 1080)
+    dx = (width - 1920 * scale) / 2
+    dy = (height - 1080 * scale) / 2
+    result: dict[int, dict[str, Any]] = {}
+
+    for slot in range(21):
+        row = slot // 7
+        column = slot % 7
+        left_1080 = 90 + column * 200
+        top_1080 = 275 + row * 213
+        crop_left = max(0, min(width, round((left_1080 + 30) * scale + dx)))
+        crop_top = max(0, min(height, round((top_1080 + 185) * scale + dy)))
+        crop_right = max(
+            crop_left,
+            min(width, round((left_1080 + 70) * scale + dy if False else (left_1080 + 70) * scale + dx)),
+        )
+        crop_bottom = max(
+            crop_top,
+            min(height, round((top_1080 + 195) * scale + dy)),
+        )
+        if crop_right <= crop_left or crop_bottom <= crop_top:
+            continue
+        patch = image.crop((crop_left, crop_top, crop_right, crop_bottom))
+        raw_bytes = patch.tobytes()
+        if not raw_bytes:
+            continue
+        count = len(raw_bytes) // 3
+        if count <= 0:
+            continue
+        mean_r = sum(raw_bytes[0::3]) / count
+        mean_g = sum(raw_bytes[1::3]) / count
+        mean_b = sum(raw_bytes[2::3]) / count
+        dist_full = (
+            (mean_r - _CE_FULL_LV_RGB[0]) ** 2
+            + (mean_g - _CE_FULL_LV_RGB[1]) ** 2
+            + (mean_b - _CE_FULL_LV_RGB[2]) ** 2
+        )
+        dist_non_full = (
+            (mean_r - _CE_NON_FULL_LV_RGB[0]) ** 2
+            + (mean_g - _CE_NON_FULL_LV_RGB[1]) ** 2
+            + (mean_b - _CE_NON_FULL_LV_RGB[2]) ** 2
+        )
+        result[slot] = {
+            "full_level": bool(dist_full <= dist_non_full and dist_full < 500),
+            "full_distance": round(dist_full, 2),
+            "non_full_distance": round(dist_non_full, 2),
+            "rgb": [round(mean_r, 1), round(mean_g, 1), round(mean_b, 1)],
+        }
     return result

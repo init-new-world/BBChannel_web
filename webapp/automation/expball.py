@@ -20,13 +20,17 @@ EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND = "event.expball.inspect-servant-grid"
 EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND = (
     "event.expball.inspect-command-code-grid"
 )
+EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND = "event.expball.inspect-ce-bomb-grid"
 EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND = "event.expball.inspect-servant-level"
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
 EXPBALL_ENHANCE_JOB_KIND = "event.expball.enhance"
 _SUMMON_REQUEST_ACTIONS = {"summon_free_ten", "summon_ten"}
 _VALID_CARD_STARS = {3, 4, 5}
+_STORAGE_TARGETS = {"exp", "ce_bomb"}
 _ENHANCE_TARGETS = {"equipment", "servant"}
+_CE_UNIFIED_LOCK_POINT = (32, 358)
+_CE_UNIFIED_MARK_POINT = (32, 477)
 _ENHANCE_ADD_BASE_POINT = (197, 157)
 _ENHANCE_FIRST_CARD_POINT = (135, 243)
 _ENHANCE_OPEN_SLOTS_POINT = (823, 283)
@@ -281,6 +285,69 @@ def register_expball_command_code_grid_inspect_job(
     job_manager.register(
         EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND,
         create_expball_command_code_grid_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_ce_bomb_grid_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        locker_threshold = _number(payload, "locker_threshold", 0.7, 0, 1)
+        mark_threshold = _number(payload, "mark_threshold", 0.6, 0, 1)
+        server = str(
+            script_data.get_setting_plan(normalized_name)["server"]
+        ).upper()
+        context.checkpoint(
+            "inspect_expball_ce_bomb_grid",
+            progress=0.2,
+            message="Inspecting visible craft-essence bomb grid cards.",
+        )
+        report = recognizer.recognize_ce_bomb_grid(
+            device_service.snapshot(),
+            server,
+            locker_threshold=locker_threshold,
+            mark_threshold=mark_threshold,
+        )
+        context.emit(
+            "expball_ce_bomb_grid",
+            "Visible craft-essence bomb grid cards were inspected.",
+            data=report,
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Craft-essence bomb grid inspection completed.",
+        )
+        return {
+            "setting_name": normalized_name,
+            **report,
+        }
+
+    return handler
+
+
+def register_expball_ce_bomb_grid_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND,
+        create_expball_ce_bomb_grid_inspect_handler(
             script_data,
             device_service,
             recognizer,
@@ -671,8 +738,22 @@ def create_expball_storage_handler(
         if not isinstance(setting_name, str) or not setting_name.strip():
             raise ValueError("setting_name must be a non-empty string.")
         normalized_name = setting_name.strip()
+        storage_target = (
+            str(payload.get("storage_target") or "exp").strip().lower()
+        )
+        if storage_target not in _STORAGE_TARGETS:
+            raise ValueError("storage_target must be exp or ce_bomb.")
+        require_locked_and_marked_raw = payload.get(
+            "require_locked_and_marked",
+            True,
+        )
+        if not isinstance(require_locked_and_marked_raw, bool):
+            raise ValueError("require_locked_and_marked must be a boolean.")
+        require_locked_and_marked = require_locked_and_marked_raw
         threshold = _number(payload, "threshold", 0.84, 0, 1)
         grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
+        locker_threshold = _number(payload, "locker_threshold", 0.7, 0, 1)
+        mark_threshold = _number(payload, "mark_threshold", 0.6, 0, 1)
         stars = _parse_card_stars(payload)
         timeout_seconds = _number(payload, "timeout_seconds", 120, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
@@ -716,6 +797,8 @@ def create_expball_storage_handler(
             )
             return {
                 "setting_name": normalized_name,
+                "storage_target": storage_target,
+                "require_locked_and_marked": require_locked_and_marked,
                 "completed": completed,
                 "stopped": stopped,
                 "reason": reason,
@@ -774,6 +857,87 @@ def create_expball_storage_handler(
                     reason="outside_storage_flow",
                     report=report,
                 )
+
+            if (
+                phase == "submit"
+                and storage_target == "ce_bomb"
+                and not selection_applied
+                and "in_store" in matches
+            ):
+                ce_grid_report = recognizer.recognize_ce_bomb_grid(
+                    screenshot,
+                    server,
+                    locker_threshold=locker_threshold,
+                    mark_threshold=mark_threshold,
+                )
+                context.emit(
+                    "expball_ce_bomb_grid",
+                    "Visible craft-essence bomb storage cards were inspected.",
+                    data={
+                        "storage_target": storage_target,
+                        "require_locked_and_marked": require_locked_and_marked,
+                        **ce_grid_report,
+                    },
+                )
+                matching_slots = [
+                    slot
+                    for slot in ce_grid_report.get("slots", [])
+                    if isinstance(slot, dict)
+                    and (
+                        slot.get("need_store") is True
+                        if require_locked_and_marked
+                        else slot.get("full_level") is True
+                    )
+                ]
+                if not matching_slots:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="no_matching_cards",
+                        report=report,
+                    )
+                for slot in matching_slots:
+                    slot_center = slot.get("center")
+                    if not isinstance(slot_center, list) or len(slot_center) != 2:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="invalid_recognition_result",
+                            report=report,
+                        )
+                    x, y = randomized_touch_point(
+                        slot_center,
+                        enabled=random_touch,
+                    )
+                    operation = device_service.tap(x, y)
+                    context.emit(
+                        "device_action",
+                        "Selected a craft-essence bomb card for storage.",
+                        data={
+                            "role": "select_ce_bomb_storage_card",
+                            "phase": phase,
+                            "slot": slot.get("slot"),
+                            "full_level": slot.get("full_level"),
+                            "locked": slot.get("locked"),
+                            "marked": slot.get("marked"),
+                            "operation": operation.to_dict(),
+                        },
+                    )
+                    if not operation.ok:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    actions.append("select_ce_bomb_storage_card")
+                    selected_slots.append(int(slot["slot"]))
+                    context.sleep(
+                        randomized_wait_seconds(action_wait_seconds, random_time)
+                    )
+                selection_applied = True
+                idle_polls = 0
+                continue
 
             if (
                 phase == "submit"
@@ -958,8 +1122,24 @@ def create_expball_enhance_handler(
             else payload.get("material_select_mode")
         )
         stars = _parse_card_stars(payload)
+        lock_full_ce_bombs_raw = payload.get("lock_full_ce_bombs", False)
+        if not isinstance(lock_full_ce_bombs_raw, bool):
+            raise ValueError("lock_full_ce_bombs must be a boolean.")
+        lock_full_ce_bombs = lock_full_ce_bombs_raw
+        mark_full_ce_bombs_raw = payload.get("mark_full_ce_bombs", False)
+        if not isinstance(mark_full_ce_bombs_raw, bool):
+            raise ValueError("mark_full_ce_bombs must be a boolean.")
+        mark_full_ce_bombs = mark_full_ce_bombs_raw
         if selection_mode_raw is None:
-            selection_mode = "grid" if stars is not None else "auto"
+            selection_mode = (
+                "grid"
+                if (
+                    stars is not None
+                    or lock_full_ce_bombs
+                    or mark_full_ce_bombs
+                )
+                else "auto"
+            )
         else:
             selection_mode = str(selection_mode_raw).strip().lower()
         if selection_mode not in {"auto", "grid"}:
@@ -978,6 +1158,8 @@ def create_expball_enhance_handler(
         threshold = _number(payload, "threshold", 0.84, 0, 1)
         grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
         level_threshold = _number(payload, "level_threshold", 0.6, 0, 1)
+        locker_threshold = _number(payload, "locker_threshold", 0.7, 0, 1)
+        mark_threshold = _number(payload, "mark_threshold", 0.6, 0, 1)
         timeout_seconds = _number(payload, "timeout_seconds", 180, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(
@@ -999,8 +1181,11 @@ def create_expball_enhance_handler(
         limit_breaks_completed = 0
         actions: list[str] = []
         selected_slots: list[int] = []
+        locked_ce_bomb_slots: list[int] = []
+        marked_ce_bomb_slots: list[int] = []
         materials_selected = False
         grid_cards_tapped = False
+        ce_bombs_checked = False
         pending_animation_skip = False
         pending_limit_break_animation_skip = False
         in_limit_break = False
@@ -1031,6 +1216,8 @@ def create_expball_enhance_handler(
                 "material_select_mode": selection_mode,
                 "target_level": target_level,
                 "auto_limit_break": auto_limit_break,
+                "lock_full_ce_bombs": lock_full_ce_bombs,
+                "mark_full_ce_bombs": mark_full_ce_bombs,
                 "max_batches": max_batches,
                 "batches_completed": batches_completed,
                 "limit_breaks_completed": limit_breaks_completed,
@@ -1041,6 +1228,8 @@ def create_expball_enhance_handler(
                 "actions": list(actions),
                 "selected_slots": list(selected_slots),
                 "selected_count": len(selected_slots),
+                "locked_ce_bomb_slots": list(locked_ce_bomb_slots),
+                "marked_ce_bomb_slots": list(marked_ce_bomb_slots),
                 "servant_level": last_level_report,
                 "last_level_report": last_level_report,
                 "last_report": report,
@@ -1181,6 +1370,7 @@ def create_expball_enhance_handler(
                     pending_limit_break_animation_skip = False
                     materials_selected = False
                     grid_cards_tapped = False
+                    ce_bombs_checked = False
                 else:
                     if not tap_point(
                         _ENHANCE_SKIP_LIMIT_BREAK_POINT,
@@ -1203,6 +1393,7 @@ def create_expball_enhance_handler(
                     pending_animation_skip = False
                     materials_selected = False
                     grid_cards_tapped = False
+                    ce_bombs_checked = False
                     if inspect_level_if_needed(screenshot, matches):
                         return finish(
                             completed=True,
@@ -1316,6 +1507,7 @@ def create_expball_enhance_handler(
                 in_limit_break = False
                 materials_selected = False
                 grid_cards_tapped = False
+                ce_bombs_checked = False
                 acted = True
             elif "qhjd2" in matches:
                 confirm_target = matches["qhjd2"]
@@ -1351,6 +1543,7 @@ def create_expball_enhance_handler(
                     pending_animation_skip = True
                 materials_selected = False
                 grid_cards_tapped = False
+                ce_bombs_checked = False
                 acted = True
             elif "qdjqh" in matches:
                 if not tap_point(
@@ -1396,6 +1589,7 @@ def create_expball_enhance_handler(
                 in_limit_break = True
                 materials_selected = False
                 grid_cards_tapped = False
+                ce_bombs_checked = False
                 acted = True
             elif "feedjd" in matches:
                 feed_target = matches["feedjd"]
@@ -1426,9 +1620,143 @@ def create_expball_enhance_handler(
                     )
                 materials_selected = False
                 grid_cards_tapped = False
+                ce_bombs_checked = False
                 acted = True
             elif "tysd" in matches or "qhjd" in matches:
                 if not grid_cards_tapped:
+                    ce_grid_report: dict[str, Any] | None = None
+                    if (
+                        target == "equipment"
+                        and (lock_full_ce_bombs or mark_full_ce_bombs)
+                        and not ce_bombs_checked
+                    ):
+                        ce_grid_report = recognizer.recognize_ce_bomb_grid(
+                            screenshot,
+                            server,
+                            locker_threshold=locker_threshold,
+                            mark_threshold=mark_threshold,
+                        )
+                        context.emit(
+                            "expball_ce_bomb_grid",
+                            "Visible craft-essence bomb grid cards were inspected.",
+                            data={
+                                "lock_full_ce_bombs": lock_full_ce_bombs,
+                                "mark_full_ce_bombs": mark_full_ce_bombs,
+                                **ce_grid_report,
+                            },
+                        )
+                        need_lock_slots = (
+                            [
+                                slot
+                                for slot in ce_grid_report.get("slots", [])
+                                if isinstance(slot, dict)
+                                and slot.get("need_lock") is True
+                            ]
+                            if lock_full_ce_bombs
+                            else []
+                        )
+                        need_mark_slots = (
+                            [
+                                slot
+                                for slot in ce_grid_report.get("slots", [])
+                                if isinstance(slot, dict)
+                                and slot.get("need_mark") is True
+                            ]
+                            if mark_full_ce_bombs
+                            else []
+                        )
+                        if need_lock_slots:
+                            if not tap_point(
+                                _CE_UNIFIED_LOCK_POINT,
+                                "enable_ce_unified_lock",
+                            ):
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason="device_action_failed",
+                                    report=report,
+                                )
+                            for slot in need_lock_slots:
+                                slot_center = slot.get("center")
+                                if (
+                                    not isinstance(slot_center, list)
+                                    or len(slot_center) != 2
+                                ):
+                                    return finish(
+                                        completed=False,
+                                        stopped=True,
+                                        reason="invalid_recognition_result",
+                                        report=report,
+                                    )
+                                if not tap_point(
+                                    slot_center,
+                                    "lock_full_ce_bomb",
+                                    extra={"slot": slot.get("slot")},
+                                ):
+                                    return finish(
+                                        completed=False,
+                                        stopped=True,
+                                        reason="device_action_failed",
+                                        report=report,
+                                    )
+                                locked_ce_bomb_slots.append(int(slot["slot"]))
+                            if not need_mark_slots:
+                                if not tap_point(
+                                    _CE_UNIFIED_LOCK_POINT,
+                                    "disable_ce_unified_lock",
+                                ):
+                                    return finish(
+                                        completed=False,
+                                        stopped=True,
+                                        reason="device_action_failed",
+                                        report=report,
+                                    )
+                        if need_mark_slots:
+                            if not tap_point(
+                                _CE_UNIFIED_MARK_POINT,
+                                "enable_ce_unified_mark",
+                            ):
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason="device_action_failed",
+                                    report=report,
+                                )
+                            for slot in need_mark_slots:
+                                slot_center = slot.get("center")
+                                if (
+                                    not isinstance(slot_center, list)
+                                    or len(slot_center) != 2
+                                ):
+                                    return finish(
+                                        completed=False,
+                                        stopped=True,
+                                        reason="invalid_recognition_result",
+                                        report=report,
+                                    )
+                                if not tap_point(
+                                    slot_center,
+                                    "mark_full_ce_bomb",
+                                    extra={"slot": slot.get("slot")},
+                                ):
+                                    return finish(
+                                        completed=False,
+                                        stopped=True,
+                                        reason="device_action_failed",
+                                        report=report,
+                                    )
+                                marked_ce_bomb_slots.append(int(slot["slot"]))
+                            if not tap_point(
+                                _CE_UNIFIED_MARK_POINT,
+                                "disable_ce_unified_mark",
+                            ):
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason="device_action_failed",
+                                    report=report,
+                                )
+                        ce_bombs_checked = True
                     if stars is not None:
                         grid_report = recognizer.recognize_storage_grid(
                             screenshot,
@@ -1484,8 +1812,33 @@ def create_expball_enhance_handler(
                                 )
                             selected_slots.append(int(slot["slot"]))
                     else:
+                        material_point: list[int] | tuple[int, int] = (
+                            _ENHANCE_FIRST_CARD_POINT
+                        )
+                        if (
+                            ce_grid_report is not None
+                            and 1 in locked_ce_bomb_slots
+                        ):
+                            fallback_slot = next(
+                                (
+                                    slot
+                                    for slot in ce_grid_report.get("slots", [])
+                                    if isinstance(slot, dict)
+                                    and slot.get("full_level") is not True
+                                    and slot.get("locked") is not True
+                                    and int(slot.get("slot", 0))
+                                    not in locked_ce_bomb_slots
+                                ),
+                                None,
+                            )
+                            if (
+                                isinstance(fallback_slot, dict)
+                                and isinstance(fallback_slot.get("center"), list)
+                                and len(fallback_slot["center"]) == 2
+                            ):
+                                material_point = fallback_slot["center"]
                         if not tap_point(
-                            _ENHANCE_FIRST_CARD_POINT,
+                            material_point,
                             "select_material_card",
                         ):
                             return finish(
@@ -1512,6 +1865,7 @@ def create_expball_enhance_handler(
                         )
                     materials_selected = True
                     grid_cards_tapped = False
+                    ce_bombs_checked = False
                     acted = True
             elif "exlevel" in matches:
                 if not tap_point(
@@ -1526,6 +1880,7 @@ def create_expball_enhance_handler(
                     )
                 materials_selected = False
                 grid_cards_tapped = False
+                ce_bombs_checked = False
                 acted = True
             elif "slot" in matches and not materials_selected:
                 if selection_mode == "grid":
@@ -1545,6 +1900,7 @@ def create_expball_enhance_handler(
                             report=report,
                         )
                     grid_cards_tapped = False
+                    ce_bombs_checked = False
                     acted = True
                 else:
                     recommend_point = (
