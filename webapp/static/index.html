@@ -271,11 +271,29 @@
             </label>
             <button id="navigate-expball" class="ghost-button wide" type="button">Navigate</button>
             <button id="inspect-expball-grid" class="ghost-button wide" type="button">Inspect Storage Grid</button>
+            <button id="inspect-expball-servant-grid" class="ghost-button wide" type="button">Inspect Servant Grid</button>
+            <button id="inspect-expball-cc-grid" class="ghost-button wide" type="button">Inspect Command Code Grid</button>
+            <button id="inspect-expball-ce-bomb-grid" class="ghost-button wide" type="button">Inspect CE Bomb Grid</button>
             <div class="inline-toggles" role="group" aria-label="EXP card rarity">
               <label><input id="expball-star-3" type="checkbox" checked><span>3 star</span></label>
               <label><input id="expball-star-4" type="checkbox" checked><span>4 star</span></label>
               <label><input id="expball-star-5" type="checkbox"><span>5 star</span></label>
             </div>
+            <label class="input-row">
+              <span>Store target</span>
+              <select id="expball-storage-target" class="field" aria-label="Storage target">
+                <option value="exp">EXP cards</option>
+                <option value="ce_bomb">CE bombs</option>
+              </select>
+            </label>
+            <label class="input-row">
+              <span>Sell target</span>
+              <select id="expball-sell-target" class="field" aria-label="Sell target">
+                <option value="exp">EXP cards</option>
+                <option value="servant">Servants</option>
+                <option value="command_code">Command codes</option>
+              </select>
+            </label>
             <label class="input-row">
               <span>Full box</span>
               <select id="expball-overflow-action" class="field" aria-label="EXP inventory overflow action">
@@ -307,6 +325,22 @@
             <label class="input-row">
               <span>Enhance batches</span>
               <input id="expball-max-batches" class="field number-field" type="number" min="1" max="100" step="1" value="5">
+            </label>
+            <label class="toggle-row">
+              <input id="expball-auto-limit-break" type="checkbox" checked>
+              <span>Auto limit break</span>
+            </label>
+            <label class="toggle-row">
+              <input id="expball-lock-ce-bombs" type="checkbox" checked>
+              <span>Lock/mark full CEs</span>
+            </label>
+            <label class="toggle-row">
+              <input id="expball-lock-gold-servants" type="checkbox" checked>
+              <span>Lock gold servants</span>
+            </label>
+            <label class="toggle-row">
+              <input id="expball-lock-inscribed-cc" type="checkbox" checked>
+              <span>Lock inscribed CCs</span>
             </label>
             <button id="inspect-expball-servant-level" class="ghost-button wide" type="button">Inspect Servant Level</button>
             <button id="run-expball-enhance" class="ghost-button wide" type="button">Run Enhancement</button>

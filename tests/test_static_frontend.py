@@ -99,16 +99,25 @@ def test_operator_console_references_api_controls():
     assert 'id="lottery-overflow-action"' in index
     assert 'id="inspect-expball"' in index
     assert 'id="inspect-expball-grid"' in index
+    assert 'id="inspect-expball-servant-grid"' in index
+    assert 'id="inspect-expball-cc-grid"' in index
+    assert 'id="inspect-expball-ce-bomb-grid"' in index
     assert 'id="expball-destination"' in index
     assert 'id="navigate-expball"' in index
     assert 'id="expball-star-3"' in index
     assert 'id="expball-star-4"' in index
     assert 'id="expball-star-5"' in index
+    assert 'id="expball-storage-target"' in index
+    assert 'id="expball-sell-target"' in index
     assert 'id="expball-overflow-action"' in index
     assert 'id="expball-enhance-target"' in index
     assert 'id="expball-material-select-mode"' in index
     assert 'id="expball-target-level"' in index
     assert 'id="expball-max-batches"' in index
+    assert 'id="expball-auto-limit-break"' in index
+    assert 'id="expball-lock-ce-bombs"' in index
+    assert 'id="expball-lock-gold-servants"' in index
+    assert 'id="expball-lock-inscribed-cc"' in index
     assert 'id="inspect-expball-servant-level"' in index
     assert 'id="run-expball-enhance"' in index
     assert 'id="run-expball-summon"' in index
@@ -173,6 +182,9 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.lottery.run"' in script
     assert 'job.kind === "event.expball.inspect"' in script
     assert 'job.kind === "event.expball.inspect-storage-grid"' in script
+    assert 'job.kind === "event.expball.inspect-servant-grid"' in script
+    assert 'job.kind === "event.expball.inspect-command-code-grid"' in script
+    assert 'job.kind === "event.expball.inspect-ce-bomb-grid"' in script
     assert 'job.kind === "event.expball.inspect-servant-level"' in script
     assert 'job.kind === "event.expball.enhance"' in script
     assert 'job.kind === "event.expball.navigate"' in script
@@ -198,6 +210,9 @@ def test_operator_console_references_api_controls():
     assert "selectedExpballStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script
     assert 'enqueueJob("event.expball.inspect-storage-grid"' in script
+    assert 'enqueueJob("event.expball.inspect-servant-grid"' in script
+    assert 'enqueueJob("event.expball.inspect-command-code-grid"' in script
+    assert 'enqueueJob("event.expball.inspect-ce-bomb-grid"' in script
     assert 'enqueueJob("event.expball.navigate"' in script
     assert "destination: els.expballDestination.value" in script
     assert 'enqueueJob("event.expball.run"' in script

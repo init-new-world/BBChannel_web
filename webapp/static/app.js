@@ -195,14 +195,23 @@ const els = {
   expballDestination: document.querySelector("#expball-destination"),
   navigateExpball: document.querySelector("#navigate-expball"),
   inspectExpballGrid: document.querySelector("#inspect-expball-grid"),
+  inspectExpballServantGrid: document.querySelector("#inspect-expball-servant-grid"),
+  inspectExpballCcGrid: document.querySelector("#inspect-expball-cc-grid"),
+  inspectExpballCeBombGrid: document.querySelector("#inspect-expball-ce-bomb-grid"),
   expballStar3: document.querySelector("#expball-star-3"),
   expballStar4: document.querySelector("#expball-star-4"),
   expballStar5: document.querySelector("#expball-star-5"),
+  expballStorageTarget: document.querySelector("#expball-storage-target"),
+  expballSellTarget: document.querySelector("#expball-sell-target"),
   expballOverflowAction: document.querySelector("#expball-overflow-action"),
   expballEnhanceTarget: document.querySelector("#expball-enhance-target"),
   expballMaterialSelectMode: document.querySelector("#expball-material-select-mode"),
   expballTargetLevel: document.querySelector("#expball-target-level"),
   expballMaxBatches: document.querySelector("#expball-max-batches"),
+  expballAutoLimitBreak: document.querySelector("#expball-auto-limit-break"),
+  expballLockCeBombs: document.querySelector("#expball-lock-ce-bombs"),
+  expballLockGoldServants: document.querySelector("#expball-lock-gold-servants"),
+  expballLockInscribedCc: document.querySelector("#expball-lock-inscribed-cc"),
   inspectExpballServantLevel: document.querySelector("#inspect-expball-servant-level"),
   runExpballEnhance: document.querySelector("#run-expball-enhance"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
@@ -533,12 +542,21 @@ function bindEvents() {
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.navigateExpball.addEventListener("click", navigateExpball);
   els.inspectExpballGrid.addEventListener("click", inspectExpballGrid);
+  els.inspectExpballServantGrid.addEventListener("click", inspectExpballServantGrid);
+  els.inspectExpballCcGrid.addEventListener("click", inspectExpballCcGrid);
+  els.inspectExpballCeBombGrid.addEventListener("click", inspectExpballCeBombGrid);
   els.expballStar3.addEventListener("change", updateControls);
   els.expballStar4.addEventListener("change", updateControls);
   els.expballStar5.addEventListener("change", updateControls);
+  els.expballStorageTarget.addEventListener("change", updateControls);
+  els.expballSellTarget.addEventListener("change", updateControls);
   els.expballOverflowAction.addEventListener("change", updateControls);
   els.expballEnhanceTarget.addEventListener("change", updateControls);
   els.expballMaterialSelectMode.addEventListener("change", updateControls);
+  els.expballAutoLimitBreak.addEventListener("change", updateControls);
+  els.expballLockCeBombs.addEventListener("change", updateControls);
+  els.expballLockGoldServants.addEventListener("change", updateControls);
+  els.expballLockInscribedCc.addEventListener("change", updateControls);
   els.inspectExpballServantLevel.addEventListener("click", inspectExpballServantLevel);
   els.runExpballEnhance.addEventListener("click", runExpballEnhance);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
@@ -3135,16 +3153,25 @@ async function runLottery() {
   }
   const overflowAction = els.lotteryOverflowAction.value || "stop";
   const overflowStars = selectedExpballStars();
+  const storageTarget = els.expballStorageTarget.value || "exp";
+  const sellTarget = els.expballSellTarget.value || "exp";
   await enqueueJob("event.lottery.run", {
     setting_name: settingName,
     pay_slot: readNumber(els.lotteryPaySlot),
     stars: selectedLotteryStars(),
     overflow_action: overflowAction,
     ...(overflowStars.length ? { overflow_stars: overflowStars } : {}),
+    ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
+    ...(overflowAction === "sell" ? {
+      sell_target: sellTarget,
+      lock_gold_servants: els.expballLockGoldServants.checked,
+      lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
+    } : {}),
     ...(overflowAction === "servant_enhancement" ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
       max_batches: readNumber(els.expballMaxBatches),
       target_level: readNumber(els.expballTargetLevel),
+      auto_limit_break: els.expballAutoLimitBreak.checked,
     } : {}),
   });
 }
@@ -3180,6 +3207,36 @@ async function inspectExpballGrid() {
   });
 }
 
+async function inspectExpballServantGrid() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-servant-grid", {
+    setting_name: settingName,
+  });
+}
+
+async function inspectExpballCcGrid() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-command-code-grid", {
+    setting_name: settingName,
+  });
+}
+
+async function inspectExpballCeBombGrid() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-ce-bomb-grid", {
+    setting_name: settingName,
+  });
+}
+
 async function inspectExpballServantLevel() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -3198,12 +3255,19 @@ async function runExpballEnhance() {
   const target = els.expballEnhanceTarget.value || "equipment";
   const materialSelectMode = els.expballMaterialSelectMode.value || "auto";
   const stars = selectedExpballStars();
+  const lockCeBombs = Boolean(target === "equipment" && els.expballLockCeBombs.checked);
   await enqueueJob("event.expball.enhance", {
     setting_name: settingName,
     target,
     material_select_mode: materialSelectMode,
     max_batches: readNumber(els.expballMaxBatches),
-    ...(target === "servant" ? { target_level: readNumber(els.expballTargetLevel) } : {}),
+    ...(target === "servant" ? {
+      target_level: readNumber(els.expballTargetLevel),
+      auto_limit_break: els.expballAutoLimitBreak.checked,
+    } : {
+      lock_full_ce_bombs: lockCeBombs,
+      mark_full_ce_bombs: lockCeBombs,
+    }),
     ...(stars.length ? { stars } : {}),
   });
 }
@@ -3215,18 +3279,35 @@ async function runExpballSummon() {
   }
   const stars = selectedExpballStars();
   const overflowAction = els.expballOverflowAction.value || "stop";
+  const storageTarget = els.expballStorageTarget.value || "exp";
+  const sellTarget = els.expballSellTarget.value || "exp";
   const isEnhancementOverflow = ["equipment_enhancement", "servant_enhancement"].includes(overflowAction);
+  const lockCeBombs = Boolean(
+    overflowAction === "equipment_enhancement" && els.expballLockCeBombs.checked,
+  );
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
     overflow_action: overflowAction,
     ...(stars.length ? { stars } : {}),
+    ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
+    ...(overflowAction === "sell" ? {
+      sell_target: sellTarget,
+      lock_gold_servants: els.expballLockGoldServants.checked,
+      lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
+    } : {}),
     ...(isEnhancementOverflow ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
       max_batches: readNumber(els.expballMaxBatches),
       ...(overflowAction === "servant_enhancement"
-        ? { target_level: readNumber(els.expballTargetLevel) }
-        : {}),
+        ? {
+          target_level: readNumber(els.expballTargetLevel),
+          auto_limit_break: els.expballAutoLimitBreak.checked,
+        }
+        : {
+          lock_full_ce_bombs: lockCeBombs,
+          mark_full_ce_bombs: lockCeBombs,
+        }),
     } : {}),
   });
 }
@@ -3237,8 +3318,10 @@ async function runExpballStorage() {
     return;
   }
   const stars = selectedExpballStars();
+  const storageTarget = els.expballStorageTarget.value || "exp";
   await enqueueJob("event.expball.storage", {
     setting_name: settingName,
+    storage_target: storageTarget,
     ...(stars.length ? { stars } : {}),
   });
 }
@@ -3249,8 +3332,12 @@ async function runExpballSell() {
     return;
   }
   const stars = selectedExpballStars();
+  const sellTarget = els.expballSellTarget.value || "exp";
   await enqueueJob("event.expball.sell", {
     setting_name: settingName,
+    sell_target: sellTarget,
+    lock_gold_servants: els.expballLockGoldServants.checked,
+    lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
     ...(stars.length ? { stars } : {}),
   });
 }
@@ -3645,6 +3732,27 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.expball.inspect-servant-grid") {
+    els.jobResult.textContent = [
+      `${result.need_lock_count || 0} gold to lock`,
+      `${result.fp_gold_count || 0} FP gold`,
+    ].join(" · ");
+    return;
+  }
+  if (job.kind === "event.expball.inspect-command-code-grid") {
+    els.jobResult.textContent = [
+      `${result.inscribed_count || 0} inscribed`,
+      result.empty ? "Empty" : "Loaded",
+    ].join(" · ");
+    return;
+  }
+  if (job.kind === "event.expball.inspect-ce-bomb-grid") {
+    els.jobResult.textContent = [
+      `${result.full_level_count || 0} full Lv.`,
+      `${result.need_store_count || 0} ready to store`,
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.expball.inspect-servant-level") {
     if (result.valid) {
       els.jobResult.textContent = [
@@ -3663,6 +3771,12 @@ function renderJobResult(job) {
       `${batches} ${batches === 1 ? "batch" : "batches"}`,
       humanizeResultValue(result.reason || "unknown"),
     ];
+    if (result.limit_breaks_completed) {
+      details.push(`${result.limit_breaks_completed} limit breaks`);
+    }
+    if (result.locked_ce_bomb_slots?.length) {
+      details.push(`${result.locked_ce_bomb_slots.length} CEs locked`);
+    }
     if (result.servant_level?.current_level) {
       details.push(`Lv. ${result.servant_level.current_level}/${result.servant_level.max_level}`);
     }
@@ -3967,14 +4081,32 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsExpball
     || hasRunningJob;
+  els.inspectExpballServantGrid.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
+  els.inspectExpballCcGrid.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
+  els.inspectExpballCeBombGrid.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || hasRunningJob;
   els.expballStar3.disabled = !supportsExpball || hasRunningJob;
   els.expballStar4.disabled = !supportsExpball || hasRunningJob;
   els.expballStar5.disabled = !supportsExpball || hasRunningJob;
+  els.expballStorageTarget.disabled = !supportsExpball || hasRunningJob;
+  els.expballSellTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
   els.expballEnhanceTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballMaterialSelectMode.disabled = !supportsExpball || hasRunningJob;
   els.expballTargetLevel.disabled = !supportsExpball || hasRunningJob;
   els.expballMaxBatches.disabled = !supportsExpball || hasRunningJob;
+  els.expballAutoLimitBreak.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockCeBombs.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockGoldServants.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockInscribedCc.disabled = !supportsExpball || hasRunningJob;
   els.inspectExpballServantLevel.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
