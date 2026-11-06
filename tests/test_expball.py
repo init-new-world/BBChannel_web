@@ -1,4 +1,5 @@
 from webapp.automation.expball import (
+    EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND,
     EXPBALL_ENHANCE_JOB_KIND,
     EXPBALL_INSPECT_JOB_KIND,
     EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND,
@@ -6,6 +7,7 @@ from webapp.automation.expball import (
     EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
+    create_expball_command_code_grid_inspect_handler,
     create_expball_enhance_handler,
     create_expball_inspect_handler,
     create_expball_servant_grid_inspect_handler,
@@ -13,6 +15,7 @@ from webapp.automation.expball import (
     create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
+    register_expball_command_code_grid_inspect_job,
     register_expball_enhance_job,
     register_expball_inspect_job,
     register_expball_servant_grid_inspect_job,
@@ -1534,6 +1537,121 @@ def test_expball_servant_grid_inspect_job_emits_report(tmp_path):
         )
         assert manager.has_kind(EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND)
         assert manager.requires_device(EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND) is True
+
+
+def test_expball_recognizer_recognizes_command_code_sale_grid():
+    from webapp.services.expball import (
+        _COMMAND_CODE_CARD_ROIS,
+        _FIRST_CARD_LOCKER_ROI,
+    )
+
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            assert prefix == "expball/CH"
+            return {
+                "entries": [
+                    {"path": "expball/CH/no_wenzhang.png"},
+                    {"path": "expball/CH/locker.png"},
+                    {"path": "expball/CH/kyz.png"},
+                ]
+            }
+
+    class Recognition:
+        def match_templates(self, _screenshot, candidates):
+            results = []
+            for candidate in candidates:
+                is_inscribed = (
+                    candidate["template_path"] == "expball/CH/kyz.png"
+                    and candidate["roi"] in {
+                        _COMMAND_CODE_CARD_ROIS[0],
+                        _COMMAND_CODE_CARD_ROIS[4],
+                    }
+                )
+                is_locker = (
+                    candidate["template_path"] == "expball/CH/locker.png"
+                    and candidate["roi"] == _FIRST_CARD_LOCKER_ROI
+                )
+                results.append(
+                    MatchResult(
+                        template_path=candidate["template_path"],
+                        matched=is_inscribed or is_locker,
+                        confidence=0.91 if (is_inscribed or is_locker) else 0.1,
+                        threshold=candidate["threshold"],
+                        top_left=[80, 184],
+                        size=[80, 40],
+                        center=[120, 204],
+                        scale=2 / 3,
+                        roi=list(candidate["roi"]),
+                    )
+                )
+            return results
+
+    report = ExpBallRecognizer(
+        Resources(),
+        Recognition(),
+    ).recognize_command_code_sale_grid(b"cc-grid", "CH")
+
+    assert report["server"] == "CH"
+    assert report["empty"] is False
+    assert report["first_slot_locked"] is True
+    assert report["inscribed_slots"] == [0, 4]
+    assert report["inscribed_count"] == 2
+    assert report["slots"][0]["inscribed"] is True
+    assert report["slots"][1]["inscribed"] is False
+    assert report["slots"][4]["inscribed"] is True
+
+
+def test_expball_command_code_grid_inspect_job_emits_report(tmp_path):
+    class Recognizer:
+        def recognize_command_code_sale_grid(
+            self,
+            _screenshot,
+            server,
+            *,
+            inscribed_threshold,
+            empty_threshold,
+            locker_threshold,
+        ):
+            assert server == "CH"
+            assert inscribed_threshold == 0.7
+            assert empty_threshold == 0.8
+            assert locker_threshold == 0.7
+            return {
+                "server": "CH",
+                "rows": 3,
+                "columns": 7,
+                "empty": False,
+                "first_slot_locked": False,
+                "inscribed_slots": [1],
+                "inscribed_count": 1,
+                "slots": [],
+            }
+
+    context = _Context()
+    handler = create_expball_command_code_grid_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )
+    result = handler(context, {"setting_name": "demo"})
+
+    assert result["setting_name"] == "demo"
+    assert result["server"] == "CH"
+    assert result["inscribed_slots"] == [1]
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_command_code_grid_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            Recognizer(),
+        )
+        assert manager.has_kind(EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND)
+        assert (
+            manager.requires_device(EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND)
+            is True
+        )
+
 
 
 

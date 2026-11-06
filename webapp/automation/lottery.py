@@ -941,7 +941,7 @@ def create_lottery_run_handler(
             )
         if (
             overflow_action == "sell"
-            and sell_target != "servant"
+            and sell_target not in {"servant", "command_code"}
             and overflow_stars is None
         ):
             raise ValueError(
@@ -991,6 +991,12 @@ def create_lottery_run_handler(
                 "include_fp_gold",
                 "select_servant_cards",
                 "fp_gold_threshold",
+                "lock_inscribed_command_codes",
+                "inscribed_threshold",
+                "empty_threshold",
+                "locker_threshold",
+                "switch_command_code_tab",
+                "auto_select",
             ):
                 _copy_option(payload, overflow_payload, key, key)
         if overflow_action == "servant_enhancement":

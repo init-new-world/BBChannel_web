@@ -79,7 +79,11 @@ def create_expball_run_handler(
             raise ValueError(
                 "overflow_action requires stars to be configured for automatic storage or sell."
             )
-        if overflow_action == "sell" and sell_target != "servant" and stars is None:
+        if (
+            overflow_action == "sell"
+            and sell_target not in {"servant", "command_code"}
+            and stars is None
+        ):
             raise ValueError(
                 "overflow_action requires stars to be configured for automatic storage or sell."
             )
@@ -112,6 +116,12 @@ def create_expball_run_handler(
                 "include_fp_gold",
                 "select_servant_cards",
                 "fp_gold_threshold",
+                "lock_inscribed_command_codes",
+                "inscribed_threshold",
+                "empty_threshold",
+                "locker_threshold",
+                "switch_command_code_tab",
+                "auto_select",
             ):
                 _copy_option(payload, overflow_payload, key, key)
         if overflow_action in {"equipment_enhancement", "servant_enhancement"}:

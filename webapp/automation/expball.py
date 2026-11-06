@@ -17,6 +17,9 @@ from webapp.services.script_data import ScriptDataService
 EXPBALL_INSPECT_JOB_KIND = "event.expball.inspect"
 EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND = "event.expball.inspect-storage-grid"
 EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND = "event.expball.inspect-servant-grid"
+EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND = (
+    "event.expball.inspect-command-code-grid"
+)
 EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND = "event.expball.inspect-servant-level"
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
@@ -213,6 +216,71 @@ def register_expball_servant_grid_inspect_job(
     job_manager.register(
         EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND,
         create_expball_servant_grid_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_command_code_grid_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        inscribed_threshold = _number(payload, "inscribed_threshold", 0.7, 0, 1)
+        empty_threshold = _number(payload, "empty_threshold", 0.8, 0, 1)
+        locker_threshold = _number(payload, "locker_threshold", 0.7, 0, 1)
+        server = str(
+            script_data.get_setting_plan(normalized_name)["server"]
+        ).upper()
+        context.checkpoint(
+            "inspect_expball_command_code_grid",
+            progress=0.2,
+            message="Inspecting visible command-code sale grid cards.",
+        )
+        report = recognizer.recognize_command_code_sale_grid(
+            device_service.snapshot(),
+            server,
+            inscribed_threshold=inscribed_threshold,
+            empty_threshold=empty_threshold,
+            locker_threshold=locker_threshold,
+        )
+        context.emit(
+            "expball_command_code_grid",
+            "Visible command-code sale grid cards were inspected.",
+            data=report,
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Command-code sale grid inspection completed.",
+        )
+        return {
+            "setting_name": normalized_name,
+            **report,
+        }
+
+    return handler
+
+
+def register_expball_command_code_grid_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND,
+        create_expball_command_code_grid_inspect_handler(
             script_data,
             device_service,
             recognizer,

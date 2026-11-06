@@ -392,3 +392,160 @@ def test_expball_sell_servant_locks_non_fp_gold_and_sells_eligible_servants():
         (640, 610),
     ]
 
+
+def test_expball_sell_command_code_locks_inscribed_and_sells():
+    reports = iter(
+        (
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report("destroy", "sell", "actionable", "destroy"),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                "ljbhclose",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                action="open_auto_sell",
+            ),
+        )
+    )
+    cc_grids = iter(
+        (
+            {
+                "server": "CH",
+                "rows": 3,
+                "columns": 7,
+                "empty": False,
+                "first_slot_locked": False,
+                "inscribed_slots": [0],
+                "inscribed_count": 1,
+                "slots": [
+                    {
+                        "slot": 0,
+                        "inscribed": True,
+                        "center": [136, 248],
+                    },
+                    {
+                        "slot": 1,
+                        "inscribed": False,
+                        "center": [269, 248],
+                    },
+                ],
+            },
+            {
+                "server": "CH",
+                "rows": 3,
+                "columns": 7,
+                "empty": False,
+                "first_slot_locked": False,
+                "inscribed_slots": [],
+                "inscribed_count": 0,
+                "slots": [
+                    {
+                        "slot": 0,
+                        "inscribed": False,
+                        "center": [136, 248],
+                    },
+                ],
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return next(reports)
+
+        def recognize_command_code_sale_grid(
+            self,
+            _screenshot,
+            server,
+            *,
+            inscribed_threshold,
+            empty_threshold,
+            locker_threshold,
+        ):
+            assert server == "CH"
+            assert inscribed_threshold == 0.7
+            assert empty_threshold == 0.8
+            assert locker_threshold == 0.7
+            return next(cc_grids)
+
+    device = _Device()
+    result = create_expball_sell_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "sell_target": "command_code",
+            "lock_inscribed_command_codes": True,
+            "switch_command_code_tab": True,
+            "auto_select": True,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["sell_target"] == "command_code"
+    assert result["locked_slots"] == [0]
+    assert result["locked_count"] == 1
+    assert result["actions"] == [
+        "switch_command_code_tab",
+        "enable_unified_lock",
+        "lock_inscribed_command_code",
+        "disable_unified_lock",
+        "auto_select_sell_cards",
+        "submit_sell_selection",
+        "execute_sell",
+        "close_sell_result",
+    ]
+    assert device.taps == [
+        (475, 128),
+        (32, 368),
+        (136, 248),
+        (32, 368),
+        (320, 610),
+        (1120, 650),
+        (980, 620),
+        (640, 610),
+    ]
+
+

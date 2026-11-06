@@ -49,6 +49,10 @@ _STATE_SPECS = (
     ("exlevel", "enhancement", "actionable", None, "select_base"),
     ("xzdx", "selection", "actionable", None, "select_target_card"),
     ("tysd", "selection", "actionable", None, "select_material_card"),
+    ("no_wenzhang", "sell", "observed", "no_command_codes", None),
+    ("no_wenzhang_1", "sell", "observed", "no_command_codes", None),
+    ("fmwz_0", "sell", "actionable", None, "open_command_code_sell"),
+    ("fmwz_1", "sell", "observed", None, None),
 )
 _SCALES = (1.0, 0.75, 2 / 3, 0.5)
 _SERVANT_LEVEL_DIGIT_SCALES = (2 / 3, 0.5)
@@ -91,6 +95,20 @@ _STORAGE_CARD_ROIS = tuple(
     for row in range(3)
     for column in range(7)
 )
+_COMMAND_CODE_CARD_ROIS = tuple(
+    (
+        round((117 + column * 200) * 2 / 3),
+        round((276 + row * 213) * 2 / 3),
+        round((292 + column * 200) * 2 / 3)
+        - round((117 + column * 200) * 2 / 3),
+        round((467 + row * 213) * 2 / 3)
+        - round((276 + row * 213) * 2 / 3),
+    )
+    for row in range(3)
+    for column in range(7)
+)
+_NO_COMMAND_CODE_ROI = (300, 400, 233, 67)
+_FIRST_CARD_LOCKER_ROI = (60, 220, 33, 40)
 
 _NAVIGATION_STATE_SPECS = (
     ("summon_page", "friendpointcall.png", (507, 333, 263, 133)),
@@ -532,6 +550,142 @@ class ExpBallRecognizer:
             "right_digits": right_digits,
             "available_template_count": len(template_paths),
             "candidate_count": len(candidates),
+            "slots": slots,
+        }
+
+    def recognize_command_code_sale_grid(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        inscribed_threshold: float = 0.7,
+        empty_threshold: float = 0.8,
+        locker_threshold: float = 0.7,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+        if not 0 <= inscribed_threshold <= 1:
+            raise ValueError("inscribed_threshold must be between 0 and 1.")
+        if not 0 <= empty_threshold <= 1:
+            raise ValueError("empty_threshold must be between 0 and 1.")
+        if not 0 <= locker_threshold <= 1:
+            raise ValueError("locker_threshold must be between 0 and 1.")
+
+        root = f"expball/{normalized_server}"
+        page = self._resources.template_index(prefix=root, limit=200)
+        available_paths = {str(entry["path"]) for entry in page["entries"]}
+
+        specs: list[tuple[str, int | None, str, dict[str, Any]]] = []
+        for empty_name in ("no_wenzhang.png", "no_wenzhang_1.png"):
+            path = f"{root}/{empty_name}"
+            if path in available_paths:
+                specs.append(
+                    (
+                        "empty",
+                        None,
+                        empty_name[:-4],
+                        {
+                            "template_path": path,
+                            "threshold": empty_threshold,
+                            "roi": _NO_COMMAND_CODE_ROI,
+                            "scales": _SCALES,
+                        },
+                    )
+                )
+        locker_path = f"{root}/locker.png"
+        if locker_path in available_paths:
+            specs.append(
+                (
+                    "locker",
+                    0,
+                    "locker",
+                    {
+                        "template_path": locker_path,
+                        "threshold": locker_threshold,
+                        "roi": _FIRST_CARD_LOCKER_ROI,
+                        "scales": _SCALES,
+                    },
+                )
+            )
+        kyz_path = f"{root}/kyz.png"
+        if kyz_path in available_paths:
+            for slot, roi in enumerate(_COMMAND_CODE_CARD_ROIS):
+                specs.append(
+                    (
+                        "inscribed",
+                        slot,
+                        "kyz",
+                        {
+                            "template_path": kyz_path,
+                            "threshold": inscribed_threshold,
+                            "roi": roi,
+                            "scales": _SCALES,
+                        },
+                    )
+                )
+
+        candidates = [candidate for _kind, _slot, _name, candidate in specs]
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+
+        empty_matched = False
+        first_slot_locked = False
+        inscribed_by_slot: dict[int, Any] = {}
+        for result, (kind, slot, _name, _candidate) in zip(
+            results,
+            specs,
+            strict=True,
+        ):
+            if not result.matched:
+                continue
+            if kind == "empty":
+                empty_matched = True
+            elif kind == "locker":
+                first_slot_locked = True
+            elif kind == "inscribed" and slot is not None:
+                inscribed_by_slot[slot] = result
+
+        slots: list[dict[str, Any]] = []
+        inscribed_slots: list[int] = []
+        for slot, roi in enumerate(_COMMAND_CODE_CARD_ROIS):
+            row = slot // 7
+            column = slot % 7
+            rx, ry, rw, rh = roi
+            inscribed_match = inscribed_by_slot.get(slot)
+            inscribed = inscribed_match is not None
+            if inscribed:
+                inscribed_slots.append(slot)
+            slots.append(
+                {
+                    "slot": slot,
+                    "row": row,
+                    "column": column,
+                    "roi": list(roi),
+                    "center": [rx + rw // 2, ry + rh // 2],
+                    "inscribed": inscribed,
+                    "confidence": (
+                        inscribed_match.confidence if inscribed_match else None
+                    ),
+                    "match": (
+                        inscribed_match.to_dict() if inscribed_match else None
+                    ),
+                }
+            )
+        return {
+            "server": normalized_server,
+            "rows": 3,
+            "columns": 7,
+            "inscribed_threshold": inscribed_threshold,
+            "empty_threshold": empty_threshold,
+            "locker_threshold": locker_threshold,
+            "empty": empty_matched,
+            "first_slot_locked": first_slot_locked,
+            "inscribed_slots": inscribed_slots,
+            "inscribed_count": len(inscribed_slots),
             "slots": slots,
         }
 

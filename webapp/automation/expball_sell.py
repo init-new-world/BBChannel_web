@@ -15,8 +15,9 @@ from webapp.services.script_data import ScriptDataService
 
 EXPBALL_SELL_JOB_KIND = "event.expball.sell"
 _VALID_CARD_STARS = {3, 4, 5}
-_SELL_TARGETS = {"exp", "servant"}
+_SELL_TARGETS = {"exp", "servant", "command_code"}
 _UNIFIED_LOCK_POINT = (32, 368)
+_COMMAND_CODE_TAB_POINT = (475, 128)
 
 
 def create_expball_sell_handler(
@@ -32,12 +33,26 @@ def create_expball_sell_handler(
         threshold = _number(payload, "threshold", 0.84, 0, 1)
         grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
         fp_gold_threshold = _number(payload, "fp_gold_threshold", 0.85, 0, 1)
+        inscribed_threshold = _number(payload, "inscribed_threshold", 0.7, 0, 1)
+        empty_threshold = _number(payload, "empty_threshold", 0.8, 0, 1)
+        locker_threshold = _number(payload, "locker_threshold", 0.7, 0, 1)
         sell_target = str(payload.get("sell_target") or "exp").strip().lower()
         if sell_target not in _SELL_TARGETS:
-            raise ValueError("sell_target must be exp or servant.")
+            raise ValueError("sell_target must be exp, servant, or command_code.")
         lock_gold_servants = _boolean(payload, "lock_gold_servants", True)
         include_fp_gold = _boolean(payload, "include_fp_gold", True)
         select_servant_cards = _boolean(payload, "select_servant_cards", False)
+        lock_inscribed_command_codes = _boolean(
+            payload,
+            "lock_inscribed_command_codes",
+            True,
+        )
+        switch_command_code_tab = _boolean(
+            payload,
+            "switch_command_code_tab",
+            True,
+        )
+        auto_select = _boolean(payload, "auto_select", False)
         stars = _parse_card_stars(payload)
         action_wait_seconds = _number(
             payload,
@@ -290,6 +305,157 @@ def create_expball_sell_handler(
                         reason="outside_sell_flow",
                         report=report,
                     )
+        elif sell_target == "command_code":
+            current_match_names = {
+                match.get("name")
+                for match in report.get("matches", [])
+                if isinstance(match, dict)
+            }
+            if switch_command_code_tab and "fmwz_1" not in current_match_names:
+                if not tap_point(
+                    _COMMAND_CODE_TAB_POINT,
+                    "switch_command_code_tab",
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                report = inspect("submit")
+                if report.get("flow") != "sell":
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="outside_sell_flow",
+                        report=report,
+                    )
+            command_code_grid = recognizer.recognize_command_code_sale_grid(
+                last_screenshot,
+                server,
+                inscribed_threshold=inscribed_threshold,
+                empty_threshold=empty_threshold,
+                locker_threshold=locker_threshold,
+            )
+            context.emit(
+                "expball_command_code_grid",
+                "Visible command-code sale grid cards were inspected.",
+                data=command_code_grid,
+            )
+            if (
+                command_code_grid.get("empty") is True
+                or command_code_grid.get("first_slot_locked") is True
+            ):
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason="no_sellable_command_codes",
+                    report=report,
+                )
+            if lock_inscribed_command_codes:
+                inscribed_slots = [
+                    slot
+                    for slot in command_code_grid.get("slots", [])
+                    if isinstance(slot, dict) and slot.get("inscribed") is True
+                ]
+                if inscribed_slots:
+                    if not tap_point(
+                        _UNIFIED_LOCK_POINT,
+                        "enable_unified_lock",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    for slot in inscribed_slots:
+                        slot_center = slot.get("center")
+                        if not isinstance(slot_center, list) or len(slot_center) != 2:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="invalid_recognition_result",
+                                report=report,
+                            )
+                        if not tap_point(
+                            slot_center,
+                            "lock_inscribed_command_code",
+                            {"slot": slot.get("slot")},
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        locked_slots.append(int(slot["slot"]))
+                    if not tap_point(
+                        _UNIFIED_LOCK_POINT,
+                        "disable_unified_lock",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    report = inspect("submit")
+                    if report.get("flow") != "sell":
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="outside_sell_flow",
+                            report=report,
+                        )
+                    command_code_grid = recognizer.recognize_command_code_sale_grid(
+                        last_screenshot,
+                        server,
+                        inscribed_threshold=inscribed_threshold,
+                        empty_threshold=empty_threshold,
+                        locker_threshold=locker_threshold,
+                    )
+                    context.emit(
+                        "expball_command_code_grid",
+                        "Visible command-code sale grid cards were inspected.",
+                        data=command_code_grid,
+                    )
+                    if (
+                        command_code_grid.get("empty") is True
+                        or command_code_grid.get("first_slot_locked") is True
+                    ):
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="no_sellable_command_codes",
+                            report=report,
+                        )
+            if auto_select:
+                current_match_names = {
+                    match.get("name")
+                    for match in report.get("matches", [])
+                    if isinstance(match, dict)
+                }
+                if "autoSell" in current_match_names:
+                    if not tap_match(
+                        report,
+                        "autoSell",
+                        "auto_select_sell_cards",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    report = inspect("submit")
+                    if report.get("flow") != "sell":
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="outside_sell_flow",
+                            report=report,
+                        )
         elif stars is not None:
             grid_report = recognizer.recognize_storage_grid(
                 last_screenshot,
