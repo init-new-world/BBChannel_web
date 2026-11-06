@@ -177,6 +177,86 @@ def test_expball_sell_refuses_to_start_outside_sell_flow():
     assert device.taps == []
 
 
+def test_expball_sell_selects_cards_by_rarity_before_submitting():
+    reports = iter(
+        (
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                action="open_auto_sell",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                "jd",
+                action="open_auto_sell",
+            ),
+            _report("destroy", "sell", "actionable", "destroy"),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                "ljbhclose",
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                "autoSell",
+                action="open_auto_sell",
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return next(reports)
+
+        def recognize_storage_grid(self, _screenshot, *, threshold):
+            assert threshold == 0.8
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 2,
+                "slots": [
+                    {"slot": 0, "star": 3, "center": [136, 248]},
+                    {"slot": 1, "star": 5, "center": [269, 248]},
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_sell_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "stars": [3],
+            "grid_threshold": 0.8,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "sold"
+    assert result["selected_slots"] == [0]
+    assert result["selected_count"] == 1
+    assert result["actions"] == [
+        "select_sell_card",
+        "submit_sell_selection",
+        "execute_sell",
+        "close_sell_result",
+    ]
+    assert device.taps == [(136, 248), (1120, 650), (980, 620), (640, 610)]
+
+
 def test_expball_sell_job_requires_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_expball_sell_job(manager, _ScriptData(), _Device(), object())

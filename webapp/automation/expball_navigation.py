@@ -188,7 +188,7 @@ def create_expball_navigate_handler(
                 )
                 banner_switches += 1
             elif state == "inventory_full":
-                if destination != "sell":
+                if destination == "summon":
                     return finish(
                         completed=False,
                         reason="inventory_full",

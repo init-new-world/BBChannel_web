@@ -834,6 +834,99 @@ def test_expball_storage_stops_when_storage_is_full_without_tapping():
     assert device.taps == []
 
 
+def test_expball_storage_selects_cards_by_rarity_before_submitting():
+    reports = iter(
+        (
+            _storage_report("in_store"),
+            _storage_report("in_store", "jd"),
+            _storage_report("zxStore"),
+            _storage_report("ljbhclose"),
+            _storage_report("in_store"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, _server, *, threshold):
+            assert threshold == 0.84
+            return next(reports)
+
+        def recognize_storage_grid(self, _screenshot, *, threshold):
+            assert threshold == 0.78
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 3,
+                "slots": [
+                    {"slot": 0, "star": 3, "center": [136, 248]},
+                    {"slot": 1, "star": 4, "center": [269, 248]},
+                    {"slot": 2, "star": 5, "center": [402, 248]},
+                ],
+            }
+
+    device = _Device()
+    context = _Context()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "stars": [4, 5],
+            "grid_threshold": 0.78,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "stored"
+    assert result["selected_slots"] == [1, 2]
+    assert result["selected_count"] == 2
+    assert result["actions"] == [
+        "select_storage_card",
+        "select_storage_card",
+        "submit_storage_selection",
+        "execute_storage",
+        "close_storage_result",
+    ]
+    assert device.taps == [
+        (269, 248),
+        (402, 248),
+        (1120, 650),
+        (980, 620),
+        (640, 610),
+    ]
+
+
+def test_expball_storage_stops_when_no_grid_cards_match_requested_stars():
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return _storage_report("in_store")
+
+        def recognize_storage_grid(self, *_args, **_kwargs):
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 1,
+                "slots": [{"slot": 0, "star": 3, "center": [136, 248]}],
+            }
+
+    device = _Device()
+    result = create_expball_storage_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(_Context(), {"setting_name": "demo", "stars": [5]})
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "no_matching_cards"
+    assert result["selected_slots"] == []
+    assert device.taps == []
+
+
 def test_expball_storage_job_requires_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_expball_storage_job(

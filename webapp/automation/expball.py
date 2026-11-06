@@ -19,6 +19,7 @@ EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND = "event.expball.inspect-storage-grid"
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
 _SUMMON_REQUEST_ACTIONS = {"summon_free_ten", "summon_ten"}
+_VALID_CARD_STARS = {3, 4, 5}
 
 
 def create_expball_inspect_handler(
@@ -467,6 +468,8 @@ def create_expball_storage_handler(
             raise ValueError("setting_name must be a non-empty string.")
         normalized_name = setting_name.strip()
         threshold = _number(payload, "threshold", 0.84, 0, 1)
+        grid_threshold = _number(payload, "grid_threshold", 0.75, 0, 1)
+        stars = _parse_card_stars(payload)
         timeout_seconds = _number(payload, "timeout_seconds", 120, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(
@@ -485,6 +488,8 @@ def create_expball_storage_handler(
         started = monotonic()
         attempts = 0
         actions: list[str] = []
+        selected_slots: list[int] = []
+        selection_applied = False
         phase = "submit"
         idle_polls = 0
         last_report: dict[str, Any] | None = None
@@ -512,6 +517,8 @@ def create_expball_storage_handler(
                 "reason": reason,
                 "attempts": attempts,
                 "actions": list(actions),
+                "selected_slots": list(selected_slots),
+                "selected_count": len(selected_slots),
                 "last_report": report,
             }
 
@@ -521,8 +528,9 @@ def create_expball_storage_handler(
                 f"store_expball_{phase}",
                 progress=min((monotonic() - started) / timeout_seconds, 0.95),
             )
+            screenshot = device_service.snapshot()
             report = recognizer.recognize(
-                device_service.snapshot(),
+                screenshot,
                 server,
                 threshold=threshold,
             )
@@ -562,6 +570,74 @@ def create_expball_storage_handler(
                     reason="outside_storage_flow",
                     report=report,
                 )
+
+            if (
+                phase == "submit"
+                and stars is not None
+                and not selection_applied
+                and "in_store" in matches
+            ):
+                grid_report = recognizer.recognize_storage_grid(
+                    screenshot,
+                    threshold=grid_threshold,
+                )
+                context.emit(
+                    "expball_storage_grid",
+                    "Visible experience-material storage cards were inspected.",
+                    data={"server": server, "stars": list(stars), **grid_report},
+                )
+                matching_slots = [
+                    slot
+                    for slot in grid_report.get("slots", [])
+                    if isinstance(slot, dict) and slot.get("star") in stars
+                ]
+                if not matching_slots:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="no_matching_cards",
+                        report=report,
+                    )
+                for slot in matching_slots:
+                    slot_center = slot.get("center")
+                    if not isinstance(slot_center, list) or len(slot_center) != 2:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="invalid_recognition_result",
+                            report=report,
+                        )
+                    x, y = randomized_touch_point(
+                        slot_center,
+                        enabled=random_touch,
+                    )
+                    operation = device_service.tap(x, y)
+                    context.emit(
+                        "device_action",
+                        "Selected an experience-material card for storage.",
+                        data={
+                            "role": "select_storage_card",
+                            "phase": phase,
+                            "slot": slot.get("slot"),
+                            "star": slot.get("star"),
+                            "operation": operation.to_dict(),
+                        },
+                    )
+                    if not operation.ok:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    actions.append("select_storage_card")
+                    selected_slots.append(int(slot["slot"]))
+                    context.sleep(
+                        randomized_wait_seconds(action_wait_seconds, random_time)
+                    )
+                selection_applied = True
+                idle_polls = 0
+                continue
 
             target_name = {
                 "submit": "jd",
@@ -711,3 +787,22 @@ def _integer(
     if not minimum <= value <= maximum:
         raise ValueError(f"{key} must be between {minimum} and {maximum}.")
     return value
+
+
+def _parse_card_stars(payload: dict[str, Any]) -> tuple[int, ...] | None:
+    if "stars" not in payload or payload["stars"] is None:
+        return None
+    raw = payload["stars"]
+    if not isinstance(raw, (list, tuple)) or not raw:
+        raise ValueError("stars must be a non-empty list of 3, 4, or 5.")
+    result: list[int] = []
+    for item in raw:
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or item not in _VALID_CARD_STARS
+        ):
+            raise ValueError("stars must contain only 3, 4, or 5.")
+        if item not in result:
+            result.append(item)
+    return tuple(result)

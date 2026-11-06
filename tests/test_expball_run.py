@@ -152,6 +152,124 @@ def test_expball_run_does_not_offer_unconfigured_automatic_storage():
         )
 
 
+def test_expball_run_handles_full_box_via_configured_storage_and_resumes():
+    nav_states = iter(
+        (
+            _navigation_report("summon_page"),
+            _navigation_report("storage_page"),
+            _navigation_report("summon_page"),
+        )
+    )
+    reports = iter(
+        (
+            _report(
+                "boxfull",
+                "summon",
+                "actionable",
+                action="handle_full_box",
+            ),
+            _report(
+                "in_store",
+                "storage",
+                "observed",
+                matches=[{"name": "in_store", "center": [310, 120], "size": [120, 60]}],
+            ),
+            _report(
+                "in_store",
+                "storage",
+                "observed",
+                matches=[
+                    {"name": "in_store", "center": [310, 120], "size": [120, 60]},
+                    {"name": "jd", "center": [1120, 650], "size": [120, 60]},
+                ],
+            ),
+            _report(
+                "zxStore",
+                "storage",
+                "actionable",
+                matches=[{"name": "zxStore", "center": [980, 620], "size": [120, 60]}],
+            ),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                matches=[{"name": "ljbhclose", "center": [640, 610], "size": [120, 60]}],
+            ),
+            _report(
+                "in_store",
+                "storage",
+                "observed",
+                matches=[{"name": "in_store", "center": [310, 120], "size": [120, 60]}],
+            ),
+            _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                matches=[{"name": "call10", "center": [800, 610], "size": [120, 60]}],
+            ),
+            _report(
+                "decide",
+                "confirmation",
+                "actionable",
+                action="confirm_summon",
+                matches=[{"name": "decide", "center": [830, 570], "size": [120, 60]}],
+            ),
+            _report(
+                "bianhuan",
+                "summon",
+                "observed",
+                matches=[{"name": "bianhuan", "center": [350, 480], "size": [120, 60]}],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_storage_grid(self, *_args, **_kwargs):
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 1,
+                "slots": [{"slot": 0, "star": 5, "center": [136, 248]}],
+            }
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(), device, Recognizer()
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 1,
+            "overflow_action": "storage",
+            "stars": [4, 5],
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "summon_limit"
+    assert result["summons"] == 1
+    assert result["overflow_action"] == "storage"
+    assert result["overflow_cycles"] == 1
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "navigate_summon",
+        "summon",
+        "navigate_storage",
+        "storage",
+        "navigate_summon",
+        "summon",
+    ]
+
+
 def test_expball_run_job_requires_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
         register_expball_run_job(

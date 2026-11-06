@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from webapp.automation.expball import create_expball_summon_handler
+from webapp.automation.expball import (
+    create_expball_storage_handler,
+    create_expball_summon_handler,
+)
 from webapp.automation.expball_navigation import create_expball_navigate_handler
+from webapp.automation.expball_sell import create_expball_sell_handler
 from webapp.runtime import JobManager, RunContext
 from webapp.services.devices import DeviceService
 from webapp.services.expball import ExpBallRecognizer
@@ -11,7 +15,8 @@ from webapp.services.script_data import ScriptDataService
 
 
 EXPBALL_RUN_JOB_KIND = "event.expball.run"
-_OVERFLOW_ACTIONS = {"stop"}
+_OVERFLOW_ACTIONS = {"stop", "storage", "sell"}
+_VALID_CARD_STARS = {3, 4, 5}
 
 
 def create_expball_run_handler(
@@ -29,13 +34,35 @@ def create_expball_run_handler(
         device_service,
         recognizer,
     )
+    storage_handler = create_expball_storage_handler(
+        script_data,
+        device_service,
+        recognizer,
+    )
+    sell_handler = create_expball_sell_handler(
+        script_data,
+        device_service,
+        recognizer,
+    )
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
         max_summons = _integer(payload, "max_summons", 10, 1, 10000)
+        max_overflow_cycles = _integer(
+            payload,
+            "max_overflow_cycles",
+            5,
+            1,
+            100,
+        )
         overflow_action = str(payload.get("overflow_action") or "stop").lower()
         if overflow_action not in _OVERFLOW_ACTIONS:
-            raise ValueError("overflow_action must be stop.")
+            raise ValueError("overflow_action must be stop, storage, or sell.")
+        stars = _parse_card_stars(payload)
+        if overflow_action in {"storage", "sell"} and stars is None:
+            raise ValueError(
+                "overflow_action requires stars to be configured for automatic storage or sell."
+            )
 
         common_payload: dict[str, Any] = {"setting_name": setting_name}
         for key in (
@@ -49,6 +76,15 @@ def create_expball_run_handler(
 
         navigation_payload = dict(common_payload)
         summon_payload = dict(common_payload)
+        overflow_payload = dict(common_payload)
+        if stars is not None:
+            overflow_payload["stars"] = list(stars)
+        _copy_option(
+            payload,
+            overflow_payload,
+            "grid_threshold",
+            "grid_threshold",
+        )
         _copy_option(
             payload,
             navigation_payload,
@@ -81,6 +117,7 @@ def create_expball_run_handler(
         )
 
         summons = 0
+        overflow_cycles = 0
         stages: list[dict[str, Any]] = []
 
         def record(stage: str, result: dict[str, Any]) -> None:
@@ -109,7 +146,7 @@ def create_expball_run_handler(
                 "max_summons": max_summons,
                 "summons": summons,
                 "overflow_action": overflow_action,
-                "overflow_cycles": 0,
+                "overflow_cycles": overflow_cycles,
                 "stages": stages,
             }
 
@@ -152,11 +189,48 @@ def create_expball_run_handler(
                     stopped=True,
                     reason=summon_reason,
                 )
-            return finish(
-                completed=False,
-                stopped=True,
-                reason="box_full",
+            if overflow_action == "stop":
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="box_full",
+                )
+            if overflow_cycles >= max_overflow_cycles:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="overflow_limit",
+                )
+            overflow_nav_payload = dict(navigation_payload)
+            overflow_nav_payload["destination"] = overflow_action
+            overflow_nav_result = navigate_handler(context, overflow_nav_payload)
+            record(f"navigate_{overflow_action}", overflow_nav_result)
+            if overflow_nav_result.get("completed") is not True:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=str(
+                        overflow_nav_result.get("reason")
+                        or "navigation_stopped"
+                    ),
+                )
+            overflow_handler = (
+                storage_handler
+                if overflow_action == "storage"
+                else sell_handler
             )
+            overflow_result = overflow_handler(context, dict(overflow_payload))
+            record(overflow_action, overflow_result)
+            if overflow_result.get("completed") is not True:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason=str(
+                        overflow_result.get("reason")
+                        or f"{overflow_action}_stopped"
+                    ),
+                )
+            overflow_cycles += 1
 
         return finish(
             completed=True,
@@ -216,3 +290,22 @@ def _copy_option(
 ) -> None:
     if source_key in source:
         destination[destination_key] = source[source_key]
+
+
+def _parse_card_stars(payload: dict[str, Any]) -> tuple[int, ...] | None:
+    if "stars" not in payload or payload["stars"] is None:
+        return None
+    raw = payload["stars"]
+    if not isinstance(raw, (list, tuple)) or not raw:
+        raise ValueError("stars must be a non-empty list of 3, 4, or 5.")
+    result: list[int] = []
+    for item in raw:
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or item not in _VALID_CARD_STARS
+        ):
+            raise ValueError("stars must contain only 3, 4, or 5.")
+        if item not in result:
+            result.append(item)
+    return tuple(result)
