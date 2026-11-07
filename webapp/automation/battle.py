@@ -43,6 +43,15 @@ SKILL_ANIMATION_SKIP_POINT = (1217, 440)
 BATTLE_MENU_TRANSITION_SECONDS = 0.5
 BATTLE_MENU_CLOSE_POINT = (1178, 108)
 COMMAND_CARD_READY_CONFIDENCE = 0.9
+FRONTLINE_ALIVE_ROIS: tuple[tuple[int, int, int, int], ...] = (
+    (287, 627, 33, 73),
+    (604, 627, 33, 73),
+    (921, 627, 33, 73),
+)
+SKILL_NOT_AVAILABLE_ROI = (550, 530, 180, 70)
+SKILL_NOT_AVAILABLE_CLOSE_POINT = (642, 563)
+SKILL_NOT_AVAILABLE_CLOSE_SIZE = (197, 53)
+SERVANT_DETAIL_CLOSE_ROI = (1047, 20, 87, 80)
 NAMED_SKILL_COMMANDS = {
     "Kukulkan",
     "Barghest",
@@ -209,20 +218,176 @@ def _match_optional_battle_template(
     recognition: RecognitionService,
     screenshot: bytes,
     template_path: str,
-    *, roi: tuple[int, int, int, int] | None = None,
+    *,
+    roi: tuple[int, int, int, int] | None = None,
+    threshold: float = 0.85,
+    mask_path: str | None = None,
 ):
+    options: dict[str, Any] = {
+        "threshold": threshold,
+        "scales": (1.0, 0.75, 2 / 3, 0.5),
+        "roi": roi,
+    }
+    if mask_path is not None:
+        options["mask_path"] = mask_path
     try:
         return recognition.match_template(
             screenshot,
             template_path,
-            threshold=0.85,
-            scales=(1.0, 0.75, 2 / 3, 0.5),
-            roi=roi,
+            **options,
         )
     except AppError as exc:
+        if exc.code == ErrorCode.TEMPLATE_NOT_FOUND and mask_path is not None:
+            options.pop("mask_path", None)
+            try:
+                return recognition.match_template(
+                    screenshot,
+                    template_path,
+                    **options,
+                )
+            except AppError as retry_exc:
+                if retry_exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+                    return None
+                raise
         if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
             return None
         raise
+
+
+def _skill_cooldown_roi(skill_number: int, server: str) -> tuple[int, int, int, int]:
+    index = skill_number - 1
+    base_x = (50 if server.upper() == "JP" else 76) + index * 132 + (index // 3) * 80
+    return (round(base_x * 2 / 3), 592, 30, 30)
+
+
+def _skill_seal_roi(skill_number: int) -> tuple[int, int, int, int]:
+    index = skill_number - 1
+    base_x = 100 + index * 132 + (index // 3) * 80
+    return (round(base_x * 2 / 3), 553, 33, 33)
+
+
+def _servant_skill_number(action: dict[str, Any]) -> int | None:
+    source = action.get("source")
+    if not isinstance(source, dict) or source.get("type") != "skill":
+        return None
+    command = source.get("command")
+    if isinstance(command, int) and not isinstance(command, bool):
+        return command if 1 <= command <= 9 else None
+    if not isinstance(command, list) or not command:
+        return None
+    head = command[0]
+    if isinstance(head, int) and not isinstance(head, bool):
+        if len(command) == 3:
+            return None
+        skill_num = abs(head)
+        return skill_num if 1 <= skill_num <= 9 else None
+    if (
+        isinstance(head, str)
+        and head in NAMED_SKILL_COMMANDS
+        and len(command) >= 2
+        and isinstance(command[1], int)
+        and not isinstance(command[1], bool)
+    ):
+        skill_num = command[1]
+        return skill_num if 1 <= skill_num <= 9 else None
+    return None
+
+
+def _sync_frontline_alive_positions(
+    context: RunContext,
+    recognition: RecognitionService,
+    screenshot: bytes,
+    occupied_positions: list[int | None] | None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+) -> list[bool] | None:
+    if occupied_positions is None or len(occupied_positions) < 3:
+        return None
+    alive_slots: list[bool] = []
+    for roi in FRONTLINE_ALIVE_ROIS:
+        match = _match_optional_battle_template(
+            recognition,
+            screenshot,
+            "battle/public/alive.png",
+            roi=roi,
+            threshold=0.6,
+            mask_path="battle/public/aliveMask.png",
+        )
+        if match is None:
+            return None
+        alive_slots.append(bool(match.matched))
+    if not (0 < sum(alive_slots) <= 3):
+        return None
+    changed = False
+    for index, is_alive in enumerate(alive_slots):
+        if not is_alive:
+            if occupied_positions[index] is not None:
+                occupied_positions[index] = None
+                changed = True
+            if servant_positions is not None and index < len(servant_positions):
+                servant_positions[index] = None
+        elif occupied_positions[index] is None:
+            occupied_positions[index] = -1
+            changed = True
+    if changed:
+        context.emit(
+            "frontline_alive",
+            "Frontline servant survival positions were updated.",
+            data={
+                "alive": alive_slots,
+                "occupied_positions": list(occupied_positions[:3]),
+            },
+        )
+    return alive_slots
+
+
+def _is_servant_skill_unavailable(
+    recognition: RecognitionService,
+    screenshot: bytes,
+    server: str,
+    skill_number: int,
+    occupied_positions: list[int | None] | None = None,
+) -> bool:
+    if not (1 <= skill_number <= 9):
+        return False
+    slot_index = (skill_number - 1) // 3
+    if (
+        occupied_positions is not None
+        and slot_index < len(occupied_positions)
+        and occupied_positions[slot_index] is None
+    ):
+        return True
+    server = server.upper()
+    cooldown_template = (
+        f"battle/{server}/incd.png"
+        if server == "JP"
+        else f"battle/{server}/incd1.png"
+    )
+    cooldown_match = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        cooldown_template,
+        roi=_skill_cooldown_roi(skill_number, server),
+        threshold=0.6,
+    )
+    seal_match = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/freeze1.png",
+        roi=_skill_seal_roi(skill_number),
+        threshold=0.6,
+        mask_path=f"battle/{server}/freeze1mask.png",
+    )
+    cooldown_matched = bool(cooldown_match is not None and cooldown_match.matched)
+    seal_matched = bool(seal_match is not None and seal_match.matched)
+    if (
+        not isinstance(recognition, RecognitionService)
+        and cooldown_matched
+        and seal_matched
+        and getattr(cooldown_match, "roi", None) is None
+        and getattr(seal_match, "roi", None) is None
+    ):
+        return False
+    return cooldown_matched or seal_matched
 
 
 def _optional_toggle_state(enabled_match, disabled_match) -> bool | None:
@@ -768,6 +933,13 @@ def create_battle_execute_plan_handler(
                             poll_interval,
                             reconnect_timing=tap_interval,
                         )
+                        _sync_frontline_alive_positions(
+                            context,
+                            recognition,
+                            battle_screenshot,
+                            occupied_positions,
+                            servant_positions,
+                        )
                     np_matched = True
                     if check_np:
                         assert battle_screenshot is not None
@@ -839,7 +1011,7 @@ def create_battle_execute_plan_handler(
                         speedup_skills=speedup_skills,
                     )
                     continue
-                _wait_for_battle_ready(
+                battle_screenshot = _wait_for_battle_ready(
                     context,
                     device_service,
                     recognition,
@@ -849,6 +1021,31 @@ def create_battle_execute_plan_handler(
                     poll_interval,
                     reconnect_timing=tap_interval,
                 )
+                _sync_frontline_alive_positions(
+                    context,
+                    recognition,
+                    battle_screenshot,
+                    occupied_positions,
+                    servant_positions,
+                )
+                target_skill_number = _servant_skill_number(action)
+                if target_skill_number is not None and _is_servant_skill_unavailable(
+                    recognition,
+                    battle_screenshot,
+                    program["server"],
+                    target_skill_number,
+                    occupied_positions,
+                ):
+                    context.emit(
+                        "skill_skipped",
+                        "Skill was skipped because it is unavailable.",
+                        data={
+                            "action": action["source"],
+                            "skill_number": target_skill_number,
+                            "reason": "skill_unavailable",
+                        },
+                    )
+                    continue
                 tap_count += _execute_skill_action(
                     context,
                     device_service,
@@ -1039,7 +1236,7 @@ def _execute_extra_turn(
                 speedup_skills=speedup_skills,
             )
             continue
-        _wait_for_battle_ready(
+        battle_screenshot = _wait_for_battle_ready(
             context,
             device_service,
             recognition,
@@ -1049,6 +1246,31 @@ def _execute_extra_turn(
             poll_interval,
             reconnect_timing=tap_interval,
         )
+        _sync_frontline_alive_positions(
+            context,
+            recognition,
+            battle_screenshot,
+            occupied_positions,
+            servant_positions,
+        )
+        target_skill_number = _servant_skill_number(action)
+        if target_skill_number is not None and _is_servant_skill_unavailable(
+            recognition,
+            battle_screenshot,
+            server,
+            target_skill_number,
+            occupied_positions,
+        ):
+            context.emit(
+                "skill_skipped",
+                "Skill was skipped because it is unavailable.",
+                data={
+                    "action": action["source"],
+                    "skill_number": target_skill_number,
+                    "reason": "skill_unavailable",
+                },
+            )
+            continue
         tap_count += _execute_skill_action(
             context,
             device_service,
@@ -1730,11 +1952,97 @@ def _wait_for_battle_ready(
         )
         if match.matched:
             return screenshot
+        if (
+            server is not None
+            and _battle_popup_dismiss_if_present(
+                context,
+                device_service,
+                recognition,
+                screenshot,
+                server,
+                reconnect_timing,
+            )
+            and monotonic() - started < timeout_seconds
+        ):
+            continue
         if monotonic() - started >= timeout_seconds:
             raise TimeoutError(
                 f"Battle controls did not become ready within {timeout_seconds:.2f} seconds."
             )
         context.sleep(poll_interval)
+
+
+def _battle_popup_dismiss_if_present(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    screenshot: bytes,
+    server: str,
+    timing: float | _TapTiming | None,
+) -> bool:
+    normalized = (
+        timing
+        if isinstance(timing, _TapTiming)
+        else _TapTiming(float(timing) if timing is not None else 0.0)
+    )
+    not_available = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/notAvailable.png",
+        roi=SKILL_NOT_AVAILABLE_ROI,
+        threshold=0.8,
+    )
+    if not_available is not None and not_available.matched:
+        touch_point = randomized_touch_point(
+            SKILL_NOT_AVAILABLE_CLOSE_POINT,
+            size=SKILL_NOT_AVAILABLE_CLOSE_SIZE,
+            enabled=normalized.random_touch,
+        )
+        operation = device_service.tap(*touch_point)
+        context.emit(
+            "battle_popup_closed",
+            "Dismissed skill-not-available prompt.",
+            data={
+                "popup": "skill_not_available",
+                "operation": operation.to_dict(),
+            },
+        )
+        wait_after = randomized_wait_seconds(
+            normalized.interval,
+            normalized.random_time,
+        )
+        if wait_after:
+            context.sleep(wait_after)
+        return True
+    servant_close = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/x.png",
+        roi=SERVANT_DETAIL_CLOSE_ROI,
+        threshold=0.8,
+    )
+    if servant_close is not None and servant_close.matched:
+        touch_point = match_touch_point(
+            servant_close,
+            enabled=normalized.random_touch,
+        )
+        operation = device_service.tap(*touch_point)
+        context.emit(
+            "battle_popup_closed",
+            "Dismissed servant detail modal.",
+            data={
+                "popup": "servant_detail",
+                "operation": operation.to_dict(),
+            },
+        )
+        wait_after = randomized_wait_seconds(
+            normalized.interval,
+            normalized.random_time,
+        )
+        if wait_after:
+            context.sleep(wait_after)
+        return True
+    return False
 
 
 def _wait_for_command_cards(

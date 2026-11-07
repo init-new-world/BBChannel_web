@@ -20,7 +20,9 @@ from webapp.automation.battle import (
     _execution_options,
     _execute_steps,
     _frontline_servants,
+    _is_servant_skill_unavailable,
     _matches_hakuno_needs,
+    _sync_frontline_alive_positions,
     _wait_for_battle_ready,
     _wait_for_command_cards,
     _wait_for_battle_transition,
@@ -2009,4 +2011,254 @@ def test_compile_battle_program_supports_crawl_tower_script_and_autonomous_modes
         step["role"]
         for step in autonomous_program["rounds"][0]["extra_turn"]["command_phase"]["steps"]
     ] == ["attack", "np_1", "np_2", "np_3"]
+
+
+def test_sync_frontline_alive_positions_updates_empty_frontline_slots():
+    events = []
+    occupied = [0, 1, 2, 3, 4, 5]
+    servants = [
+        {"slot": index, "name": f"Servant {index + 1}"}
+        for index in range(6)
+    ]
+
+    class Recognition:
+        def match_template(self, _screenshot, template_path, **options):
+            assert template_path == "battle/public/alive.png"
+            roi = options["roi"]
+            return SimpleNamespace(matched=roi[0] != 604)
+
+    class Context:
+        def emit(self, event_type, message, *, data):
+            events.append((event_type, message, data))
+
+    alive = _sync_frontline_alive_positions(
+        Context(),
+        Recognition(),
+        b"frame",
+        occupied,
+        servants,
+    )
+
+    assert alive == [True, False, True]
+    assert occupied[:3] == [0, None, 2]
+    assert [s["name"] if s else None for s in servants[:3]] == [
+        "Servant 1",
+        None,
+        "Servant 3",
+    ]
+    assert len(events) == 1
+    assert events[0][0] == "frontline_alive"
+    assert events[0][2]["occupied_positions"] == [0, None, 2]
+
+
+@pytest.mark.parametrize(
+    ("popup_template", "expected_popup", "expected_tap"),
+    [
+        ("battle/CH/notAvailable.png", "skill_not_available", (642, 563)),
+        ("battle/CH/x.png", "servant_detail", (1090, 60)),
+    ],
+)
+def test_wait_for_battle_ready_dismisses_skill_and_servant_detail_popups(
+    popup_template: str,
+    expected_popup: str,
+    expected_tap: tuple[int, int],
+):
+    state = {"frame": "popup"}
+    taps = []
+    events = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["frame"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            state["frame"] = "battle"
+            return Operation()
+
+    class Recognition:
+        def match_template(self, screenshot, template_path, *_args, **_options):
+            frame = screenshot.decode()
+            if template_path == "battle/CH/attack.png":
+                return SimpleNamespace(matched=frame == "battle", confidence=1.0)
+            if template_path == popup_template:
+                return SimpleNamespace(
+                    matched=frame == "popup",
+                    confidence=0.95,
+                    center=(1090, 60),
+                    size=(62, 64),
+                )
+            return SimpleNamespace(matched=False, confidence=0.0)
+
+    class Context:
+        def emit(self, event_type, message, *, data):
+            events.append((event_type, message, data))
+
+        def sleep(self, _seconds):
+            pass
+
+    _wait_for_battle_ready(
+        Context(),
+        Device(),
+        Recognition(),
+        "battle/CH/attack.png",
+        0.85,
+        1.0,
+        0.01,
+        reconnect_timing=_TapTiming(0),
+    )
+
+    assert taps == [expected_tap]
+    popup_events = [event for event in events if event[0] == "battle_popup_closed"]
+    assert len(popup_events) == 1
+    assert popup_events[0][2]["popup"] == expected_popup
+
+
+def test_execute_battle_job_skips_skills_on_cooldown_or_empty_frontline_slot(
+    tmp_path: Path,
+):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"Servant A": {"other_name": []}}),
+        encoding="utf-8",
+    )
+    (data / "settings" / "cooldown.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Servant A",
+                "noSpeedupSkill": 1,
+                "round1_turns": 1,
+                "round1_turn0_skill": [1, 2, [3, 3], 4],
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Recognition:
+        def match_template(self, _screenshot, template_path, _threshold=None, **options):
+            if template_path == "battle/CH/attack.png":
+                return SimpleNamespace(matched=True, confidence=1.0)
+            if template_path == "battle/public/alive.png":
+                roi = options["roi"]
+                return SimpleNamespace(matched=roi[0] != 604, confidence=0.95)
+            if template_path == "battle/CH/incd1.png":
+                roi = options["roi"]
+                return SimpleNamespace(matched=roi[0] == 51, confidence=0.95, roi=roi)
+            if template_path == "battle/CH/freeze1.png":
+                roi = options["roi"]
+                return SimpleNamespace(matched=roi[0] == 155, confidence=0.95, roi=roi)
+            return SimpleNamespace(matched=False, confidence=0.0)
+
+        def match_templates(self, _screenshot, candidates):
+            paths = [candidate["template_path"] for candidate in candidates]
+            if any("phase_" in path or "battleFinish" in path for path in paths):
+                return [
+                    SimpleNamespace(
+                        template_path=path,
+                        matched=path.endswith("/battleFinish.png"),
+                        confidence=1.0,
+                        to_dict=lambda p=path: {
+                            "template_path": p,
+                            "matched": p.endswith("/battleFinish.png"),
+                        },
+                    )
+                    for path in paths
+                ]
+            return [
+                SimpleNamespace(
+                    template_path=path,
+                    matched=True,
+                    confidence=1.0,
+                    to_dict=lambda p=path: {"template_path": p, "matched": True},
+                )
+                for path in paths
+            ]
+
+    assert (
+        _is_servant_skill_unavailable(
+            Recognition(),
+            b"frame",
+            "CH",
+            1,
+            [0, 1, 2],
+        )
+        is True
+    )
+    assert (
+        _is_servant_skill_unavailable(
+            Recognition(),
+            b"frame",
+            "CH",
+            2,
+            [0, 1, 2],
+        )
+        is True
+    )
+    assert (
+        _is_servant_skill_unavailable(
+            Recognition(),
+            b"frame",
+            "CH",
+            3,
+            [0, 1, 2],
+        )
+        is False
+    )
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            Recognition(),
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "cooldown",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:cooldown",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+        events = manager.database.list_events(job.job_id)
+
+    assert result.status == JobStatus.SUCCEEDED
+    skipped = [
+        event.data["skill_number"]
+        for event in events
+        if event.event_type == "skill_skipped"
+        and event.data.get("reason") == "skill_unavailable"
+    ]
+    assert skipped == [1, 2, 4]
+    assert taps == [
+        (256, 590),
+        (805, 440),
+        (1150, 600),
+        (150, 500),
+        (375, 500),
+        (650, 500),
+    ]
+
 
