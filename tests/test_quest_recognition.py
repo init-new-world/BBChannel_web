@@ -229,6 +229,8 @@ def test_main_story_recognizer_selects_first_visible_ap_target():
 
         def match_template_all(self, _screenshot, template_path, **options):
             self.calls.append({"template_path": template_path, **options})
+            if template_path.endswith("nextOne.png"):
+                return []
             return [
                 _match(template_path, [900, 500], confidence=0.91),
                 _match(template_path, [420, 240], confidence=0.97),
@@ -248,12 +250,59 @@ def test_main_story_recognizer_selects_first_visible_ap_target():
             "scales": (1.0, 0.75, 2 / 3, 0.5),
             "mask_path": "battle/MainStory/CNTW/reddotMask.png",
             "max_results": 50,
-        }
+        },
+        {
+            "template_path": "battle/MainStory/CNTW/nextOne.png",
+            "threshold": 0.8,
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+            "mask_path": "battle/MainStory/CNTW/nextOneMask.png",
+            "max_results": 50,
+        },
     ]
     assert result["server"] == "CNTW"
     assert result["candidate_count"] == 2
     assert result["candidates"][0]["center"] == [420, 240]
+    assert result["candidates"][0]["touch"] == [393, 267]
     assert result["selected"] == result["candidates"][0]
+
+
+def test_main_story_recognizer_combines_next_arrow_reddot_offsets_and_ooku_flags():
+    class FullMainStoryRecognition:
+        def match_template_all(self, _screenshot, template_path, **_options):
+            if template_path.endswith("nextOne.png"):
+                return [
+                    _match(template_path, [820, 210], confidence=0.96),
+                    _match(template_path, [180, 480], confidence=0.99),
+                ]
+            return [
+                _match(template_path, [450, 180], confidence=0.92),
+                _match(template_path, [210, 500], confidence=0.98),
+            ]
+
+        def match_template(self, _screenshot, template_path, **_options):
+            if template_path.endswith("AP.png"):
+                return _match(template_path, [810, 175], matched=True, confidence=0.89)
+            if template_path.endswith("ao.png"):
+                return _match(template_path, [120, 50], matched=True, confidence=0.83)
+            return _match(template_path, [100, 100], matched=False, confidence=0.25)
+
+    result = QuestRecognizer(
+        FullMainStoryRecognition()
+    ).recognize_main_story_quests(b"screen", "CH")
+
+    assert result["server"] == "CH"
+    assert result["ap_cost"]["matched"] is True
+    assert result["ooku_ao"]["matched"] is True
+    assert [candidate["type"] for candidate in result["candidates"]] == [
+        "reddot",
+        "next",
+        "next",
+    ]
+    assert result["selected"]["type"] == "next"
+    assert result["selected"]["center"] == [820, 210]
+    assert result["selected"]["touch"] == [820, 277]
+    assert result["selected"]["map_touch"] == [820, 310]
+    assert result["selected"]["panel_touch"] == [820, 277]
 
 
 def test_interlude_recognizer_detects_ap_goto_stage_and_goto_interlude():

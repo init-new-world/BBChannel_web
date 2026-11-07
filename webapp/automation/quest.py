@@ -217,6 +217,9 @@ def create_main_story_entry_handler(
         action_wait_seconds = _number(payload, "action_wait_seconds", 1, 0, 30)
         max_actions = _integer(payload, "max_actions", 20, 1, 200)
         max_map_swipes = _integer(payload, "max_map_swipes", 15, 0, 100)
+        ooku = payload.get("ooku", False)
+        if not isinstance(ooku, bool):
+            raise ValueError("ooku must be a boolean.")
         plan = script_data.get_setting_plan(normalized_name)
         server = str(plan["server"]).upper()
         run_options = plan.get("run", {})
@@ -226,6 +229,7 @@ def create_main_story_entry_handler(
         attempts = 0
         actions: list[str] = []
         map_swipes = 0
+        is_ooku = ooku
 
         while monotonic() - started <= timeout_seconds:
             attempts += 1
@@ -238,7 +242,10 @@ def create_main_story_entry_handler(
                 {"setting_name": normalized_name},
             ) or {}
             stage = str(stage_result.get("stage") or "unknown")
-            if stage in _BATTLE_FLOW_STAGES:
+            matched_template = str(stage_result.get("matched_template") or "")
+            if stage in _BATTLE_FLOW_STAGES and not (
+                stage == "completion" and matched_template.endswith("/nextOne.png")
+            ):
                 context.checkpoint(
                     "complete",
                     progress=1.0,
@@ -265,16 +272,109 @@ def create_main_story_entry_handler(
                 "Visible main story quests were recognized.",
                 data=report,
             )
+            candidates = list(report.get("candidates") or [])
             selected = report.get("selected")
-            if isinstance(selected, dict):
+            main_x = report.get("main_x") or {}
+            ap_cost = report.get("ap_cost") or {}
+            left_close = report.get("left_close") or {}
+            ooku_ao = report.get("ooku_ao") or {}
+            infinite = report.get("infinite") or {}
+            if bool(ooku_ao.get("matched")):
+                is_ooku = True
+            next_candidate = next(
+                (
+                    item
+                    for item in candidates
+                    if isinstance(item, dict) and item.get("type") == "next"
+                ),
+                None,
+            )
+            reddot_candidate = next(
+                (
+                    item
+                    for item in candidates
+                    if isinstance(item, dict) and item.get("type") == "reddot"
+                ),
+                None,
+            )
+
+            if bool(main_x.get("matched")):
                 _tap_candidate(
                     context,
                     device_service,
-                    selected["center"],
+                    main_x["center"],
+                    "main_story_close_popup",
+                    random_touch,
+                )
+                actions.append("main_story_close_popup")
+            elif bool(ap_cost.get("matched")) and isinstance(next_candidate, dict):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    next_candidate.get("panel_touch")
+                    or next_candidate.get("touch")
+                    or next_candidate["center"],
+                    "main_story_panel_quest",
+                    random_touch,
+                )
+                actions.append("main_story_panel_quest")
+            elif bool(infinite.get("matched")):
+                if bool(left_close.get("matched")):
+                    _tap_candidate(
+                        context,
+                        device_service,
+                        left_close["center"],
+                        "main_story_left_close",
+                        random_touch,
+                    )
+                    actions.append("main_story_left_close")
+                if isinstance(reddot_candidate, dict):
+                    for _ in range(3):
+                        _tap_candidate(
+                            context,
+                            device_service,
+                            reddot_candidate["center"],
+                            "ooku_reddot_probe",
+                            random_touch,
+                        )
+                    actions.append("ooku_reddot_probe")
+                    map_swipes = 0
+                else:
+                    return _result(
+                        normalized_name,
+                        False,
+                        "unknown",
+                        "ooku_recollection_reached",
+                        attempts,
+                        actions,
+                    )
+            elif bool(ap_cost.get("matched")) and bool(left_close.get("matched")):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    left_close["center"],
+                    "main_story_left_close",
+                    random_touch,
+                )
+                actions.append("main_story_left_close")
+            elif isinstance(selected, dict):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    selected.get("touch") or selected["center"],
                     "main_story_quest",
                     random_touch,
                 )
                 actions.append("main_story_quest")
+            elif bool(left_close.get("matched")):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    left_close["center"],
+                    "main_story_left_close",
+                    random_touch,
+                )
+                actions.append("main_story_left_close")
             elif map_swipes < max_map_swipes:
                 swipe = _free_map_swipe(map_swipes)
                 operation = device_service.swipe(*swipe, 1500)
@@ -291,7 +391,7 @@ def create_main_story_entry_handler(
                 actions.append("map_swipe")
             else:
                 reason = (
-                    "no_visible_main_story"
+                    ("no_visible_ooku_quest" if is_ooku else "no_visible_main_story")
                     if max_map_swipes == 0
                     else "map_scan_exhausted"
                 )

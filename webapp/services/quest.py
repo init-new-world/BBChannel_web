@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import MatchResult
 from webapp.services.recognition import RecognitionService
 
@@ -9,6 +10,8 @@ from webapp.services.recognition import RecognitionService
 FREE_QUEST_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 FREE_QUEST_LIST_ROI = (600, 0, 200, 720)
 FREE_QUEST_LAYOUT_SCALE = 2 / 3
+MAIN_STORY_LEFT_CLOSE_ROI = (0, 0, 200, 93)
+MAIN_STORY_INFINITE_ROI = (767, 87, 367, 247)
 INTERLUDE_AP_ROI = (700, 90, 233, 243)
 INTERLUDE_GOTO_STAGE_ROI = (733, 87, 387, 273)
 INTERLUDE_GOTO_INTERLUDE_ROI = (0, 80, 187, 100)
@@ -125,13 +128,14 @@ class QuestRecognizer:
         server: str,
         *,
         threshold: float = 0.8,
+        ap_threshold: float = 0.7,
     ) -> dict[str, Any]:
         normalized_server = server.strip().upper()
         if normalized_server not in {"CH", "CNTW", "JP"}:
             raise ValueError("server must be CH, CNTW, or JP.")
 
         template_root = f"battle/MainStory/{normalized_server}"
-        matches = self._recognition.match_template_all(
+        reddot_matches = self._recognition.match_template_all(
             screenshot,
             f"{template_root}/reddot.png",
             threshold=threshold,
@@ -139,19 +143,107 @@ class QuestRecognizer:
             mask_path=f"{template_root}/reddotMask.png",
             max_results=50,
         )
-        candidates = [
-            {
-                "center": list(match.center),
-                "confidence": match.confidence,
-                "scale": match.scale,
-            }
-            for match in self._distinct_matches(matches)
+        next_matches = self._match_all_optional(
+            screenshot,
+            f"{template_root}/nextOne.png",
+            threshold=threshold,
+            scales=FREE_QUEST_SCALES,
+            mask_path=f"{template_root}/nextOneMask.png",
+            max_results=50,
+        )
+        ap_cost = self._match_optional(
+            screenshot,
+            f"battle/{normalized_server}/AP.png",
+            threshold=ap_threshold,
+            roi=INTERLUDE_AP_ROI,
+            scales=FREE_QUEST_SCALES,
+        )
+        main_x = self._match_optional(
+            screenshot,
+            f"{template_root}/x.png",
+            threshold=0.85,
+            scales=FREE_QUEST_SCALES,
+        )
+        left_close = self._match_optional(
+            screenshot,
+            f"{template_root}/close.png",
+            threshold=threshold,
+            roi=MAIN_STORY_LEFT_CLOSE_ROI,
+            scales=FREE_QUEST_SCALES,
+        )
+        ooku_ao = self._match_optional(
+            screenshot,
+            f"{template_root}/ao.png",
+            threshold=0.7,
+            scales=FREE_QUEST_SCALES,
+        )
+        infinite = self._match_optional(
+            screenshot,
+            f"{template_root}/infinite.png",
+            threshold=threshold,
+            roi=MAIN_STORY_INFINITE_ROI,
+            scales=FREE_QUEST_SCALES,
+        )
+        ap_cost_matched = bool(ap_cost is not None and ap_cost.matched)
+
+        candidates: list[dict[str, Any]] = []
+        for match in self._distinct_matches(next_matches):
+            x, y = match.center
+            touch = [x, min(719, y + round(150 * match.scale))]
+            panel_touch = [x, min(719, y + round(100 * match.scale))]
+            if not ap_cost_matched and self._is_unsafe_map_point(touch):
+                continue
+            candidates.append(
+                {
+                    "type": "next",
+                    "center": list(match.center),
+                    "touch": panel_touch if ap_cost_matched else touch,
+                    "map_touch": touch,
+                    "panel_touch": panel_touch,
+                    "confidence": match.confidence,
+                    "scale": match.scale,
+                }
+            )
+        for match in self._distinct_matches(reddot_matches):
+            x, y = match.center
+            offset = round(40 * match.scale)
+            touch = [max(0, x - offset), min(719, y + offset)]
+            if self._is_unsafe_map_point(touch):
+                continue
+            candidates.append(
+                {
+                    "type": "reddot",
+                    "center": list(match.center),
+                    "touch": touch,
+                    "confidence": match.confidence,
+                    "scale": match.scale,
+                }
+            )
+        candidates.sort(
+            key=lambda item: (
+                item["center"][1],
+                item["center"][0],
+                0 if item.get("type") == "next" else 1,
+            )
+        )
+        panel_candidates = [
+            item for item in candidates if item.get("type") == "next"
         ]
+        selected = (
+            panel_candidates[0]
+            if ap_cost_matched and panel_candidates
+            else (candidates[0] if candidates else None)
+        )
         return {
             "server": normalized_server,
             "candidate_count": len(candidates),
             "candidates": candidates,
-            "selected": candidates[0] if candidates else None,
+            "selected": selected,
+            "ap_cost": ap_cost.to_dict() if ap_cost is not None else None,
+            "main_x": main_x.to_dict() if main_x is not None else None,
+            "left_close": left_close.to_dict() if left_close is not None else None,
+            "ooku_ao": ooku_ao.to_dict() if ooku_ao is not None else None,
+            "infinite": infinite.to_dict() if infinite is not None else None,
         }
 
     def recognize_interlude_quests(
@@ -223,6 +315,51 @@ class QuestRecognizer:
             "return_touch": list(INTERLUDE_RETURN_TOUCH_POINT),
             "selected": selected,
         }
+
+    def _match_optional(
+        self,
+        screenshot: bytes,
+        template_path: str,
+        **options: Any,
+    ) -> MatchResult | None:
+        if not hasattr(self._recognition, "match_template"):
+            return None
+        try:
+            return self._recognition.match_template(
+                screenshot,
+                template_path,
+                **options,
+            )
+        except AppError as exc:
+            if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+                return None
+            raise
+
+    def _match_all_optional(
+        self,
+        screenshot: bytes,
+        template_path: str,
+        **options: Any,
+    ) -> list[MatchResult]:
+        if not hasattr(self._recognition, "match_template_all"):
+            return []
+        try:
+            return self._recognition.match_template_all(
+                screenshot,
+                template_path,
+                **options,
+            )
+        except AppError as exc:
+            if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+                return []
+            raise
+
+    @staticmethod
+    def _is_unsafe_map_point(point: list[int] | tuple[int, int]) -> bool:
+        x, y = int(point[0]), int(point[1])
+        return (
+            x < round(345 * FREE_QUEST_LAYOUT_SCALE) and y > 490
+        ) or y > round(830 * FREE_QUEST_LAYOUT_SCALE)
 
     @staticmethod
     def _distinct_matches(matches: list[MatchResult]) -> list[MatchResult]:

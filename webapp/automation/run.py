@@ -46,9 +46,15 @@ def create_full_run_handler(
         ):
             raise ValueError("max_clear_runs must be between 1 and 10000.")
         entry_mode = payload.get("entry_mode", "current")
-        if entry_mode not in {"current", "free_quest", "main_story", "interlude"}:
+        if entry_mode not in {
+            "current",
+            "free_quest",
+            "main_story",
+            "ooku",
+            "interlude",
+        }:
             raise ValueError(
-                "entry_mode must be current, free_quest, main_story, or interlude."
+                "entry_mode must be current, free_quest, main_story, ooku, or interlude."
             )
         max_restarts = payload.get("max_restarts", 3)
         if (
@@ -192,26 +198,38 @@ def create_full_run_handler(
                 stop_reason = str(
                     entry_result.get("reason") or "free_quest_entry_failed"
                 )
-        elif entry_mode == "main_story":
+        elif entry_mode in {"main_story", "ooku"}:
             if enter_main_story is None:
                 raise RuntimeError("Main story entry is not available.")
             context.checkpoint(
                 "run.enter_main_story",
                 progress=0.0,
-                message="Entering a visible main story quest.",
+                message=(
+                    "Entering a visible Ooku main story quest."
+                    if entry_mode == "ooku"
+                    else "Entering a visible main story quest."
+                ),
             )
+            entry_payload = {
+                **stage_options["entry"],
+                "setting_name": normalized_name,
+            }
+            if entry_mode == "ooku":
+                entry_payload["ooku"] = True
             entry_result = enter_main_story(
                 context,
-                {
-                    **stage_options["entry"],
-                    "setting_name": normalized_name,
-                },
+                entry_payload,
             ) or {}
             initial_stage = str(entry_result.get("stage") or "unknown")
             if not entry_result.get("entered"):
                 stopped = True
                 stop_reason = str(
-                    entry_result.get("reason") or "main_story_entry_failed"
+                    entry_result.get("reason")
+                    or (
+                        "ooku_entry_failed"
+                        if entry_mode == "ooku"
+                        else "main_story_entry_failed"
+                    )
                 )
         elif entry_mode == "interlude":
             if enter_interlude is None:
@@ -430,9 +448,70 @@ def create_full_run_handler(
             if clearing_ap:
                 clear_runs += 1
             if completion_result.get("stopped"):
-                stopped = True
-                stop_reason = str(completion_result.get("reason") or "completion_stop")
-                break
+                completion_reason = str(
+                    completion_result.get("reason") or "completion_stop"
+                )
+                has_more_runs = run_number < max_runs or (
+                    clear_ap and (not clearing_ap or clear_runs < max_clear_runs)
+                )
+                if (
+                    entry_mode in {"main_story", "ooku"}
+                    and completion_reason == "main_story_navigation"
+                    and enter_main_story is not None
+                ):
+                    if not has_more_runs:
+                        break
+                    next_entry_payload = {
+                        **stage_options["entry"],
+                        "setting_name": normalized_name,
+                    }
+                    if entry_mode == "ooku":
+                        next_entry_payload["ooku"] = True
+                    next_entry = (
+                        enter_main_story(context, next_entry_payload) or {}
+                    )
+                    next_stage = str(next_entry.get("stage") or "unknown")
+                    if not next_entry.get("entered") or next_stage not in battle_stages:
+                        stopped = True
+                        stop_reason = str(
+                            next_entry.get("reason")
+                            or (
+                                "ooku_entry_failed"
+                                if entry_mode == "ooku"
+                                else "main_story_entry_failed"
+                            )
+                        )
+                        break
+                    resume_stage = next_stage
+                elif (
+                    entry_mode == "interlude"
+                    and completion_reason in {"interlude_navigation", "story_navigation"}
+                    and enter_interlude is not None
+                ):
+                    if not has_more_runs:
+                        break
+                    next_entry = (
+                        enter_interlude(
+                            context,
+                            {
+                                **stage_options["entry"],
+                                "setting_name": normalized_name,
+                            },
+                        )
+                        or {}
+                    )
+                    next_stage = str(next_entry.get("stage") or "unknown")
+                    if not next_entry.get("entered") or next_stage not in battle_stages:
+                        stopped = True
+                        stop_reason = str(
+                            next_entry.get("reason") or "interlude_entry_failed"
+                        )
+                        break
+                    resume_stage = next_stage
+                else:
+                    stopped = True
+                    stop_reason = completion_reason
+                    break
             run_number += 1
             current_run_results = {
                 "assist": {},

@@ -207,6 +207,7 @@ const zh = {
   "Main 2": "主技能 2",
   "Main 3": "主技能 3",
   "Main story": "主线关卡",
+  "Ooku main story": "主线物语·大奥",
   "Interlude": "幕间物语",
   "Auto formation": "自动编队爬塔",
   "Allow QP overflow": "允许溢出QP",

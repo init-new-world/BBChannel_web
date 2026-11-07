@@ -4488,6 +4488,7 @@ function updateControls() {
   els.fullRunMapSwipes.disabled = ![
     "free_quest",
     "main_story",
+    "ooku",
     "interlude",
   ].includes(
     els.fullRunEntryMode.value,

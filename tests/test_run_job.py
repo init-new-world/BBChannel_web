@@ -834,3 +834,61 @@ def test_full_run_validates_restart_limit(max_restarts):
             _Context(),
             {"setting_name": "demo", "max_restarts": max_restarts},
         )
+
+
+def test_full_run_enters_ooku_and_re_enters_after_main_story_navigation():
+    calls: list[tuple[str, dict]] = []
+    entry_stages = iter(("assist", "prepare"))
+
+    def enter_main_story(_context, payload):
+        calls.append(("enter_main_story", dict(payload)))
+        return {"entered": True, "stage": next(entry_stages), "reason": None}
+
+    def stage(name: str):
+        def execute(_context, payload):
+            calls.append((name, dict(payload)))
+            if name == "complete":
+                return {
+                    "complete": True,
+                    "repeated": False,
+                    "stopped": True,
+                    "reason": "main_story_navigation",
+                    "drop_count": 0,
+                }
+            return {"ready": True, "stage": name}
+
+        return execute
+
+    handler = create_full_run_handler(
+        _ScriptData(),
+        stage("assist"),
+        stage("prepare"),
+        stage("battle"),
+        stage("complete"),
+        enter_main_story=enter_main_story,
+    )
+    result = handler(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_runs": 2,
+            "entry_mode": "ooku",
+            "entry": {"max_map_swipes": 4},
+        },
+    )
+
+    assert result["runs_completed"] == 2
+    assert result["stopped"] is False
+    assert [name for name, _payload in calls] == [
+        "enter_main_story",
+        "assist",
+        "prepare",
+        "battle",
+        "complete",
+        "enter_main_story",
+        "prepare",
+        "battle",
+        "complete",
+    ]
+    assert calls[0][1] == {"max_map_swipes": 4, "setting_name": "demo", "ooku": True}
+    assert calls[5][1] == {"max_map_swipes": 4, "setting_name": "demo", "ooku": True}

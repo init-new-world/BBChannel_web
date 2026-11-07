@@ -586,3 +586,97 @@ def test_interlude_entry_job_requires_connected_device(tmp_path: Path):
         assert manager.has_kind(INTERLUDE_ENTER_JOB_KIND)
         assert manager.requires_device(INTERLUDE_ENTER_JOB_KIND) is True
 
+
+def test_main_story_entry_handles_popup_panel_next_and_ooku_recollection():
+    stages = iter(
+        (
+            {"stage": "completion", "matched_template": "battle/MainStory/CH/nextOne.png"},
+            {"stage": "unknown"},
+            {"stage": "unknown"},
+            {"stage": "assist"},
+        )
+    )
+
+    class Recognizer:
+        def recognize_main_story_quests(self, screenshot, _server):
+            if screenshot == b"screen-1":
+                return {
+                    "candidates": [],
+                    "selected": None,
+                    "main_x": {"matched": True, "center": [1120, 95]},
+                }
+            if screenshot == b"screen-2":
+                candidate = {
+                    "type": "next",
+                    "center": [500, 260],
+                    "touch": [500, 360],
+                    "panel_touch": [500, 327],
+                }
+                return {
+                    "candidates": [candidate],
+                    "selected": candidate,
+                    "ap_cost": {"matched": False},
+                }
+            candidate = {
+                "type": "next",
+                "center": [820, 200],
+                "touch": [820, 267],
+                "panel_touch": [820, 267],
+            }
+            return {
+                "candidates": [candidate],
+                "selected": candidate,
+                "ap_cost": {"matched": True},
+            }
+
+    device = _Device()
+    result = create_main_story_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: next(stages),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "ooku": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["stage"] == "assist"
+    assert result["actions"] == [
+        "main_story_close_popup",
+        "main_story_quest",
+        "main_story_panel_quest",
+    ]
+    assert device.taps == [(1120, 95), (500, 360), (820, 267)]
+
+    class RecollectionRecognizer:
+        def recognize_main_story_quests(self, _screenshot, _server):
+            return {
+                "candidates": [],
+                "selected": None,
+                "infinite": {"matched": True, "center": [950, 220]},
+                "left_close": {"matched": True, "center": [90, 48]},
+            }
+
+    recollection_device = _Device()
+    recollection_result = create_main_story_entry_handler(
+        _ScriptData(),
+        recollection_device,
+        RecollectionRecognizer(),
+        lambda _context, _payload: {"stage": "unknown"},
+    )(
+        _Context(),
+        {"setting_name": "demo", "ooku": True, "action_wait_seconds": 0},
+    )
+
+    assert recollection_result["entered"] is False
+    assert recollection_result["reason"] == "ooku_recollection_reached"
+    assert recollection_result["actions"] == ["main_story_left_close"]
+    assert recollection_device.taps == [(90, 48)]
+
+
