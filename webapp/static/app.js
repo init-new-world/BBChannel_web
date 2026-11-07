@@ -191,6 +191,10 @@ const els = {
   lotteryStar3: document.querySelector("#lottery-star-3"),
   lotteryStar4: document.querySelector("#lottery-star-4"),
   lotteryStar5: document.querySelector("#lottery-star-5"),
+  lotteryKeep3: document.querySelector("#lottery-keep-3"),
+  lotteryKeep4: document.querySelector("#lottery-keep-4"),
+  lotteryKeep5: document.querySelector("#lottery-keep-5"),
+  lotteryFirstRoundCount: document.querySelector("#lottery-first-round-count"),
   lotteryOverflowAction: document.querySelector("#lottery-overflow-action"),
   inspectExpball: document.querySelector("#inspect-expball"),
   expballDestination: document.querySelector("#expball-destination"),
@@ -3132,6 +3136,24 @@ function selectedLotteryStars() {
     .map(([star]) => star);
 }
 
+function parseLotteryMaxStackCounts() {
+  const counts = {};
+  for (const [star, input] of [
+    [3, els.lotteryKeep3],
+    [4, els.lotteryKeep4],
+    [5, els.lotteryKeep5],
+  ]) {
+    if (!input) {
+      continue;
+    }
+    const value = readNumber(input);
+    if (Number.isSafeInteger(value) && value >= 1) {
+      counts[String(star)] = value;
+    }
+  }
+  return counts;
+}
+
 function selectedExpballStars() {
   return [
     [3, els.expballStar3],
@@ -3192,9 +3214,11 @@ async function inspectLotteryStacks() {
   if (!settingName || stars.length === 0) {
     return;
   }
+  const maxStackCounts = parseLotteryMaxStackCounts();
   await enqueueJob("event.lottery.inspect-giftbox-stacks", {
     setting_name: settingName,
     stars,
+    ...(Object.keys(maxStackCounts).length ? { max_stack_counts: maxStackCounts } : {}),
   });
 }
 
@@ -3206,16 +3230,21 @@ async function runLottery() {
   }
   const overflowAction = els.lotteryOverflowAction.value || "stop";
   const overflowStars = selectedExpballStars();
+  const maxStackCounts = parseLotteryMaxStackCounts();
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
+  const usesStorage = ["storage", "storage_then_sell"].includes(overflowAction);
+  const usesSell = ["sell", "storage_then_sell"].includes(overflowAction);
   await enqueueJob("event.lottery.run", {
     setting_name: settingName,
     pay_slot: readNumber(els.lotteryPaySlot),
     stars: selectedLotteryStars(),
+    first_round_count: Boolean(els.lotteryFirstRoundCount?.checked),
     overflow_action: overflowAction,
+    ...(Object.keys(maxStackCounts).length ? { max_stack_counts: maxStackCounts } : {}),
     ...(overflowStars.length ? { overflow_stars: overflowStars } : {}),
-    ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
-    ...(overflowAction === "sell" ? {
+    ...(usesStorage ? { storage_target: storageTarget } : {}),
+    ...(usesSell ? {
       sell_target: sellTarget,
       lock_gold_servants: els.expballLockGoldServants.checked,
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
@@ -3367,6 +3396,8 @@ async function runExpballSummon() {
   const overflowAction = els.expballOverflowAction.value || "stop";
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
+  const usesStorage = ["storage", "storage_then_sell"].includes(overflowAction);
+  const usesSell = ["sell", "storage_then_sell"].includes(overflowAction);
   const isEnhancementOverflow = ["equipment_enhancement", "servant_enhancement"].includes(overflowAction);
   const servantTargets = parseExpballServantTargets();
   const lockTargets = parseExpballLockTargets();
@@ -3383,8 +3414,8 @@ async function runExpballSummon() {
     lock_enough_stop: Boolean(els.expballLockEnoughStop?.checked),
     ...(lockTargets.length ? { lock_targets: lockTargets } : {}),
     ...(stars.length ? { stars } : {}),
-    ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
-    ...(overflowAction === "sell" ? {
+    ...(usesStorage ? { storage_target: storageTarget } : {}),
+    ...(usesSell ? {
       sell_target: sellTarget,
       lock_gold_servants: els.expballLockGoldServants.checked,
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
@@ -4192,6 +4223,10 @@ function updateControls() {
   els.lotteryStar3.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar4.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar5.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryKeep3.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryKeep4.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryKeep5.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryFirstRoundCount.disabled = !supportsLottery || hasRunningJob;
   els.lotteryOverflowAction.disabled = !supportsLottery || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
     || !els.settingSelect.value

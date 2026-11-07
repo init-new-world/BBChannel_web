@@ -98,7 +98,12 @@ def test_operator_console_references_api_controls():
     assert 'id="lottery-star-3"' in index
     assert 'id="lottery-star-4"' in index
     assert 'id="lottery-star-5"' in index
+    assert 'id="lottery-keep-3"' in index
+    assert 'id="lottery-keep-4"' in index
+    assert 'id="lottery-keep-5"' in index
+    assert 'id="lottery-first-round-count"' in index
     assert 'id="lottery-overflow-action"' in index
+    assert '<option value="storage_then_sell">Store then sell</option>' in index
     assert 'id="inspect-expball"' in index
     assert 'id="inspect-expball-grid"' in index
     assert 'id="inspect-expball-servant-grid"' in index
@@ -220,6 +225,8 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.lottery.run"' in script
     assert "pay_slot: readNumber(els.lotteryPaySlot)" in script
     assert "stars: selectedLotteryStars()" in script
+    assert "first_round_count: Boolean(els.lotteryFirstRoundCount?.checked)" in script
+    assert "parseLotteryMaxStackCounts()" in script
     assert "overflow_action: overflowAction" in script
     assert "selectedExpballStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script

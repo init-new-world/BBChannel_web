@@ -249,11 +249,28 @@
               <label><input id="lottery-star-5" type="checkbox" checked><span>5 star</span></label>
             </div>
             <label class="input-row">
+              <span>Keep 3★ ≤</span>
+              <input id="lottery-keep-3" class="field number-field" type="number" min="0" max="99" step="1" value="0">
+            </label>
+            <label class="input-row">
+              <span>Keep 4★ ≤</span>
+              <input id="lottery-keep-4" class="field number-field" type="number" min="0" max="99" step="1" value="0">
+            </label>
+            <label class="input-row">
+              <span>Keep 5★ ≤</span>
+              <input id="lottery-keep-5" class="field number-field" type="number" min="0" max="99" step="1" value="0">
+            </label>
+            <label class="toggle-row">
+              <input id="lottery-first-round-count" type="checkbox">
+              <span>First round full count</span>
+            </label>
+            <label class="input-row">
               <span>Full box</span>
               <select id="lottery-overflow-action" class="field" aria-label="Lottery inventory overflow action">
                 <option value="stop">Stop</option>
                 <option value="storage">Storage</option>
                 <option value="sell">Sell</option>
+                <option value="storage_then_sell">Store then sell</option>
                 <option value="servant_enhancement">Servant enhance</option>
               </select>
             </label>
@@ -304,6 +321,7 @@
                 <option value="stop">Stop</option>
                 <option value="storage">Storage</option>
                 <option value="sell">Sell</option>
+                <option value="storage_then_sell">Store then sell</option>
                 <option value="servant_enhancement">Servant enhance</option>
                 <option value="equipment_enhancement">CE enhance</option>
               </select>
