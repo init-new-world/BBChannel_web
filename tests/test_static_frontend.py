@@ -88,6 +88,10 @@ def test_operator_console_references_api_controls():
     assert 'id="run-chocolate"' in index
     assert 'id="inspect-digdig"' in index
     assert 'id="inspect-digdig-grid"' in index
+    assert 'id="digdig-one-key"' in index
+    assert 'id="digdig-reset-board"' in index
+    assert 'id="digdig-target-pieces"' in index
+    assert 'id="digdig-target-extras"' in index
     assert 'id="digdig-max-cycles"' in index
     assert 'id="execute-digdig"' in index
     assert 'id="run-digdig"' in index
@@ -138,6 +142,8 @@ def test_operator_console_references_api_controls():
     assert 'id="inspect-expball-summon-locks"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
+    assert 'id="expball-banner-direction"' in index
+    assert 'id="expball-draw-100"' in index
     assert 'id="run-expball-storage"' in index
     assert 'id="run-expball-sell"' in index
     assert 'id="equip-template-name"' in index
@@ -240,6 +246,10 @@ def test_operator_console_references_api_controls():
     assert "destination: els.expballDestination.value" in script
     assert 'enqueueJob("event.expball.run"' in script
     assert "max_summons: readNumber(els.fpSummonBatches)" in script
+    assert 'banner_direction: els.expballBannerDirection?.value || "right"' in script
+    assert "draw_100: Boolean(els.expballDraw100?.checked)" in script
+    assert "parseDigdigTargets(els.digdigTargetPieces)" in script
+    assert "parseDigdigTargets(els.digdigTargetExtras)" in script
     assert 'enqueueJob("event.expball.storage"' in script
     assert 'enqueueJob("event.expball.sell"' in script
     assert "result.overflow_cycles" in script

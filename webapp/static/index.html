@@ -227,6 +227,22 @@
             <div class="section-label">Excavation Board</div>
             <button id="inspect-digdig" class="ghost-button wide" type="button">Inspect Dig Board</button>
             <button id="inspect-digdig-grid" class="ghost-button wide" type="button">Inspect Dig Grid</button>
+            <label class="toggle-row">
+              <input id="digdig-one-key" type="checkbox" checked>
+              <span>One-key free dig</span>
+            </label>
+            <label class="toggle-row">
+              <input id="digdig-reset-board" type="checkbox" checked>
+              <span>Reset board when done</span>
+            </label>
+            <label class="input-row">
+              <span>Target pieces</span>
+              <input id="digdig-target-pieces" class="field" type="text" placeholder="e.g. ash, bone, gear" autocomplete="off">
+            </label>
+            <label class="input-row">
+              <span>Target extras</span>
+              <input id="digdig-target-extras" class="field" type="text" placeholder="e.g. hx, jlg, zsds" autocomplete="off">
+            </label>
             <label class="input-row">
               <span>Dig cycles</span>
               <input id="digdig-max-cycles" class="field number-field" type="number" min="1" max="200" step="1" value="10">
@@ -378,6 +394,17 @@
             <label class="input-row">
               <span>FP batches</span>
               <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">
+            </label>
+            <label class="input-row">
+              <span>Banner dir.</span>
+              <select id="expball-banner-direction" class="field" aria-label="FP banner search direction">
+                <option value="right">Right</option>
+                <option value="left">Left</option>
+              </select>
+            </label>
+            <label class="toggle-row">
+              <input id="expball-draw-100" type="checkbox">
+              <span>100-roll summon</span>
             </label>
             <label class="toggle-row">
               <input id="expball-lock-lily" type="checkbox">

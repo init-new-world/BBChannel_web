@@ -181,6 +181,10 @@ const els = {
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   inspectDigdigGrid: document.querySelector("#inspect-digdig-grid"),
+  digdigOneKey: document.querySelector("#digdig-one-key"),
+  digdigResetBoard: document.querySelector("#digdig-reset-board"),
+  digdigTargetPieces: document.querySelector("#digdig-target-pieces"),
+  digdigTargetExtras: document.querySelector("#digdig-target-extras"),
   digdigMaxCycles: document.querySelector("#digdig-max-cycles"),
   executeDigdig: document.querySelector("#execute-digdig"),
   runDigdig: document.querySelector("#run-digdig"),
@@ -223,6 +227,8 @@ const els = {
   inspectExpballServantLevel: document.querySelector("#inspect-expball-servant-level"),
   runExpballEnhance: document.querySelector("#run-expball-enhance"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
+  expballBannerDirection: document.querySelector("#expball-banner-direction"),
+  expballDraw100: document.querySelector("#expball-draw-100"),
   expballLockLily: document.querySelector("#expball-lock-lily"),
   expballLockHabe: document.querySelector("#expball-lock-habe"),
   expballLockHakuno: document.querySelector("#expball-lock-hakuno"),
@@ -544,6 +550,10 @@ function bindEvents() {
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.inspectDigdigGrid.addEventListener("click", inspectDigdigGrid);
+  els.digdigOneKey.addEventListener("change", updateControls);
+  els.digdigResetBoard.addEventListener("change", updateControls);
+  els.digdigTargetPieces.addEventListener("input", updateControls);
+  els.digdigTargetExtras.addEventListener("input", updateControls);
   els.executeDigdig.addEventListener("click", executeDigdig);
   els.runDigdig.addEventListener("click", runDigdig);
   els.inspectLottery.addEventListener("click", inspectLottery);
@@ -575,6 +585,8 @@ function bindEvents() {
   els.inspectExpballServantTarget.addEventListener("click", inspectExpballServantTarget);
   els.inspectExpballServantLevel.addEventListener("click", inspectExpballServantLevel);
   els.runExpballEnhance.addEventListener("click", runExpballEnhance);
+  els.expballBannerDirection.addEventListener("change", updateControls);
+  els.expballDraw100.addEventListener("change", updateControls);
   els.expballLockLily.addEventListener("change", updateControls);
   els.expballLockHabe.addEventListener("change", updateControls);
   els.expballLockHakuno.addEventListener("change", updateControls);
@@ -3114,15 +3126,33 @@ async function executeDigdig() {
   });
 }
 
+function parseDigdigTargets(input) {
+  return String(input?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((token) => (/^\d+$/.test(token) ? Number(token) : token));
+}
+
 async function runDigdig() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
     return;
   }
+  const oneKey = Boolean(els.digdigOneKey?.checked);
+  const resetBoard = Boolean(els.digdigResetBoard?.checked);
+  const targetPieces = parseDigdigTargets(els.digdigTargetPieces);
+  const targetExtras = parseDigdigTargets(els.digdigTargetExtras);
+  if (!oneKey && !targetPieces.length && !targetExtras.length) {
+    return;
+  }
   await enqueueJob("event.digdig.run", {
     setting_name: settingName,
-    one_key: true,
+    one_key: oneKey,
+    reset_board: resetBoard,
     max_cycles: readNumber(els.digdigMaxCycles),
+    ...(targetPieces.length ? { target_pieces: targetPieces } : {}),
+    ...(targetExtras.length ? { target_extras: targetExtras } : {}),
   });
 }
 
@@ -3277,9 +3307,13 @@ async function navigateExpball() {
   if (!settingName) {
     return;
   }
+  const bannerDirection = els.expballBannerDirection?.value || "right";
   await enqueueJob("event.expball.navigate", {
     setting_name: settingName,
     destination: els.expballDestination.value,
+    ...(els.expballDestination.value === "summon"
+      ? { banner_direction: bannerDirection }
+      : {}),
   });
 }
 
@@ -3407,6 +3441,8 @@ async function runExpballSummon() {
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
+    banner_direction: els.expballBannerDirection?.value || "right",
+    draw_100: Boolean(els.expballDraw100?.checked),
     overflow_action: overflowAction,
     lock_lily: Boolean(els.expballLockLily?.checked),
     lock_habe: Boolean(els.expballLockHabe?.checked),
@@ -4200,10 +4236,20 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsDigdig
     || hasRunningJob;
+  els.digdigOneKey.disabled = !supportsDigdig || hasRunningJob;
+  els.digdigResetBoard.disabled = !supportsDigdig || hasRunningJob;
+  els.digdigTargetPieces.disabled = !supportsDigdig || hasRunningJob;
+  els.digdigTargetExtras.disabled = !supportsDigdig || hasRunningJob;
   els.digdigMaxCycles.disabled = !supportsDigdig || hasRunningJob;
+  const hasDigdigMode = Boolean(
+    els.digdigOneKey?.checked
+      || parseDigdigTargets(els.digdigTargetPieces).length
+      || parseDigdigTargets(els.digdigTargetExtras).length,
+  );
   els.runDigdig.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsDigdig
+    || !hasDigdigMode
     || hasRunningJob;
   els.inspectLottery.disabled = !state.connected
     || !els.settingSelect.value
@@ -4297,6 +4343,8 @@ function updateControls() {
     || !supportsExpball
     || hasRunningJob;
   els.fpSummonBatches.disabled = !supportsExpball || hasRunningJob;
+  els.expballBannerDirection.disabled = !supportsExpball || hasRunningJob;
+  els.expballDraw100.disabled = !["CH", "JP"].includes(state.selectedSettingPlan?.server) || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
