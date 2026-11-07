@@ -735,12 +735,34 @@ class AssistRecognizer:
             if apple == "blue"
             else f"battle/{server.upper()}/{apple}.png"
         )
-        return self._recognition.match_template(
+        result = self._recognition.match_template(
             screenshot,
             template_path,
             threshold=threshold,
             scales=ASSIST_EQUIP_SCALES,
         )
+        if result.matched:
+            color_check = getattr(self._recognition, "check_color_half_mode", None)
+            if callable(color_check):
+                try:
+                    color_available = bool(
+                        color_check(screenshot, template_path, result)
+                    )
+                except AppError:
+                    color_available = True
+                if not color_available:
+                    return MatchResult(
+                        template_path=result.template_path,
+                        matched=False,
+                        confidence=result.confidence,
+                        threshold=result.threshold,
+                        top_left=list(result.top_left),
+                        size=list(result.size),
+                        center=list(result.center),
+                        scale=result.scale,
+                        roi=list(result.roi) if result.roi is not None else None,
+                    )
+        return result
 
     def _servant_templates(self, canonical_name: Any) -> list[str]:
         if not isinstance(canonical_name, str) or not canonical_name:

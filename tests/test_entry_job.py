@@ -620,3 +620,92 @@ def test_battle_prepare_job_consumes_available_apple_when_ap_is_empty(tmp_path: 
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["ready"] is True
     assert result.result["actions"] == ["apple_gold", "apple_decide"]
+
+
+def test_available_apple_skips_darkened_zero_count_icon_and_scrolls_for_copper(tmp_path: Path):
+    pytest.importorskip("cv2")
+    import io
+
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    battle_assets = assets / "battle" / "CH"
+    battle_assets.mkdir(parents=True)
+
+    def make_icon(scale_brightness: float, outline_rgb: tuple[int, int, int]) -> Image.Image:
+        image = Image.new(
+            "RGB",
+            (48, 48),
+            tuple(round(c * scale_brightness) for c in (210, 160, 45)),
+        )
+        draw = ImageDraw.Draw(image)
+        draw.rectangle(
+            (4, 4, 43, 43),
+            outline=tuple(round(c * scale_brightness) for c in outline_rgb),
+            width=3,
+        )
+        draw.line(
+            (6, 41, 41, 6),
+            fill=tuple(round(c * scale_brightness) for c in (250, 240, 120)),
+            width=3,
+        )
+        return image
+
+    gold_template = make_icon(1.0, (255, 220, 60))
+    copper_template = make_icon(1.0, (190, 95, 50))
+    gold_template.save(battle_assets / "gold.png")
+    copper_template.save(battle_assets / "copper.png")
+
+    top_screen = Image.new("RGB", (1280, 720), (18, 24, 32))
+    # Darkened gold icon (0 remaining: 0.4x brightness still matches template correlation >= 0.99)
+    top_screen.paste(make_icon(0.4, (255, 220, 60)), (400, 220))
+    top_buf = io.BytesIO()
+    top_screen.save(top_buf, format="PNG")
+    top_bytes = top_buf.getvalue()
+
+    bottom_screen = Image.new("RGB", (1280, 720), (18, 24, 32))
+    bottom_screen.paste(copper_template, (400, 480))
+    bottom_buf = io.BytesIO()
+    bottom_screen.save(bottom_buf, format="PNG")
+    bottom_bytes = bottom_buf.getvalue()
+
+    resources = ResourceService(assets, data)
+    recognition = RecognitionService(resources)
+
+    # Without allow_other, darkened gold is rejected by halfMode color check
+    assert (
+        _available_apple(
+            recognition,
+            top_bytes,
+            "CH",
+            preferred="gold",
+            allow_other=False,
+        )
+        is None
+    )
+
+    swipes: list[tuple[int, int, int, int, int]] = []
+
+    class ScrollDevice:
+        def swipe(self, x1, y1, x2, y2, duration_ms):
+            swipes.append((x1, y1, x2, y2, duration_ms))
+
+            class Operation:
+                def to_dict(self):
+                    return {"ok": True}
+
+            return Operation()
+
+        def snapshot(self):
+            return bottom_bytes
+
+    matched = _available_apple(
+        recognition,
+        top_bytes,
+        "CH",
+        preferred="gold",
+        allow_other=True,
+        device_service=ScrollDevice(),
+    )
+    assert matched is not None
+    assert matched[0] == "copper"
+    assert swipes == [(1014, 453, 1014, 620, 200)]

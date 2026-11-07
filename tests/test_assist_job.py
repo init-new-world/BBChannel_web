@@ -1015,3 +1015,114 @@ def test_assist_select_job_refreshes_list_after_scroll_limit(tmp_path: Path):
     assert result.result["attempts"] == 3
     assert result.result["scrolls"] == 1
     assert result.result["refreshes"] == 1
+
+
+def test_assist_handler_scrolls_ap_recovery_list_for_copper_and_falls_back_up_to_silver():
+    state = {"screen": "apple_top"}
+    taps = []
+    swipes = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["screen"].encode()
+
+        def swipe(self, x1, y1, x2, y2, duration_ms):
+            swipes.append((x1, y1, x2, y2, duration_ms))
+            if (x1, y1, x2, y2) == (1014, 453, 1014, 620):
+                state["screen"] = "apple_bottom"
+            elif (x1, y1, x2, y2) == (1014, 267, 1014, 60):
+                state["screen"] = "apple_top_retry"
+            return Operation()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            state["screen"] = {
+                "apple_top_retry": "apple_decide",
+                "apple_decide": "candidate",
+                "candidate": "team",
+            }[state["screen"]]
+            return Operation()
+
+    class Match:
+        size = (100, 50)
+        top_left = (500, 300)
+
+        def __init__(self, matched, center=(640, 420), *, color_available=True):
+            self.matched = matched
+            self.center = center
+            self.color_available = color_available
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match(False)
+
+        def match_apple_close(self, screenshot, _server):
+            return Match(
+                screenshot in {b"apple_top", b"apple_bottom", b"apple_top_retry"},
+                (900, 600),
+            )
+
+        def match_apple_decide(self, screenshot, _server):
+            return Match(screenshot == b"apple_decide", (742, 601))
+
+        def match_apple(self, screenshot, _server, apple):
+            if screenshot == b"apple_bottom" and apple == "copper":
+                # Copper is visible at bottom but grayed out (0 remaining)
+                return Match(False, (422, 520), color_available=False)
+            if screenshot == b"apple_top_retry" and apple == "silver":
+                return Match(True, (422, 322))
+            return Match(False)
+
+        def match_not_available(self, _screenshot, _server):
+            return Match(False)
+
+        def recognize(self, screenshot, _assist, *, server):
+            assert screenshot == b"candidate"
+            return {
+                "candidate_count": 1,
+                "servant_name": "Support",
+                "candidates": [{"anchor": [70, 225], "scale": 1.0, "checks": {}}],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True},
+                "run": {
+                    "allow_other_apple": True,
+                    "random_time": 0,
+                    "random_touch": False,
+                },
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {
+            "setting_name": "demo",
+            "apple": "copper",
+            "max_ap_actions": 2,
+            "tap_wait_seconds": 0,
+        },
+    )
+
+    assert swipes == [
+        (1014, 453, 1014, 620, 200),
+        (1014, 267, 1014, 60, 200),
+    ]
+    assert taps == [(422, 322), (742, 601), (340, 165)]
+    assert result["ap_actions"] == ["apple_silver", "apple_decide"]

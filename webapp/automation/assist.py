@@ -250,6 +250,10 @@ def create_assist_handler(
                     plan["server"],
                     preferred=preferred_apple,
                     allow_other=bool(plan["run"].get("allow_other_apple")),
+                    device_service=device_service,
+                    snapshot=snapshot_without_reconnect,
+                    context=context,
+                    wait_seconds=randomized_wait_seconds(tap_wait_seconds, random_time),
                 )
                 if apple_match is None:
                     raise RuntimeError("No available AP recovery item was recognized.")
@@ -676,6 +680,10 @@ def _optional_assist_match(
         raise
 
 
+APPLE_SCROLL_DOWN = (1014, 453, 1014, 620, 200)
+APPLE_SCROLL_UP = (1014, 267, 1014, 60, 200)
+
+
 def _available_assist_apple(
     recognizer: AssistRecognizer,
     screenshot: bytes,
@@ -683,6 +691,10 @@ def _available_assist_apple(
     *,
     preferred: str,
     allow_other: bool,
+    device_service: DeviceService | None = None,
+    snapshot: Any = None,
+    context: RunContext | None = None,
+    wait_seconds: float = 0.0,
 ):
     candidates = [preferred]
     if allow_other:
@@ -691,14 +703,57 @@ def _available_assist_apple(
             for apple in ("gold", "silver", "blue", "copper")
             if apple != preferred
         )
+    current_screenshot = screenshot
+    current_scroll = "top"
     for apple in candidates:
         match = _optional_assist_match(
             recognizer,
             "match_apple",
-            screenshot,
+            current_screenshot,
             server,
             apple,
         )
-        if match is not None and match.matched:
+        if (
+            (match is None or not match.matched)
+            and getattr(match, "color_available", None) is not False
+            and device_service is not None
+            and hasattr(device_service, "swipe")
+        ):
+            target_scroll = "bottom" if apple in {"blue", "copper"} else "top"
+            if target_scroll != current_scroll:
+                swipe_args = APPLE_SCROLL_DOWN if target_scroll == "bottom" else APPLE_SCROLL_UP
+                try:
+                    operation = device_service.swipe(*swipe_args)
+                except AppError:
+                    operation = None
+                if operation is not None:
+                    current_scroll = target_scroll
+                    if context is not None:
+                        context.emit(
+                            "device_action",
+                            "Scrolled AP recovery list before assist selection.",
+                            data={
+                                "role": f"apple_scroll_{target_scroll}",
+                                "apple": apple,
+                                "operation": operation.to_dict(),
+                            },
+                        )
+                        if wait_seconds > 0:
+                            context.sleep(wait_seconds)
+                    current_screenshot = (
+                        snapshot() if callable(snapshot) else device_service.snapshot()
+                    )
+                    match = _optional_assist_match(
+                        recognizer,
+                        "match_apple",
+                        current_screenshot,
+                        server,
+                        apple,
+                    )
+        if (
+            match is not None
+            and match.matched
+            and getattr(match, "color_available", None) is not False
+        ):
             return apple, match
     return None

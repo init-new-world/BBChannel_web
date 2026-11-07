@@ -201,6 +201,47 @@ class RecognitionService:
             )
         return result, png.tobytes()
 
+    def check_color_half_mode(
+        self,
+        screenshot: bytes,
+        template_path: str,
+        match: MatchResult,
+    ) -> bool:
+        cv, numpy = self._require_opencv()
+        screenshot_image = self._decode_screenshot(screenshot, template_path)
+        template_image, template_mask, _ = self._load_template(template_path, None)
+        screenshot_height, screenshot_width = screenshot_image.shape[:2]
+        x, y = int(match.top_left[0]), int(match.top_left[1])
+        width, height = int(match.size[0]), int(match.size[1])
+        left = max(0, x)
+        top = max(0, y)
+        right = min(screenshot_width, x + width)
+        bottom = min(screenshot_height, y + height)
+        if right <= left or bottom <= top:
+            return False
+        target_crop = screenshot_image[top:bottom, left:right]
+        template_height, template_width = template_image.shape[:2]
+        target_resized = cv.resize(
+            target_crop,
+            (template_width, template_height),
+            interpolation=cv.INTER_LINEAR,
+        )
+        if template_mask is not None:
+            alpha = (template_mask >= 128).astype(numpy.float32)
+        else:
+            alpha = numpy.ones((template_height, template_width), dtype=numpy.float32)
+        nonzero = float(numpy.count_nonzero(alpha))
+        if nonzero <= 0:
+            return True
+        dist = 0.0
+        half_dist = 0.0
+        for channel in range(3):
+            target_mean = float(numpy.sum(target_resized[:, :, channel] * alpha)) / nonzero
+            template_mean = float(numpy.sum(template_image[:, :, channel] * alpha)) / nonzero
+            dist += (target_mean - template_mean) ** 2
+            half_dist += (target_mean - template_mean / 2.0) ** 2
+        return bool(dist < half_dist)
+
     def _decode_screenshot(self, screenshot: bytes, template_path: str | None):
         cv, numpy = self._require_opencv()
         screenshot_image = cv.imdecode(

@@ -192,6 +192,9 @@ def create_battle_entry_handler(
                     server,
                     preferred=preferred_apple,
                     allow_other=plan["run"]["allow_other_apple"],
+                    device_service=device_service,
+                    context=context,
+                    wait_seconds=randomized_wait_seconds(action_wait_seconds, random_time),
                 )
                 if apple_match is None:
                     raise RuntimeError("No available AP recovery item was recognized.")
@@ -273,6 +276,10 @@ def _number(
     return result
 
 
+APPLE_SCROLL_DOWN = (1014, 453, 1014, 620, 200)
+APPLE_SCROLL_UP = (1014, 267, 1014, 60, 200)
+
+
 def _available_apple(
     recognition: RecognitionService,
     screenshot: bytes,
@@ -280,6 +287,9 @@ def _available_apple(
     *,
     preferred: str,
     allow_other: bool,
+    device_service: DeviceService | None = None,
+    context: RunContext | None = None,
+    wait_seconds: float = 0.0,
 ):
     templates = {
         "gold": f"battle/{server}/gold.png",
@@ -294,19 +304,79 @@ def _available_apple(
             for apple_name in ("gold", "silver", "blue", "copper")
             if apple_name != preferred
         )
+    current_screenshot = screenshot
+    current_scroll = "top"
     for apple_name in candidates:
         template_path = templates[apple_name]
-        try:
-            result = recognition.match_template(
-                screenshot,
-                template_path,
-                threshold=0.85,
-                scales=(1.0, 0.75, 2 / 3, 0.5),
-            )
-        except AppError as exc:
-            if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
-                continue
-            raise
-        if result.matched:
+        result = _match_apple_template(recognition, current_screenshot, template_path)
+        if result is None:
+            continue
+        if not result.matched and device_service is not None and hasattr(device_service, "swipe"):
+            target_scroll = "bottom" if apple_name in {"blue", "copper"} else "top"
+            if target_scroll != current_scroll:
+                swipe_args = APPLE_SCROLL_DOWN if target_scroll == "bottom" else APPLE_SCROLL_UP
+                try:
+                    operation = device_service.swipe(*swipe_args)
+                except AppError:
+                    operation = None
+                if operation is not None:
+                    current_scroll = target_scroll
+                    if context is not None:
+                        context.emit(
+                            "device_action",
+                            "Scrolled AP recovery list.",
+                            data={
+                                "role": f"apple_scroll_{target_scroll}",
+                                "apple": apple_name,
+                                "operation": operation.to_dict(),
+                            },
+                        )
+                        if wait_seconds > 0:
+                            context.sleep(wait_seconds)
+                    current_screenshot = device_service.snapshot()
+                    result = _match_apple_template(recognition, current_screenshot, template_path)
+                    if result is None:
+                        continue
+        if result.matched and _apple_color_available(
+            recognition,
+            current_screenshot,
+            template_path,
+            result,
+        ):
             return apple_name, result
     return None
+
+
+def _match_apple_template(
+    recognition: RecognitionService,
+    screenshot: bytes,
+    template_path: str,
+):
+    try:
+        return recognition.match_template(
+            screenshot,
+            template_path,
+            threshold=0.85,
+            scales=(1.0, 0.75, 2 / 3, 0.5),
+        )
+    except AppError as exc:
+        if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+            return None
+        raise
+
+
+def _apple_color_available(
+    recognition: RecognitionService,
+    screenshot: bytes,
+    template_path: str,
+    result: Any,
+) -> bool:
+    if getattr(result, "color_available", None) is False:
+        return False
+    color_check = getattr(recognition, "check_color_half_mode", None)
+    if callable(color_check):
+        try:
+            return bool(color_check(screenshot, template_path, result))
+        except AppError:
+            return True
+    return True
