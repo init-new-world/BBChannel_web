@@ -19,6 +19,7 @@ from webapp.services.event_log import EventLog
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
+from webapp.services.team import TeamRecognizer
 
 
 class _AppleMatch:
@@ -709,3 +710,180 @@ def test_available_apple_skips_darkened_zero_count_icon_and_scrolls_for_copper(t
     assert matched is not None
     assert matched[0] == "copper"
     assert swipes == [(1014, 453, 1014, 620, 200)]
+
+
+def test_battle_prepare_job_waits_for_ce_card_flip_and_skips_prebattle_story(tmp_path: Path):
+    pytest.importorskip("cv2")
+    import io
+
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    battle_assets = assets / "battle" / "CH"
+    public_assets = assets / "battle" / "public"
+    servant_faces = assets / "servantface"
+    settings = data / "settings"
+    battle_assets.mkdir(parents=True)
+    public_assets.mkdir(parents=True)
+    servant_faces.mkdir(parents=True)
+    settings.mkdir(parents=True)
+
+    def pattern(size: tuple[int, int], color: tuple[int, int, int]) -> Image.Image:
+        image = Image.new("RGB", size, color)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((2, 2, size[0] - 3, size[1] - 3), outline=(245, 220, 70), width=2)
+        draw.line((3, size[1] - 4, size[0] - 4, 3), fill=(40, 220, 235), width=2)
+        return image
+
+    def png_bytes(img: Image.Image) -> bytes:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    team_decide = pattern((80, 40), (80, 65, 150))
+    gold_back = Image.new("RGB", (60, 80), (195, 165, 45))
+    gold_draw = ImageDraw.Draw(gold_back)
+    gold_draw.polygon([(30, 5), (55, 40), (30, 75), (5, 40)], outline=(255, 240, 120), fill=(160, 120, 25))
+    first_servant = Image.new("RGB", (60, 60), (65, 130, 180))
+    first_draw = ImageDraw.Draw(first_servant)
+    first_draw.ellipse((8, 8, 52, 52), outline=(240, 220, 90), width=4)
+    second_servant = Image.new("RGB", (60, 60), (160, 70, 120))
+    second_draw = ImageDraw.Draw(second_servant)
+    second_draw.line((8, 8, 52, 52), fill=(90, 240, 180), width=5)
+    second_draw.line((8, 52, 52, 8), fill=(240, 180, 90), width=5)
+    need_skip = pattern((40, 36), (185, 65, 55))
+    skip_confirm = pattern((70, 36), (50, 150, 95))
+    tips_icon = Image.new("RGB", (64, 44), (130, 110, 180))
+    tips_draw = ImageDraw.Draw(tips_icon)
+    tips_draw.ellipse((6, 6, 58, 38), outline=(250, 210, 80), width=3)
+    tips_draw.line((32, 6, 32, 38), fill=(80, 240, 210), width=3)
+    attack = pattern((90, 45), (150, 55, 80))
+
+    team_decide.save(battle_assets / "teamDecide.png")
+    gold_back.save(public_assets / "goldBack.png")
+    first_servant.save(servant_faces / "First_1.png")
+    second_servant.save(servant_faces / "Second_1.png")
+    need_skip.save(battle_assets / "needSkip.png")
+    skip_confirm.save(battle_assets / "listupdate.png")
+    tips_icon.save(battle_assets / "tips.png")
+    attack.save(battle_assets / "attack.png")
+
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    # Frame 0: team_decide visible, but slot 0 shows goldBack (CE flip) -> no tap, waits
+    frame_flip = base.copy()
+    frame_flip.paste(team_decide, (600, 500))
+    frame_flip.paste(gold_back, (80, 220))
+    # Frame 1: team_decide visible, both slots mid-transition (2 mismatches -> triggers 1 retry)
+    frame_mid_anim = base.copy()
+    frame_mid_anim.paste(team_decide, (600, 500))
+    # Frame 2: retry snapshot shows both servants matched -> taps team_decide (640, 520)
+    frame_team_ok = base.copy()
+    frame_team_ok.paste(team_decide, (600, 500))
+    frame_team_ok.paste(first_servant, (80, 220))
+    frame_team_ok.paste(second_servant, (280, 220))
+    # Frame 3: pre-battle story needSkip in STORY_SKIP_ROI (1193, 573, 67, 80) -> taps (1197, 40)
+    frame_need_skip = base.copy()
+    frame_need_skip.paste(need_skip, (1205, 590))
+    # Frame 4: story skip confirm (listupdate.png) in STORY_SKIP_CONFIRM_ROI (767, 533, 113, 60) -> taps center (815, 563)
+    frame_skip_confirm = base.copy()
+    frame_skip_confirm.paste(skip_confirm, (780, 545))
+    # Frame 5: loading screen with tips.png -> taps LOADING_TIPS_POINT (917, 257)
+    frame_tips = base.copy()
+    frame_tips.paste(tips_icon, (100, 600))
+    # Frame 6: battle ready (attack.png)
+    frame_battle = base.copy()
+    frame_battle.paste(attack, (1100, 600))
+
+    frames = [
+        png_bytes(frame)
+        for frame in (
+            frame_flip,
+            frame_mid_anim,
+            frame_team_ok,
+            frame_need_skip,
+            frame_skip_confirm,
+            frame_tips,
+            frame_battle,
+        )
+    ]
+    (data / "servant_info_CH.json").write_text(
+        json.dumps({"First": {}, "Second": {}}),
+        encoding="utf-8",
+    )
+    (settings / "flip_and_skip.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "First",
+                "servant_1_name": "Second",
+                "usedServant": [0, 1],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class SequenceDevice:
+        def __init__(self) -> None:
+            self.index = 0
+            self.taps: list[tuple[int, int]] = []
+
+        def snapshot(self) -> bytes:
+            frame = frames[min(self.index, len(frames) - 1)]
+            self.index += 1
+            return frame
+
+        def tap(self, x: int, y: int):
+            self.taps.append((x, y))
+
+            class Operation:
+                def to_dict(self):
+                    return {"x": x, "y": y}
+
+            return Operation()
+
+    class ContextStub:
+        def checkpoint(self, *_args, **_kwargs):
+            pass
+
+        def emit(self, *_args, **_kwargs):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    resources = ResourceService(assets, data)
+    recognition = RecognitionService(resources)
+    team_recognizer = TeamRecognizer(resources, recognition)
+    device = SequenceDevice()
+    handler = create_battle_entry_handler(
+        ScriptDataService(data),
+        device,
+        recognition,
+        team_recognizer,
+    )
+    result = handler(
+        ContextStub(),
+        {
+            "setting_name": "flip_and_skip",
+            "timeout_seconds": 5,
+            "poll_interval": 0,
+            "action_wait_seconds": 0,
+            "team_check_mode": "strict",
+        },
+    )
+
+    assert result["ready"] is True
+    assert result["team_verification"]["ok"] is True
+    assert result["team_verification"]["retried"] is True
+    assert result["actions"] == [
+        "team_card_flip_wait",
+        "team_decide",
+        "story_skip",
+        "story_skip_confirm",
+        "loading_tips",
+    ]
+    assert device.taps == [
+        (640, 520),
+        (1197, 40),
+        (815, 563),
+        (917, 257),
+    ]

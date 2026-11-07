@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from webapp.core.errors import AppError, ErrorCode
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
 
 TEAM_TEMPLATE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 TEAM_LAYOUT_SCALE = 2 / 3
+TEAM_CARD_BACK_TEMPLATES = (
+    "battle/public/goldBack.png",
+    "battle/public/silverBack.png",
+    "battle/public/copperBack.png",
+    "battle/public/blackBack.png",
+)
 
 
 class TeamRecognizer:
@@ -18,6 +25,47 @@ class TeamRecognizer:
     ) -> None:
         self._resources = resources
         self._recognition = recognition
+
+    def has_craft_essence_card_back(
+        self,
+        screenshot: bytes,
+        plan: dict[str, Any] | None = None,
+        *,
+        threshold: float = 0.8,
+    ) -> bool:
+        slots = list(range(6))
+        if isinstance(plan, dict):
+            configured_slots = [
+                int(servant["slot"])
+                for servant in plan.get("servants", [])
+                if (
+                    isinstance(servant, dict)
+                    and servant.get("used")
+                    and isinstance(servant.get("slot"), int)
+                    and not isinstance(servant.get("slot"), bool)
+                    and 0 <= int(servant["slot"]) < 6
+                )
+            ]
+            if configured_slots:
+                slots = configured_slots
+        for slot in slots:
+            roi = self._servant_roi(slot)
+            for template_path in TEAM_CARD_BACK_TEMPLATES:
+                try:
+                    result = self._recognition.match_template(
+                        screenshot,
+                        template_path,
+                        roi=roi,
+                        threshold=threshold,
+                        scales=TEAM_TEMPLATE_SCALES,
+                    )
+                except AppError as exc:
+                    if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:
+                        continue
+                    raise
+                if result.matched:
+                    return True
+        return False
 
     def recognize(
         self,

@@ -21,6 +21,14 @@ from webapp.services.team import TeamRecognizer
 BATTLE_PREPARE_JOB_KIND = "battle.prepare"
 CRAWL_TOWER_TRIGGER_POINT = (297, 677)
 CRAWL_TOWER_TRIGGER_SIZE = (60, 47)
+STORY_SKIP_ROI = (1193, 573, 67, 80)
+STORY_SKIP_ALT_ROI = (1120, 10, 147, 60)
+STORY_SKIP_CONFIRM_ROI = (767, 533, 113, 60)
+STORY_SKIP_POINT = (1197, 40)
+STORY_SKIP_SIZE = (100, 47)
+LOADING_TIPS_POINT = (917, 257)
+LOADING_TIPS_SIZE = (327, 207)
+MAX_TEAM_CARD_FLIP_WAITS = 5
 
 
 def create_battle_entry_handler(
@@ -53,21 +61,26 @@ def create_battle_entry_handler(
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
         server = str(plan["server"]).upper()
-        template_roles = (
-            ("battle_ready", f"battle/{server}/attack.png", 0.85),
-            ("battle_ready", f"battle/{server}/phase_1.png", 0.95),
-            ("apple_decide", f"battle/{server}/apple_decide.png", 0.85),
-            ("apple_close", f"battle/{server}/apple_close.png", 0.85),
-            ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png", 0.85),
-            ("team_decide", f"battle/{server}/teamDecide.png", 0.85),
-            ("start_task", f"battle/{server}/start_task.png", 0.8),
-            ("start_battle", f"battle/{server}/start_battle.png", 0.85),
+        template_roles: tuple[tuple[str, str, float, tuple[int, int, int, int] | None], ...] = (
+            ("battle_ready", f"battle/{server}/attack.png", 0.85, None),
+            ("battle_ready", f"battle/{server}/phase_1.png", 0.95, None),
+            ("apple_decide", f"battle/{server}/apple_decide.png", 0.85, None),
+            ("apple_close", f"battle/{server}/apple_close.png", 0.85, None),
+            ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png", 0.85, None),
+            ("team_decide", f"battle/{server}/teamDecide.png", 0.85, None),
+            ("start_task", f"battle/{server}/start_task.png", 0.8, None),
+            ("start_battle", f"battle/{server}/start_battle.png", 0.85, None),
+            ("story_skip_confirm", f"battle/{server}/listupdate.png", 0.85, STORY_SKIP_CONFIRM_ROI),
+            ("story_skip", f"battle/{server}/needSkip.png", 0.8, STORY_SKIP_ROI),
+            ("story_skip", f"battle/{server}/needSkip1.png", 0.8, STORY_SKIP_ALT_ROI),
+            ("loading_tips", f"battle/{server}/tips.png", 0.85, None),
         )
         started = monotonic()
         attempts = 0
         actions: list[str] = []
         team_verification = None
         auto_formation_confirmed = False
+        card_flip_waits = 0
 
         while monotonic() - started <= timeout_seconds:
             elapsed = monotonic() - started
@@ -91,11 +104,12 @@ def create_battle_entry_handler(
                 continue
             matched_role = None
             matched_result = None
-            for role, template_path, role_threshold in template_roles:
+            for role, template_path, role_threshold, role_roi in template_roles:
                 try:
                     result = recognition.match_template(
                         screenshot,
                         template_path,
+                        roi=role_roi,
                         threshold=role_threshold,
                         scales=(1.0, 0.75, 2 / 3, 0.5),
                     )
@@ -153,7 +167,37 @@ def create_battle_entry_handler(
                 and team_check_mode != "off"
                 and team_verification is None
             ):
+                has_card_back = getattr(
+                    team_recognizer,
+                    "has_craft_essence_card_back",
+                    None,
+                )
+                if (
+                    callable(has_card_back)
+                    and card_flip_waits < MAX_TEAM_CARD_FLIP_WAITS
+                    and has_card_back(screenshot, plan)
+                ):
+                    card_flip_waits += 1
+                    actions.append("team_card_flip_wait")
+                    context.emit(
+                        "recognition",
+                        "Waiting for party screen to flip from Craft Essence backs to Servant portraits.",
+                        data={"attempt": attempts, "card_flip_waits": card_flip_waits},
+                    )
+                    context.sleep(poll_interval)
+                    continue
                 team_verification = team_recognizer.recognize(screenshot, plan)
+                if int(team_verification.get("mismatch_count", 0)) >= 2:
+                    context.sleep(
+                        randomized_wait_seconds(action_wait_seconds, random_time)
+                    )
+                    screenshot = device_service.snapshot()
+                    attempts += 1
+                    retried_verification = team_recognizer.recognize(screenshot, plan)
+                    team_verification = {
+                        **retried_verification,
+                        "retried": True,
+                    }
                 context.emit(
                     "team_verification",
                     "Battle team verification completed.",
@@ -168,6 +212,46 @@ def create_battle_entry_handler(
                         "attempts": attempts,
                         "team_verification": team_verification,
                     }
+            if matched_role == "story_skip":
+                touch_x, touch_y = randomized_touch_point(
+                    STORY_SKIP_POINT,
+                    enabled=random_touch,
+                    size=STORY_SKIP_SIZE,
+                )
+                operation = device_service.tap(touch_x, touch_y)
+                actions.append("story_skip")
+                context.emit(
+                    "device_action",
+                    "Triggered pre-battle story skip.",
+                    data={
+                        "role": "story_skip",
+                        "x": STORY_SKIP_POINT[0],
+                        "y": STORY_SKIP_POINT[1],
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+            if matched_role == "loading_tips":
+                touch_x, touch_y = randomized_touch_point(
+                    LOADING_TIPS_POINT,
+                    enabled=random_touch,
+                    size=LOADING_TIPS_SIZE,
+                )
+                operation = device_service.tap(touch_x, touch_y)
+                actions.append("loading_tips")
+                context.emit(
+                    "device_action",
+                    "Tapped loading tips screen.",
+                    data={
+                        "role": "loading_tips",
+                        "x": LOADING_TIPS_POINT[0],
+                        "y": LOADING_TIPS_POINT[1],
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
             if matched_role == "apple_close" and matched_result is not None:
                 if not recover_ap:
                     operation = device_service.tap(
