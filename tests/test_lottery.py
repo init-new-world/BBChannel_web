@@ -1447,6 +1447,402 @@ def test_lottery_giftbox_receive_first_round_count_ignores_empty_page_limit():
     assert len(device.swipes) == 2
 
 
+def test_lottery_draw_supports_long_touch_draw_mode():
+    reports = iter(
+        (
+            _report(
+                "draw_10",
+                "actionable",
+                action="draw",
+                action_point=(413, 435),
+            ),
+            _report("pool_empty", "complete", reason="pool_empty"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.8
+            return next(reports)
+
+    device = _Device()
+    result = create_lottery_draw_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "long_touch_draw": True,
+            "long_touch_duration_ms": 8500,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["long_touch_draw"] is True
+    assert result["actions"] == ["long_touch_draw"]
+    assert device.swipes == [(413, 435, 413, 435, 8500)]
+    assert device.taps == []
+
+
+def test_lottery_giftbox_receive_supports_two_phase_one_key_then_filtered():
+    giftbox_reports = iter(
+        (
+            # Phase 1: open filter -> configure one_key_stars=[3] -> receive_all_on -> confirm -> receive_all_off
+            {
+                "state": "giftbox_loaded",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: False, 5: False},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: False, 5: False},
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "receive_confirm",
+                "status": "actionable",
+                "reason": None,
+            },
+            {
+                "state": "receive_all_off",
+                "status": "complete",
+                "reason": "giftbox_empty",
+                "receive_all_enabled": False,
+            },
+            # Phase 2: open filter -> configure stars=[4] -> filtered stack selection -> receive_selected
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: False, 4: True, 5: False},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: False, 4: True, 5: False},
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "receive_all_on",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+        )
+    )
+    stack_reports = iter(
+        (
+            {
+                "server": "CH",
+                "stars": [4],
+                "max_counts": {"3": None, "4": 20, "5": None},
+                "scrollbar": {"matched": True, "center": [930, 680], "at_bottom": True},
+                "stack_count": 1,
+                "selectable_count": 1,
+                "stacks": [],
+                "touch_points": [[851, 266]],
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize_giftbox(self, *_args, **_kwargs):
+            return next(giftbox_reports)
+
+        def recognize_giftbox_stacks(self, *_args, **_kwargs):
+            return next(stack_reports)
+
+    device = _Device()
+    result = create_lottery_giftbox_receive_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "one_key_stars": [3],
+            "stars": [4],
+            "max_stack_counts": {4: 20},
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "giftbox_filtered_complete"
+    assert result["one_key_stars"] == [3]
+    assert result["stars"] == [4]
+    assert result["selected_stacks"] == 1
+    assert result["receive_batches"] == 2
+    assert "receive_all" in result["actions"]
+    assert "receive_selected" in result["actions"]
+
+
+def test_lottery_run_supports_tidy_giftbox_only_and_draw_pool_only():
+    draw_reports = iter(
+        (
+            _report("giftbox_full", "blocked", reason="giftbox_full"),
+        )
+    )
+    giftbox_reports = iter(
+        (
+            {
+                "state": "giftbox_loaded",
+                "status": "actionable",
+                "reason": None,
+                "receive_all_enabled": True,
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: True, 5: True},
+            },
+            {
+                "state": "filter_dialog",
+                "status": "actionable",
+                "reason": None,
+                "servant_exp_enabled": True,
+                "star_filters": {3: True, 4: True, 5: True},
+            },
+            {
+                "state": "receive_all_off",
+                "status": "complete",
+                "reason": "giftbox_empty",
+                "receive_all_enabled": False,
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(draw_reports)
+
+        def recognize_giftbox(self, *_args, **_kwargs):
+            return next(giftbox_reports)
+
+    device = _Device()
+    # 1. draw_pool only (tidy_giftbox=False) stops when giftbox_full
+    draw_only_res = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "draw_pool": True,
+            "tidy_giftbox": False,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+    assert draw_only_res["completed"] is False
+    assert draw_only_res["stopped"] is True
+    assert draw_only_res["reason"] == "giftbox_full"
+    assert draw_only_res["draw_pool"] is True
+    assert draw_only_res["tidy_giftbox"] is False
+
+    # 2. tidy_giftbox only (draw_pool=False) cleans giftbox and finishes
+    tidy_only_res = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "draw_pool": False,
+            "tidy_giftbox": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+    assert tidy_only_res["completed"] is True
+    assert tidy_only_res["stopped"] is False
+    assert tidy_only_res["reason"] == "giftbox_empty"
+    assert tidy_only_res["draw_pool"] is False
+    assert tidy_only_res["tidy_giftbox"] is True
+    assert [stage["stage"] for stage in tidy_only_res["stages"]] == ["receive_giftbox"]
+
+
+def test_lottery_run_supports_multi_stage_overflow_actions():
+    draw_reports = iter(
+        (
+            _report("giftbox_full", "blocked", reason="giftbox_full"),
+            _report("unknown", "unknown"),
+            _report(
+                "draw_10",
+                "actionable",
+                action="draw",
+                action_point=(413, 435),
+            ),
+            _report("pool_empty", "complete", reason="pool_empty"),
+        )
+    )
+    giftbox_reports = iter(
+        (
+            {
+                "state": "inventory_full",
+                "status": "blocked",
+                "reason": "inventory_full",
+                "receive_all_enabled": None,
+            },
+        )
+    )
+    navigation_reports = iter(
+        (
+            {"state": "menu_available", "status": "actionable"},
+        )
+    )
+    expball_reports = iter(
+        (
+            # Storage full immediately
+            {
+                "server": "CH",
+                "state": "storefull",
+                "flow": "storage",
+                "status": "blocked",
+                "reason": "storage_full",
+                "recommended_action": None,
+                "matches": [{"name": "storefull", "center": [640, 360]}],
+            },
+            # Sell page empty -> move to servant_enhancement
+            {
+                "server": "CH",
+                "state": "autoSell",
+                "flow": "sell",
+                "status": "actionable",
+                "reason": None,
+                "recommended_action": "open_auto_sell",
+                "matches": [{"name": "autoSell", "center": [320, 610]}],
+            },
+            # Servant enhancement at max level -> completes
+            {
+                "server": "CH",
+                "state": "slot",
+                "flow": "enhancement",
+                "status": "actionable",
+                "reason": None,
+                "recommended_action": None,
+                "matches": [
+                    {"name": "slot", "center": [823, 283], "size": [120, 60]},
+                    {"name": "help", "center": [1180, 110], "size": [120, 60]},
+                ],
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(draw_reports)
+
+        def recognize_giftbox(self, *_args, **_kwargs):
+            return next(giftbox_reports)
+
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(navigation_reports)
+
+    class ExpBallRec:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return {
+                "server": "CH",
+                "state": "sell_page",
+                "flow": "sell",
+                "status": "ready",
+                "reason": "sell_page",
+                "recommended_action": None,
+                "matches": [
+                    {"name": "sell_page"},
+                    {"name": "enhancement_page"},
+                ],
+            }
+
+        def recognize(self, *_args, **_kwargs):
+            return next(expball_reports)
+
+        def recognize_storage_grid(self, *_args, **_kwargs):
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 0,
+                "slots": [],
+            }
+
+        def recognize_servant_level(self, *_args, **_kwargs):
+            return {
+                "valid": True,
+                "current_level": 100,
+                "max_level": 100,
+                "is_max_level": True,
+            }
+
+    device = _Device()
+    result = create_lottery_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        expball_recognizer=ExpBallRec(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "overflow_actions": ["storage", "sell", "servant_enhancement"],
+            "overflow_stars": [4],
+            "target_level": 100,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["reason"] == "pool_empty"
+    assert result["overflow_actions"] == ["storage", "sell", "servant_enhancement"]
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "draw",
+        "receive_giftbox",
+        "overflow_storage",
+        "navigate_overflow_sell",
+        "overflow_sell",
+        "navigate_overflow_servant_enhancement",
+        "overflow_servant_enhancement",
+        "navigate",
+        "draw",
+    ]
+
+
+
 
 def test_lottery_jobs_require_connected_device(tmp_path):
     with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
