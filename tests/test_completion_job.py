@@ -76,6 +76,12 @@ def _run_completion(
     list_update = _pattern((92, 38), (65, 175, 135))
     need_skip = _pattern((48, 48), (145, 115, 205))
     need_skip_1 = _pattern((84, 38), (215, 145, 85))
+    menu_btn = _pattern((96, 62), (45, 95, 205))
+    ks_btn = _pattern((86, 38), (225, 95, 55))
+    rwks_btn = _pattern((136, 38), (55, 195, 95))
+    list_update_btn = _pattern((58, 38), (195, 55, 185))
+    apple_close = _pattern((60, 38), (125, 185, 55))
+    start_task = _pattern((110, 50), (215, 65, 145))
     drop_item = drop_template if drop_template is not None else _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
@@ -94,6 +100,12 @@ def _run_completion(
     list_update.save(battle_assets / "listupdate.png")
     need_skip.save(battle_assets / "needSkip.png")
     need_skip_1.save(battle_assets / "needSkip1.png")
+    menu_btn.save(battle_assets / "menu.png")
+    ks_btn.save(battle_assets / "ks.png")
+    rwks_btn.save(battle_assets / "rwks.png")
+    list_update_btn.save(battle_assets / "listupdatebtn.png")
+    apple_close.save(battle_assets / "apple_close.png")
+    start_task.save(battle_assets / "start_task.png")
     goto_interlude.save(interlude_assets / "gotoInterlude.png")
     goto_stage.save(interlude_assets / "gotoStage.png")
     next_story.save(main_story_assets / "nextOne.png")
@@ -698,5 +710,79 @@ def test_completion_closes_reward_dialog_and_skips_post_battle_cutscene(
         "story_skip",
         "story_skip_confirm",
     ]
+
+
+def test_completion_finishes_on_menu_screen_without_repeat(tmp_path: Path):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern((96, 62), (45, 95, 205)), (1100, 620))
+
+    result = _run_completion(
+        tmp_path,
+        [(frame, None)],
+        payload={"repeat": False},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["complete"] is True
+    assert result.result["repeated"] is False
+    assert result.result["actions"] == []
+
+
+def test_completion_reenters_quest_from_menu_screen_when_repeat_enabled(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    menu_frame = base.copy()
+    menu_frame.paste(_pattern((96, 62), (45, 95, 205)), (1100, 620))
+    ks_frame = base.copy()
+    ks_frame.paste(_pattern((86, 38), (225, 95, 55)), (795, 545))
+    assist_frame = base.copy()
+    assist_frame.paste(_pattern((58, 38), (195, 55, 185)), (900, 110))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (menu_frame, {"type": "tap", "x": 1048, "y": 172}),
+            (ks_frame, {"type": "tap", "x": 838, "y": 564}),
+            (assist_frame, None),
+        ],
+        payload={"repeat": True, "timeout_seconds": 10},
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["complete"] is True
+    assert result.result["repeated"] is True
+    assert result.result["actions"] == ["reenter_quest", "confirm_quest_start"]
+
+
+def test_completion_stops_on_team_restriction_during_quest_reentry(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    menu_frame = base.copy()
+    menu_frame.paste(_pattern((96, 62), (45, 95, 205)), (1100, 620))
+    restriction_frame = base.copy()
+    restriction_frame.paste(_pattern((100, 38), (185, 85, 95)), (590, 580))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (menu_frame, {"type": "tap", "x": 1048, "y": 172}),
+            (restriction_frame, None),
+        ],
+        payload={"repeat": True, "timeout_seconds": 10},
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["complete"] is False
+    assert result.result["stopped"] is True
+    assert result.result["reason"] == "team_restriction"
+    assert result.result["actions"] == ["reenter_quest"]
+
 
 

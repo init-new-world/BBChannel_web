@@ -36,6 +36,16 @@ STORY_SKIP_TOP_ROI = (1120, 10, 147, 60)
 STORY_SKIP_BOTTOM_ROI = (1193, 573, 67, 80)
 STORY_SKIP_POINT = (1197, 40)
 STORY_SKIP_SIZE = (100, 46)
+MENU_ROI = (1033, 533, 247, 187)
+QUEST_REENTER_POINT = (1048, 172)
+QUEST_REENTER_SIZE = (5, 17)
+QUEST_START_KS_ROI = (780, 533, 120, 60)
+QUEST_START_RWKS_ROI = (733, 533, 207, 60)
+LIST_UPDATE_BTN_ROI = (820, 100, 147, 60)
+APPLE_CLOSE_ROI = (600, 580, 80, 67)
+START_QUEST_ROI = (1067, 613, 200, 100)
+TEAM_RESTRICTION_ROI = (573, 573, 137, 57)
+QUEST_UNAVAILABLE_ROI = (573, 533, 137, 60)
 
 
 def create_completion_handler(
@@ -81,6 +91,7 @@ def create_completion_handler(
         drop_count = initial_drop_count
         observed_drop_bounds: list[tuple[int, int, int, int]] = []
         cant_add_friend = False
+        reentering_quest = False
 
         while monotonic() - started <= timeout_seconds:
             elapsed = monotonic() - started
@@ -270,11 +281,15 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
-            friend_full = _match_optional(
-                recognition,
-                screenshot,
-                f"battle/{server}/notAvailable.png",
-                roi=FRIEND_FULL_ROI,
+            friend_full = (
+                None
+                if reentering_quest
+                else _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/notAvailable.png",
+                    roi=FRIEND_FULL_ROI,
+                )
             )
             if friend_full is not None and friend_full.matched:
                 cant_add_friend = True
@@ -488,6 +503,187 @@ def create_completion_handler(
                     "actions": actions,
                     "attempts": attempts,
                 }
+
+            if reentering_quest:
+                team_restriction = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/notAvailable.png",
+                    threshold=0.8,
+                    roi=TEAM_RESTRICTION_ROI,
+                )
+                if team_restriction is not None and team_restriction.matched:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Stopped because quest has party formation restrictions.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": False,
+                        "stopped": True,
+                        "reason": "team_restriction",
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+
+                quest_unavailable = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/notAvailable.png",
+                    threshold=0.8,
+                    roi=QUEST_UNAVAILABLE_ROI,
+                )
+                if quest_unavailable is not None and quest_unavailable.matched:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Stopped because quest entry is unavailable.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": False,
+                        "stopped": True,
+                        "reason": "quest_unavailable",
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+
+                quest_start = None
+                for template_name, start_roi in (
+                    ("ks", QUEST_START_KS_ROI),
+                    ("rwks", QUEST_START_RWKS_ROI),
+                ):
+                    candidate = _match_optional(
+                        recognition,
+                        screenshot,
+                        f"battle/{server}/{template_name}.png",
+                        threshold=0.8,
+                        roi=start_roi,
+                    )
+                    if candidate is not None and candidate.matched:
+                        quest_start = candidate
+                        break
+                if quest_start is not None:
+                    operation = device_service.tap(
+                        *match_touch_point(quest_start, enabled=random_touch)
+                    )
+                    actions.append("confirm_quest_start")
+                    context.emit(
+                        "device_action",
+                        "Confirmed quest entry for the next run.",
+                        data={
+                            "role": "confirm_quest_start",
+                            "operation": operation.to_dict(),
+                        },
+                    )
+                    context.sleep(
+                        randomized_wait_seconds(action_wait_seconds, random_time)
+                    )
+                    continue
+
+                assist_screen = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/listupdatebtn.png",
+                    threshold=0.7,
+                    roi=LIST_UPDATE_BTN_ROI,
+                )
+                apple_prompt = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/apple_close.png",
+                    threshold=0.8,
+                    roi=APPLE_CLOSE_ROI,
+                )
+                if (assist_screen is not None and assist_screen.matched) or (
+                    apple_prompt is not None and apple_prompt.matched
+                ):
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Battle settlement completed and re-entered quest.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": True,
+                        "repeated": True,
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+
+                prepare_screen = None
+                for template_name in ("start_task", "start_battle"):
+                    candidate = _match_optional(
+                        recognition,
+                        screenshot,
+                        f"battle/{server}/{template_name}.png",
+                        threshold=0.8,
+                        roi=START_QUEST_ROI,
+                    )
+                    if candidate is not None and candidate.matched:
+                        prepare_screen = candidate
+                        break
+                if prepare_screen is not None:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Battle settlement completed and reached party preparation.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": True,
+                        "repeated": True,
+                        "next_stage": "prepare",
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+
+            menu_button = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/menu.png",
+                threshold=0.8,
+                roi=MENU_ROI,
+            )
+            if menu_button is not None and menu_button.matched:
+                if not repeat:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Battle settlement returned to the terminal screen.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": True,
+                        "repeated": False,
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
+                reentering_quest = True
+                operation = device_service.tap(
+                    *randomized_touch_point(
+                        QUEST_REENTER_POINT,
+                        enabled=random_touch,
+                        size=QUEST_REENTER_SIZE,
+                    )
+                )
+                actions.append("reenter_quest")
+                context.emit(
+                    "device_action",
+                    "Selected the quest node to start the next run.",
+                    data={
+                        "role": "reenter_quest",
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
 
             battle_finish = None
             for template_name in ("battleFinish", "battleFinish1", "fight_end"):

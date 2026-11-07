@@ -927,3 +927,48 @@ def test_full_run_propagates_crawl_tower_mode_and_friendship_suppression():
     assert by_stage["battle"]["crawl_tower_mode"] == "autonomous"
     assert by_stage["complete"]["ignore_full_friendship"] is True
 
+
+def test_full_run_resumes_at_prepare_when_completion_returns_prepare_next_stage():
+    calls: list[str] = []
+
+    def stage(name: str):
+        def execute(_context, _payload):
+            calls.append(name)
+            if name == "complete":
+                return {
+                    "complete": True,
+                    "repeated": True,
+                    "next_stage": "prepare",
+                    "drop_count": 0,
+                }
+            return {"ready": True, "stage": name}
+
+        return execute
+
+    handler = create_full_run_handler(
+        _ScriptData(),
+        stage("assist"),
+        stage("prepare"),
+        stage("battle"),
+        stage("complete"),
+    )
+    result = handler(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_runs": 2,
+        },
+    )
+
+    assert result["runs_completed"] == 2
+    assert calls == [
+        "assist",
+        "prepare",
+        "battle",
+        "complete",
+        "prepare",
+        "battle",
+        "complete",
+    ]
+
+

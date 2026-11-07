@@ -537,6 +537,10 @@ def create_full_run_handler(
                     stopped = True
                     stop_reason = completion_reason
                     break
+            elif resume_stage is None:
+                next_stage = completion_result.get("next_stage")
+                if isinstance(next_stage, str) and next_stage in battle_stages:
+                    resume_stage = next_stage
             run_number += 1
             current_run_results = {
                 "assist": {},
