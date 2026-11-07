@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
+
+from PIL import Image
 
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
 
 CHOCOLATE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+_VALENTINO_REF_RECT = (1620, 10, 1840, 130)
+_VALENTINO_TARGET_SIZE = (220, 120)
 _STATE_SPECS = (
     ("limit", "blocked", "storage_full", None),
     ("notEnough", "blocked", "materials_exhausted", None),
@@ -102,4 +107,35 @@ class ChocolateRecognizer:
             ),
             "available_template_count": len(candidates),
             "matches": matches,
+        }
+
+    def capture_banner_template(
+        self,
+        screenshot: bytes,
+        server: str,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+
+        with Image.open(BytesIO(screenshot)) as image:
+            rgb = image.convert("RGB")
+        width, height = rgb.size
+        x1 = max(0, min(width - 1, round(_VALENTINO_REF_RECT[0] * width / 1920)))
+        y1 = max(0, min(height - 1, round(_VALENTINO_REF_RECT[1] * height / 1080)))
+        x2 = max(x1 + 1, min(width, round(_VALENTINO_REF_RECT[2] * width / 1920)))
+        y2 = max(y1 + 1, min(height, round(_VALENTINO_REF_RECT[3] * height / 1080)))
+        cropped = rgb.crop((x1, y1, x2, y2)).resize(
+            _VALENTINO_TARGET_SIZE,
+            Image.Resampling.BILINEAR,
+        )
+        relative_path = f"chocolate/{normalized_server}/valentino.png"
+        target_path = self._resources.assets_dir / relative_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        cropped.save(target_path, format="PNG")
+        return {
+            "server": normalized_server,
+            "template_path": relative_path,
+            "crop_bounds": [x1, y1, x2, y2],
+            "size": list(_VALENTINO_TARGET_SIZE),
         }

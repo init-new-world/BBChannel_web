@@ -1,8 +1,15 @@
+from io import BytesIO
+
+from PIL import Image
+
 from webapp.automation.chocolate import (
+    CHOCOLATE_CAPTURE_BANNER_JOB_KIND,
     CHOCOLATE_INSPECT_JOB_KIND,
     CHOCOLATE_RUN_JOB_KIND,
+    create_chocolate_capture_banner_handler,
     create_chocolate_inspect_handler,
     create_chocolate_run_handler,
+    register_chocolate_capture_banner_job,
     register_chocolate_inspect_job,
     register_chocolate_run_job,
 )
@@ -264,3 +271,147 @@ def test_chocolate_run_job_requires_connected_device(tmp_path):
 
         assert manager.has_kind(CHOCOLATE_RUN_JOB_KIND)
         assert manager.requires_device(CHOCOLATE_RUN_JOB_KIND) is True
+
+
+def test_chocolate_capture_banner_template_crops_and_saves(tmp_path):
+    class Resources:
+        assets_dir = tmp_path
+
+    img = Image.new("RGB", (1280, 720), color=(20, 40, 80))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    screenshot = buf.getvalue()
+
+    recognizer = ChocolateRecognizer(Resources(), object())
+    report = recognizer.capture_banner_template(screenshot, "ch")
+
+    assert report["server"] == "CH"
+    assert report["template_path"] == "chocolate/CH/valentino.png"
+    assert report["crop_bounds"] == [1080, 7, 1227, 87]
+    assert report["size"] == [220, 120]
+    saved_path = tmp_path / "chocolate" / "CH" / "valentino.png"
+    assert saved_path.is_file()
+    with Image.open(saved_path) as saved_img:
+        assert saved_img.size == (220, 120)
+
+    context = _Context()
+    handler_result = create_chocolate_capture_banner_handler(
+        _ScriptData(),
+        type("Device", (), {"snapshot": lambda self: screenshot})(),
+        recognizer,
+    )(context, {"setting_name": "demo"})
+    assert handler_result["server"] == "CNTW"
+    assert handler_result["template_path"] == "chocolate/CNTW/valentino.png"
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_chocolate_capture_banner_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            recognizer,
+        )
+        assert manager.has_kind(CHOCOLATE_CAPTURE_BANNER_JOB_KIND)
+        assert manager.requires_device(CHOCOLATE_CAPTURE_BANNER_JOB_KIND) is True
+
+
+def test_chocolate_run_supports_valentino_entry_batch10_and_gender_switch():
+    reports = iter(
+        (
+            _report(
+                "valentino",
+                "actionable",
+                action="open_chocolate_exchange",
+                center=(1153, 47),
+            ),
+            _report(
+                "exchange",
+                "actionable",
+                action="exchange",
+                center=(1127, 650),
+            ),
+            _report(
+                "exchange",
+                "actionable",
+                action="exchange",
+                center=(1127, 650),
+            ),
+            _report(
+                "end",
+                "actionable",
+                action="continue_exchange",
+                center=(640, 360),
+            ),
+            _report(
+                "end",
+                "actionable",
+                action="continue_exchange",
+                center=(640, 360),
+            ),
+        )
+    )
+
+    calls = {"count": 0}
+
+    class Recognizer:
+        def recognize(self, _screenshot, server, *, threshold):
+            assert server == "CH"
+            assert threshold == 0.82
+            calls["count"] += 1
+            report = next(reports)
+            if calls["count"] == 3:
+                report["matches"].append(
+                    {
+                        "name": "10",
+                        "status": "ready",
+                        "reason": None,
+                        "recommended_action": None,
+                        "center": [842, 309],
+                        "size": [40, 40],
+                    }
+                )
+            return report
+
+    class ScriptDataCH:
+        def get_setting_plan(self, name):
+            assert name == "demo"
+            return {
+                "server": "CH",
+                "run": {"random_touch": False, "random_time": 0},
+            }
+
+    device = _Device()
+    context = _Context()
+    result = create_chocolate_run_handler(
+        ScriptDataCH(),
+        device,
+        Recognizer(),
+    )(
+        context,
+        {
+            "setting_name": "demo",
+            "female": True,
+            "male": True,
+            "select_10_batch": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "exchange_complete"
+    assert result["actions"] == [
+        "open_female_chocolate",
+        "select_10_batch",
+        "exchange",
+        "cancel_end_dialog",
+        "open_male_chocolate",
+    ]
+    assert device.taps == [
+        (837, 140),
+        (842, 309),
+        (1127, 650),
+        (470, 488),
+        (1013, 140),
+    ]
+
