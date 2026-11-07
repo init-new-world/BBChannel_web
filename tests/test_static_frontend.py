@@ -85,6 +85,10 @@ def test_operator_console_references_api_controls():
     assert 'id="start-full-run"' in index
     assert 'id="restart-game"' in index
     assert 'id="inspect-chocolate"' in index
+    assert 'id="capture-chocolate-banner"' in index
+    assert 'id="chocolate-female"' in index
+    assert 'id="chocolate-male"' in index
+    assert 'id="chocolate-batch-10"' in index
     assert 'id="run-chocolate"' in index
     assert 'id="inspect-digdig"' in index
     assert 'id="inspect-digdig-grid"' in index
@@ -206,6 +210,7 @@ def test_operator_console_references_api_controls():
     assert "state.selectedSettingPlan?.run?.game_crash_restart" in script
     assert "result.restart_count" in script
     assert 'job.kind === "event.chocolate.inspect"' in script
+    assert 'job.kind === "event.chocolate.capture-banner"' in script
     assert 'job.kind === "event.chocolate.run"' in script
     assert 'job.kind === "event.digdig.inspect"' in script
     assert 'job.kind === "event.digdig.inspect-board-grid"' in script
@@ -232,7 +237,9 @@ def test_operator_console_references_api_controls():
     assert "result.pieces?.length || 0" in script
     assert 'enqueueJob("battle.restart-game"' in script
     assert 'enqueueJob("event.chocolate.inspect"' in script
+    assert 'enqueueJob("event.chocolate.capture-banner"' in script
     assert 'enqueueJob("event.chocolate.run"' in script
+    assert "select_10_batch: Boolean(els.chocolateBatch10?.checked)" in script
     assert 'enqueueJob("event.digdig.inspect"' in script
     assert 'enqueueJob("event.digdig.inspect-board-grid"' in script
     assert 'enqueueJob("event.digdig.execute"' in script

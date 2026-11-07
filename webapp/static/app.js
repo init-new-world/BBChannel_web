@@ -178,6 +178,10 @@ const els = {
   startFullRun: document.querySelector("#start-full-run"),
   restartGame: document.querySelector("#restart-game"),
   inspectChocolate: document.querySelector("#inspect-chocolate"),
+  captureChocolateBanner: document.querySelector("#capture-chocolate-banner"),
+  chocolateFemale: document.querySelector("#chocolate-female"),
+  chocolateMale: document.querySelector("#chocolate-male"),
+  chocolateBatch10: document.querySelector("#chocolate-batch-10"),
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   inspectDigdigGrid: document.querySelector("#inspect-digdig-grid"),
@@ -558,6 +562,10 @@ function bindEvents() {
   els.startFullRun.addEventListener("click", startFullRun);
   els.restartGame.addEventListener("click", restartGame);
   els.inspectChocolate.addEventListener("click", inspectChocolate);
+  els.captureChocolateBanner?.addEventListener("click", captureChocolateBanner);
+  els.chocolateFemale?.addEventListener("change", updateControls);
+  els.chocolateMale?.addEventListener("change", updateControls);
+  els.chocolateBatch10?.addEventListener("change", updateControls);
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.inspectDigdigGrid.addEventListener("click", inspectDigdigGrid);
@@ -3104,13 +3112,31 @@ async function inspectChocolate() {
   });
 }
 
+async function captureChocolateBanner() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.chocolate.capture-banner", {
+    setting_name: settingName,
+  });
+}
+
 async function runChocolate() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
     return;
   }
+  const female = Boolean(els.chocolateFemale?.checked ?? true);
+  const male = Boolean(els.chocolateMale?.checked ?? true);
+  if (!female && !male) {
+    return;
+  }
   await enqueueJob("event.chocolate.run", {
     setting_name: settingName,
+    female,
+    male,
+    select_10_batch: Boolean(els.chocolateBatch10?.checked),
   });
 }
 
@@ -3833,6 +3859,14 @@ function renderJobResult(job) {
     els.jobResult.textContent = details.join(" · ");
     return;
   }
+  if (job.kind === "event.chocolate.capture-banner") {
+    els.jobResult.textContent = [
+      "Valentine banner captured",
+      result.server || "unknown",
+      result.template_path || "valentino.png",
+    ].join(" · ");
+    return;
+  }
   if (job.kind === "event.chocolate.run") {
     const actionCount = result.actions?.length || 0;
     els.jobResult.textContent = [
@@ -4285,11 +4319,20 @@ function updateControls() {
   els.restartGame.disabled = !state.connected
     || !state.selectedSettingPlan?.run?.game_crash_restart
     || hasRunningJob;
+  const hasChocolateGender = Boolean(
+    els.chocolateFemale?.checked || els.chocolateMale?.checked
+  );
   els.inspectChocolate.disabled = !state.connected
     || !els.settingSelect.value
     || hasRunningJob;
+  if (els.captureChocolateBanner) {
+    els.captureChocolateBanner.disabled = !state.connected
+      || !els.settingSelect.value
+      || hasRunningJob;
+  }
   els.runChocolate.disabled = !state.connected
     || !els.settingSelect.value
+    || !hasChocolateGender
     || hasRunningJob;
   els.inspectDigdig.disabled = !state.connected
     || !els.settingSelect.value
