@@ -656,4 +656,325 @@ def test_expball_run_forwards_draw_100_and_banner_direction():
     ]
 
 
+def test_expball_run_auto_stores_full_ce_bombs_when_grid_is_full():
+    nav_states = iter(
+        (
+            _navigation_report("summon_page"),
+            _navigation_report("enhancement_page"),
+            _navigation_report("storage_page"),
+            _navigation_report("enhancement_page"),
+            _navigation_report("summon_page"),
+        )
+    )
+    reports = iter(
+        (
+            _report(
+                "boxfull",
+                "summon",
+                "actionable",
+                action="handle_full_box",
+            ),
+            _report(
+                "slot",
+                "enhancement",
+                "actionable",
+                action="open_material_slots",
+                matches=[{"name": "slot", "center": [823, 283]}],
+            ),
+            _report(
+                "tysd",
+                "selection",
+                "actionable",
+                action="select_material_card",
+                matches=[
+                    {"name": "tysd", "center": [420, 80]},
+                    {"name": "qhjd", "center": [1153, 670]},
+                ],
+            ),
+            _report(
+                "in_store",
+                "storage",
+                "observed",
+                matches=[{"name": "in_store", "center": [310, 120]}],
+            ),
+            _report(
+                "in_store",
+                "storage",
+                "observed",
+                matches=[
+                    {"name": "in_store", "center": [310, 120]},
+                    {"name": "jd", "center": [1120, 650]},
+                ],
+            ),
+            _report(
+                "zxStore",
+                "storage",
+                "actionable",
+                matches=[{"name": "zxStore", "center": [980, 620]}],
+            ),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                matches=[{"name": "ljbhclose", "center": [640, 610]}],
+            ),
+            _report(
+                "in_store",
+                "storage",
+                "observed",
+                matches=[{"name": "in_store", "center": [310, 120]}],
+            ),
+            _report(
+                "sure",
+                "confirmation",
+                "actionable",
+                action="confirm_dialog",
+                matches=[{"name": "sure", "center": [640, 563]}],
+            ),
+            _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                matches=[{"name": "call10", "center": [800, 520]}],
+            ),
+            _report(
+                "decide",
+                "confirmation",
+                "actionable",
+                action="confirm_summon",
+                matches=[{"name": "decide", "center": [835, 563]}],
+            ),
+            _report(
+                "again10",
+                "summon",
+                "actionable",
+                action="summon_again",
+                matches=[
+                    {"name": "again10", "center": [760, 673]},
+                    {"name": "bianhuan", "center": [1040, 670]},
+                ],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_ce_bomb_grid(self, *_args, **_kwargs):
+            return {
+                "server": "CH",
+                "rows": 3,
+                "columns": 7,
+                "full_level_slots": list(range(21)),
+                "full_level_count": 21,
+                "all_full_level": True,
+                "last_slot_full_level": True,
+                "need_lock_slots": [],
+                "need_lock_count": 0,
+                "need_mark_slots": [],
+                "need_mark_count": 0,
+                "need_store_slots": [0],
+                "need_store_count": 1,
+                "slots": [
+                    {
+                        "slot": idx,
+                        "center": [135, 248],
+                        "full_level": True,
+                        "locked": True,
+                        "marked": True,
+                        "need_lock": False,
+                        "need_mark": False,
+                        "need_store": idx == 0,
+                    }
+                    for idx in range(21)
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 1,
+            "overflow_action": "equipment_enhancement",
+            "auto_store_ce_bombs": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["auto_store_ce_bombs"] is True
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "navigate_summon",
+        "summon",
+        "navigate_equipment_enhancement",
+        "equipment_enhancement",
+        "navigate_storage",
+        "storage",
+        "navigate_equipment_enhancement",
+        "equipment_enhancement",
+        "navigate_summon",
+        "summon",
+    ]
+
+
+def test_expball_run_supports_multi_stage_overflow_actions_pipeline():
+    nav_states = iter(
+        (
+            _navigation_report("summon_page"),
+            _navigation_report("storage_page"),
+            _navigation_report("sell_page"),
+            _navigation_report("enhancement_page"),
+            _navigation_report("summon_page"),
+        )
+    )
+    reports = iter(
+        (
+            _report(
+                "boxfull",
+                "summon",
+                "actionable",
+                action="handle_full_box",
+            ),
+            _report(
+                "store_full",
+                "storage",
+                "blocked",
+                reason="storage_full",
+                matches=[{"name": "store_full", "center": [640, 360]}],
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                action="open_auto_sell",
+                matches=[{"name": "autoSell", "center": [320, 610]}],
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                action="open_auto_sell",
+                matches=[
+                    {"name": "autoSell", "center": [320, 610]},
+                    {"name": "jd", "center": [1120, 650]},
+                ],
+            ),
+            _report(
+                "destroy",
+                "sell",
+                "actionable",
+                matches=[{"name": "destroy", "center": [980, 620]}],
+            ),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                matches=[{"name": "ljbhclose", "center": [640, 610]}],
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                action="open_auto_sell",
+                matches=[{"name": "autoSell", "center": [320, 610]}],
+            ),
+            _report(
+                "sure",
+                "confirmation",
+                "actionable",
+                action="confirm_dialog",
+                matches=[{"name": "sure", "center": [640, 563]}],
+            ),
+            _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                matches=[{"name": "call10", "center": [800, 520]}],
+            ),
+            _report(
+                "decide",
+                "confirmation",
+                "actionable",
+                action="confirm_summon",
+                matches=[{"name": "decide", "center": [835, 563]}],
+            ),
+            _report(
+                "again10",
+                "summon",
+                "actionable",
+                action="summon_again",
+                matches=[
+                    {"name": "again10", "center": [760, 673]},
+                    {"name": "bianhuan", "center": [1040, 670]},
+                ],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_storage_grid(self, *_args, **_kwargs):
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 1,
+                "slots": [{"slot": 0, "star": 4, "center": [136, 248]}],
+            }
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 1,
+            "overflow_actions": ["storage", "sell", "equipment_enhancement"],
+            "stars": [4],
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["storage_full"] is True
+    assert result["overflow_actions"] == [
+        "storage",
+        "sell",
+        "equipment_enhancement",
+    ]
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "navigate_summon",
+        "summon",
+        "navigate_storage",
+        "storage",
+        "navigate_sell",
+        "sell",
+        "navigate_equipment_enhancement",
+        "equipment_enhancement",
+        "navigate_summon",
+        "summon",
+    ]
+
+
+
 

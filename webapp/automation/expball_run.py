@@ -71,14 +71,29 @@ def create_expball_run_handler(
         store_first_raw = payload.get("store_first", False)
         if not isinstance(store_first_raw, bool):
             raise ValueError("store_first must be a boolean.")
-        overflow_action = str(payload.get("overflow_action") or "stop").lower()
-        if store_first_raw and overflow_action in {"stop", "storage", "sell"}:
-            overflow_action = "storage_then_sell"
-        if overflow_action not in _OVERFLOW_ACTIONS:
-            raise ValueError(
-                "overflow_action must be stop, storage, sell, "
-                "storage_then_sell, equipment_enhancement, or servant_enhancement."
-            )
+        auto_store_ce_bombs_raw = payload.get("auto_store_ce_bombs", False)
+        if not isinstance(auto_store_ce_bombs_raw, bool):
+            raise ValueError("auto_store_ce_bombs must be a boolean.")
+        auto_store_ce_bombs = auto_store_ce_bombs_raw
+        servant_enhance_interval = _integer(
+            payload,
+            "servant_enhance_interval",
+            1,
+            1,
+            100,
+        )
+        overflow_actions = _parse_overflow_actions(payload, store_first_raw)
+        overflow_action = (
+            overflow_actions[0]
+            if len(overflow_actions) == 1
+            else ("stop" if not overflow_actions else overflow_actions[0])
+        )
+        if payload.get("overflow_action") is not None and not payload.get(
+            "overflow_actions"
+        ):
+            overflow_action = str(payload.get("overflow_action") or "stop").lower()
+            if store_first_raw and overflow_action in {"stop", "storage", "sell"}:
+                overflow_action = "storage_then_sell"
         stars = _parse_card_stars(payload)
         storage_stars = _parse_card_stars(payload, key="storage_stars") or stars
         sell_stars = _parse_card_stars(payload, key="sell_stars") or stars
@@ -87,7 +102,10 @@ def create_expball_run_handler(
         )
         sell_target = str(payload.get("sell_target") or "exp").strip().lower()
         if (
-            overflow_action in {"storage", "storage_then_sell"}
+            any(
+                action in {"storage", "storage_then_sell"}
+                for action in overflow_actions
+            )
             and storage_target != "ce_bomb"
             and storage_stars is None
         ):
@@ -95,7 +113,10 @@ def create_expball_run_handler(
                 "overflow_action requires stars to be configured for automatic storage or sell."
             )
         if (
-            overflow_action in {"sell", "storage_then_sell"}
+            any(
+                action in {"sell", "storage_then_sell"}
+                for action in overflow_actions
+            )
             and sell_target not in {"servant", "command_code"}
             and sell_stars is None
         ):
@@ -134,6 +155,11 @@ def create_expball_run_handler(
             "mark_threshold",
         ):
             _copy_option(payload, storage_overflow_payload, key, key)
+        ce_bomb_storage_payload = dict(common_payload)
+        ce_bomb_storage_payload["storage_target"] = "ce_bomb"
+        ce_bomb_storage_payload["require_locked_and_marked"] = True
+        for key in ("locker_threshold", "mark_threshold"):
+            _copy_option(payload, ce_bomb_storage_payload, key, key)
         sell_overflow_payload = dict(overflow_payload)
         if sell_stars is not None:
             sell_overflow_payload["stars"] = list(sell_stars)
@@ -152,33 +178,45 @@ def create_expball_run_handler(
             "allow_qp_full",
         ):
             _copy_option(payload, sell_overflow_payload, key, key)
-        if overflow_action == "storage":
-            overflow_payload = storage_overflow_payload
-        if overflow_action == "sell":
-            overflow_payload = sell_overflow_payload
-        if overflow_action in {"equipment_enhancement", "servant_enhancement"}:
-            overflow_payload["target"] = (
-                "equipment"
-                if overflow_action == "equipment_enhancement"
-                else "servant"
-            )
-            for key in (
-                "material_select_mode",
-                "select_base_first",
-                "max_batches",
-                "target_level",
-                "level_threshold",
-                "servant_target",
-                "servant_targets",
-                "servant_target_threshold",
-                "max_base_scrolls",
-                "auto_limit_break",
-                "lock_full_ce_bombs",
-                "mark_full_ce_bombs",
-                "locker_threshold",
-                "mark_threshold",
-            ):
-                _copy_option(payload, overflow_payload, key, key)
+        equipment_enhance_payload = dict(overflow_payload)
+        equipment_enhance_payload["target"] = "equipment"
+        for key in (
+            "selection_mode",
+            "material_select_mode",
+            "select_base_first",
+            "max_batches",
+            "eat_3star",
+            "eat3star",
+            "eat_4star",
+            "eat4star",
+            "allow_high_star_materials",
+            "lock_full_ce_bombs",
+            "mark_full_ce_bombs",
+            "stop_when_ce_grid_full",
+            "locker_threshold",
+            "mark_threshold",
+        ):
+            _copy_option(payload, equipment_enhance_payload, key, key)
+        if auto_store_ce_bombs:
+            equipment_enhance_payload.setdefault("lock_full_ce_bombs", True)
+            equipment_enhance_payload.setdefault("mark_full_ce_bombs", True)
+            equipment_enhance_payload.setdefault("stop_when_ce_grid_full", True)
+        servant_enhance_payload = dict(overflow_payload)
+        servant_enhance_payload["target"] = "servant"
+        for key in (
+            "selection_mode",
+            "material_select_mode",
+            "select_base_first",
+            "max_batches",
+            "target_level",
+            "level_threshold",
+            "servant_target",
+            "servant_targets",
+            "servant_target_threshold",
+            "max_base_scrolls",
+            "auto_limit_break",
+        ):
+            _copy_option(payload, servant_enhance_payload, key, key)
         _copy_option(
             payload,
             navigation_payload,
@@ -226,6 +264,7 @@ def create_expball_run_handler(
         summons = 0
         overflow_cycles = 0
         storage_full = False
+        servant_targets_completed = False
         locked_cards: list[dict[str, Any]] = []
         stages: list[dict[str, Any]] = []
 
@@ -257,6 +296,9 @@ def create_expball_run_handler(
                 "locked_cards": list(locked_cards),
                 "locked_count": len(locked_cards),
                 "overflow_action": overflow_action,
+                "overflow_actions": list(overflow_actions),
+                "servant_enhance_interval": servant_enhance_interval,
+                "auto_store_ce_bombs": auto_store_ce_bombs,
                 "overflow_cycles": overflow_cycles,
                 "storage_full": storage_full,
                 "stages": stages,
@@ -311,7 +353,7 @@ def create_expball_run_handler(
                     stopped=True,
                     reason=summon_reason,
                 )
-            if overflow_action == "stop":
+            if not overflow_actions or overflow_actions == ("stop",):
                 return finish(
                     completed=False,
                     stopped=True,
@@ -323,113 +365,322 @@ def create_expball_run_handler(
                     stopped=True,
                     reason="overflow_limit",
                 )
-            if overflow_action == "storage_then_sell":
-                if not storage_full:
-                    store_nav_payload = dict(navigation_payload)
-                    store_nav_payload["destination"] = "storage"
-                    store_nav_result = navigate_handler(
+
+            for action in overflow_actions:
+                if action == "storage_then_sell":
+                    if not storage_full:
+                        store_nav_payload = dict(navigation_payload)
+                        store_nav_payload["destination"] = "storage"
+                        store_nav_result = navigate_handler(
+                            context,
+                            store_nav_payload,
+                        )
+                        record("navigate_storage", store_nav_result)
+                        if store_nav_result.get("completed") is not True:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason=str(
+                                    store_nav_result.get("reason")
+                                    or "navigation_stopped"
+                                ),
+                            )
+                        storage_result = storage_handler(
+                            context,
+                            dict(storage_overflow_payload),
+                        )
+                        record("storage", storage_result)
+                        if storage_result.get("completed") is True:
+                            continue
+                        if storage_result.get("reason") != "storage_full":
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason=str(
+                                    storage_result.get("reason")
+                                    or "storage_stopped"
+                                ),
+                            )
+                        storage_full = True
+
+                    sell_nav_payload = dict(navigation_payload)
+                    sell_nav_payload["destination"] = "sell"
+                    sell_nav_result = navigate_handler(
                         context,
-                        store_nav_payload,
+                        sell_nav_payload,
                     )
-                    record("navigate_storage", store_nav_result)
-                    if store_nav_result.get("completed") is not True:
+                    record("navigate_sell", sell_nav_result)
+                    if sell_nav_result.get("completed") is not True:
                         return finish(
                             completed=False,
                             stopped=True,
                             reason=str(
-                                store_nav_result.get("reason")
+                                sell_nav_result.get("reason")
                                 or "navigation_stopped"
                             ),
                         )
-                    storage_result = storage_handler(
+                    sell_result = sell_handler(
                         context,
-                        dict(storage_overflow_payload),
+                        dict(sell_overflow_payload),
                     )
-                    record("storage", storage_result)
-                    if storage_result.get("completed") is True:
-                        overflow_cycles += 1
-                        continue
-                    if storage_result.get("reason") != "storage_full":
+                    record("sell", sell_result)
+                    if sell_result.get("completed") is not True:
                         return finish(
                             completed=False,
                             stopped=True,
                             reason=str(
-                                storage_result.get("reason")
+                                sell_result.get("reason") or "sell_stopped"
+                            ),
+                        )
+                    continue
+
+                if action == "storage":
+                    if storage_full:
+                        if len(overflow_actions) > 1:
+                            continue
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="storage_full",
+                        )
+                    overflow_nav_payload = dict(navigation_payload)
+                    overflow_nav_payload["destination"] = "storage"
+                    overflow_nav_result = navigate_handler(
+                        context,
+                        overflow_nav_payload,
+                    )
+                    record("navigate_storage", overflow_nav_result)
+                    if overflow_nav_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_nav_result.get("reason")
+                                or "navigation_stopped"
+                            ),
+                        )
+                    overflow_result = storage_handler(
+                        context,
+                        dict(storage_overflow_payload),
+                    )
+                    record("storage", overflow_result)
+                    if overflow_result.get("reason") == "storage_full":
+                        storage_full = True
+                        if len(overflow_actions) > 1:
+                            continue
+                    if overflow_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_result.get("reason")
                                 or "storage_stopped"
                             ),
                         )
-                    storage_full = True
+                    continue
 
-                sell_nav_payload = dict(navigation_payload)
-                sell_nav_payload["destination"] = "sell"
-                sell_nav_result = navigate_handler(context, sell_nav_payload)
-                record("navigate_sell", sell_nav_result)
-                if sell_nav_result.get("completed") is not True:
-                    return finish(
-                        completed=False,
-                        stopped=True,
-                        reason=str(
-                            sell_nav_result.get("reason")
-                            or "navigation_stopped"
-                        ),
+                if action == "sell":
+                    overflow_nav_payload = dict(navigation_payload)
+                    overflow_nav_payload["destination"] = "sell"
+                    overflow_nav_result = navigate_handler(
+                        context,
+                        overflow_nav_payload,
                     )
-                sell_result = sell_handler(
-                    context,
-                    dict(sell_overflow_payload),
-                )
-                record("sell", sell_result)
-                if sell_result.get("completed") is not True:
-                    return finish(
-                        completed=False,
-                        stopped=True,
-                        reason=str(
-                            sell_result.get("reason") or "sell_stopped"
-                        ),
+                    record("navigate_sell", overflow_nav_result)
+                    if overflow_nav_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_nav_result.get("reason")
+                                or "navigation_stopped"
+                            ),
+                        )
+                    overflow_result = sell_handler(
+                        context,
+                        dict(sell_overflow_payload),
                     )
-                overflow_cycles += 1
-                continue
+                    record("sell", overflow_result)
+                    if overflow_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_result.get("reason") or "sell_stopped"
+                            ),
+                        )
+                    continue
 
-            overflow_nav_payload = dict(navigation_payload)
-            overflow_nav_payload["destination"] = overflow_action
-            overflow_nav_result = navigate_handler(context, overflow_nav_payload)
-            record(f"navigate_{overflow_action}", overflow_nav_result)
-            if overflow_nav_result.get("completed") is not True:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason=str(
-                        overflow_nav_result.get("reason")
-                        or "navigation_stopped"
-                    ),
-                )
-            if overflow_action == "storage":
-                overflow_handler = storage_handler
-            elif overflow_action == "sell":
-                overflow_handler = sell_handler
-            else:
-                overflow_handler = enhance_handler
-            overflow_result = overflow_handler(context, dict(overflow_payload))
-            record(overflow_action, overflow_result)
-            if overflow_result.get("reason") == "storage_full":
-                storage_full = True
-            if overflow_result.get("completed") is not True:
-                return finish(
-                    completed=False,
-                    stopped=True,
-                    reason=str(
-                        overflow_result.get("reason")
-                        or f"{overflow_action}_stopped"
-                    ),
-                )
-            if (
-                overflow_action == "servant_enhancement"
-                and overflow_result.get("reason") == "target_level_reached"
-            ):
-                return finish(
-                    completed=True,
-                    stopped=False,
-                    reason="target_level_reached",
-                )
+                if action == "equipment_enhancement":
+                    overflow_nav_payload = dict(navigation_payload)
+                    overflow_nav_payload["destination"] = (
+                        "equipment_enhancement"
+                    )
+                    overflow_nav_result = navigate_handler(
+                        context,
+                        overflow_nav_payload,
+                    )
+                    record(
+                        "navigate_equipment_enhancement",
+                        overflow_nav_result,
+                    )
+                    if overflow_nav_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_nav_result.get("reason")
+                                or "navigation_stopped"
+                            ),
+                        )
+                    overflow_result = enhance_handler(
+                        context,
+                        dict(equipment_enhance_payload),
+                    )
+                    record("equipment_enhancement", overflow_result)
+                    if overflow_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_result.get("reason")
+                                or "equipment_enhancement_stopped"
+                            ),
+                        )
+                    grid_full = (
+                        overflow_result.get("reason") == "ce_bomb_grid_full"
+                    )
+                    has_locked_bombs = bool(
+                        overflow_result.get("locked_ce_bomb_slots")
+                        or overflow_result.get("marked_ce_bomb_slots")
+                    )
+                    if not storage_full and (
+                        grid_full
+                        or (auto_store_ce_bombs and has_locked_bombs)
+                    ):
+                        store_nav_payload = dict(navigation_payload)
+                        store_nav_payload["destination"] = "storage"
+                        store_nav_result = navigate_handler(
+                            context,
+                            store_nav_payload,
+                        )
+                        record("navigate_storage", store_nav_result)
+                        if store_nav_result.get("completed") is not True:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason=str(
+                                    store_nav_result.get("reason")
+                                    or "navigation_stopped"
+                                ),
+                            )
+                        ce_store_result = storage_handler(
+                            context,
+                            dict(ce_bomb_storage_payload),
+                        )
+                        record("storage", ce_store_result)
+                        if ce_store_result.get("reason") == "storage_full":
+                            storage_full = True
+                        elif ce_store_result.get("completed") is not True:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason=str(
+                                    ce_store_result.get("reason")
+                                    or "storage_stopped"
+                                ),
+                            )
+                        elif grid_full:
+                            resume_nav_payload = dict(navigation_payload)
+                            resume_nav_payload["destination"] = (
+                                "equipment_enhancement"
+                            )
+                            resume_nav_result = navigate_handler(
+                                context,
+                                resume_nav_payload,
+                            )
+                            record(
+                                "navigate_equipment_enhancement",
+                                resume_nav_result,
+                            )
+                            if resume_nav_result.get("completed") is not True:
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason=str(
+                                        resume_nav_result.get("reason")
+                                        or "navigation_stopped"
+                                    ),
+                                )
+                            resume_payload = dict(equipment_enhance_payload)
+                            resume_payload["stop_when_ce_grid_full"] = False
+                            resume_result = enhance_handler(
+                                context,
+                                resume_payload,
+                            )
+                            record("equipment_enhancement", resume_result)
+                            if resume_result.get("completed") is not True:
+                                return finish(
+                                    completed=False,
+                                    stopped=True,
+                                    reason=str(
+                                        resume_result.get("reason")
+                                        or "equipment_enhancement_stopped"
+                                    ),
+                                )
+                    continue
+
+                if action == "servant_enhancement":
+                    if servant_targets_completed:
+                        continue
+                    if (
+                        "equipment_enhancement" in overflow_actions
+                        and servant_enhance_interval > 1
+                        and overflow_cycles % servant_enhance_interval != 0
+                    ):
+                        continue
+                    overflow_nav_payload = dict(navigation_payload)
+                    overflow_nav_payload["destination"] = "servant_enhancement"
+                    overflow_nav_result = navigate_handler(
+                        context,
+                        overflow_nav_payload,
+                    )
+                    record(
+                        "navigate_servant_enhancement",
+                        overflow_nav_result,
+                    )
+                    if overflow_nav_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_nav_result.get("reason")
+                                or "navigation_stopped"
+                            ),
+                        )
+                    overflow_result = enhance_handler(
+                        context,
+                        dict(servant_enhance_payload),
+                    )
+                    record("servant_enhancement", overflow_result)
+                    if overflow_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                overflow_result.get("reason")
+                                or "servant_enhancement_stopped"
+                            ),
+                        )
+                    if overflow_result.get("reason") == "target_level_reached":
+                        servant_targets_completed = True
+                        if len(overflow_actions) == 1:
+                            return finish(
+                                completed=True,
+                                stopped=False,
+                                reason="target_level_reached",
+                            )
+
             overflow_cycles += 1
 
         return finish(
@@ -490,6 +741,57 @@ def _copy_option(
 ) -> None:
     if source_key in source:
         destination[destination_key] = source[source_key]
+
+
+def _parse_overflow_actions(
+    payload: dict[str, Any],
+    store_first: bool,
+) -> tuple[str, ...]:
+    raw_list = payload.get("overflow_actions")
+    if raw_list is not None:
+        if isinstance(raw_list, str):
+            items = [
+                part.strip().lower()
+                for part in raw_list.split(",")
+                if part.strip()
+            ]
+        elif isinstance(raw_list, (list, tuple)):
+            items = []
+            for item in raw_list:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError(
+                        "overflow_actions entries must be non-empty strings."
+                    )
+                items.append(item.strip().lower())
+        else:
+            raise ValueError(
+                "overflow_actions must be a list or comma-separated string."
+            )
+        deduped: list[str] = []
+        for item in items:
+            if item not in _OVERFLOW_ACTIONS:
+                raise ValueError(
+                    "overflow_actions entries must be stop, storage, sell, "
+                    "storage_then_sell, equipment_enhancement, or servant_enhancement."
+                )
+            if item == "stop":
+                continue
+            if item not in deduped:
+                deduped.append(item)
+        if store_first and "sell" in deduped and "storage" not in deduped:
+            sell_idx = deduped.index("sell")
+            deduped[sell_idx] = "storage_then_sell"
+        return tuple(deduped) if deduped else ("stop",)
+
+    overflow_action = str(payload.get("overflow_action") or "stop").strip().lower()
+    if store_first and overflow_action in {"stop", "storage", "sell"}:
+        overflow_action = "storage_then_sell"
+    if overflow_action not in _OVERFLOW_ACTIONS:
+        raise ValueError(
+            "overflow_action must be stop, storage, sell, "
+            "storage_then_sell, equipment_enhancement, or servant_enhancement."
+        )
+    return (overflow_action,)
 
 
 def _parse_card_stars(
