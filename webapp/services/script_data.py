@@ -21,6 +21,7 @@ VALID_SERVERS = {"CH", "CNTW", "JP"}
 TURN_FIELD_RE = re.compile(r"^round(?P<round>\d+)_turn(?P<turn>\d+)_(skill|np|strategy|condition|replace)$")
 SETTING_STRATEGY_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_strategy|extraStrategy)$")
 SETTING_SKILL_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_skill|extraSkill)$")
+SETTING_REPLACE_FIELD_RE = re.compile(r"^round\d+_turn\d+_replace$")
 ROUND_NUMBER_RE = re.compile(r"^round(?P<round>\d+)_")
 SPECIAL_KEY_NAME_RE = re.compile(
     r"^W(?P<W>-?\d+)H(?P<H>-?\d+)"
@@ -461,6 +462,8 @@ class ScriptDataService:
         for field, value in config.items():
             if SETTING_STRATEGY_FIELD_RE.match(field) and value is not None:
                 errors.extend(self._validate_strategy_entries(value, field, tagged=False))
+            elif SETTING_REPLACE_FIELD_RE.match(field) and value is not None:
+                errors.extend(self._validate_turn_replace(value, field))
 
         if config.get("stuckRestart"):
             stuck_interval = config.get("checkStuckInterval", 30)
@@ -916,7 +919,7 @@ class ScriptDataService:
         replace: Any,
     ) -> list[dict[str, Any]]:
         actions: list[dict[str, Any]] = []
-        if replace:
+        if isinstance(replace, dict) and replace:
             actions.append({"type": "replace", "replacements": replace})
         actions.extend({"type": "skill", "command": skill} for skill in skills)
         actions.extend({"type": "np", "servant": np} for np in nps)
@@ -927,6 +930,39 @@ class ScriptDataService:
     @staticmethod
     def _list_value(value: Any) -> list[Any]:
         return value if isinstance(value, list) else []
+
+    def _validate_turn_replace(self, value: Any, field: str) -> list[dict[str, str]]:
+        if not isinstance(value, dict):
+            return [
+                self._issue(
+                    "invalid_turn_replace",
+                    field,
+                    "Turn replacement must be a JSON object mapping slots 1 through 6 to source slots 1 through 6 or null.",
+                )
+            ]
+        errors: list[dict[str, str]] = []
+        for destination, source in value.items():
+            slot_field = f"{field}.{destination}" if isinstance(destination, str) else field
+            if not isinstance(destination, str) or destination not in {"1", "2", "3", "4", "5", "6"}:
+                errors.append(
+                    self._issue(
+                        "invalid_turn_replace",
+                        slot_field,
+                        "Turn replacement destination slots must be strings '1' through '6'.",
+                    )
+                )
+                continue
+            if source is not None and (
+                isinstance(source, bool) or not isinstance(source, int) or not 1 <= source <= 6
+            ):
+                errors.append(
+                    self._issue(
+                        "invalid_turn_replace",
+                        slot_field,
+                        "Turn replacement source slots must be integers 1 through 6 or null.",
+                    )
+                )
+        return errors
 
     def _validate_strategy_file(self, entries: Any) -> dict[str, Any]:
         errors: list[dict[str, str]] = []

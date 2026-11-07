@@ -1217,7 +1217,8 @@ select:disabled {
   font-weight: 600;
 }
 
-#preset-turn-skill-count {
+#preset-turn-skill-count,
+#preset-turn-replace-count {
   margin-left: 6px;
   font-weight: 400;
 }
@@ -1426,12 +1427,25 @@ select:disabled {
   font-weight: 600;
 }
 
-.turn-np-fields .icon-button {
+.turn-np-fields .icon-button,
+.turn-replace-fields .icon-button {
   width: 40px;
   height: 34px;
   display: inline-grid;
   place-items: center;
   padding: 0;
+}
+
+.turn-replace-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+#preset-turn-replace-status {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 760px) {

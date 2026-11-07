@@ -743,3 +743,34 @@ def test_lists_servants_and_masters(tmp_path: Path):
             {"name": "Chaldea", "sn": 7, "skills": ["Heal"], "skill_types": [1]},
         ],
     }
+
+
+@pytest.mark.parametrize(
+    "replace_value",
+    [
+        [],
+        "invalid",
+        {"0": 4},
+        {"7": 4},
+        {"1": 0},
+        {"1": 7},
+        {"1": True},
+        {"1": "4"},
+    ],
+)
+def test_setting_validation_rejects_invalid_turn_replace(tmp_path: Path, replace_value):
+    _write_json(tmp_path / "servant_info_CH.json", {})
+    service = ScriptDataService(tmp_path)
+    with pytest.raises(AppError) as excinfo:
+        service.save_setting(
+            "invalid-replace",
+            {
+                "server": "CH",
+                "round1_turns": 1,
+                "round1_turn0_replace": replace_value,
+            },
+        )
+    assert excinfo.value.code == ErrorCode.DATA_FILE_INVALID
+    errors = excinfo.value.details["validation"]["errors"]
+    assert any(issue["code"] == "invalid_turn_replace" for issue in errors)
+

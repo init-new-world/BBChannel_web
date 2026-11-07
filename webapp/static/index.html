@@ -765,6 +765,19 @@
               <button id="clear-turn-nps" class="icon-button" type="button" title="Clear NP order" aria-label="Clear NP order"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
               <span id="preset-turn-np-status" class="preset-error" role="status" hidden></span>
             </div>
+            <details id="preset-turn-replace" class="preset-turn-skills preset-turn-replace" hidden>
+              <summary>Post-Turn Replacements <span id="preset-turn-replace-count"></span></summary>
+              <div class="turn-replace-fields">
+                <label class="field-stack"><span>Slot 1</span><select class="field" data-turn-replace-slot="1" aria-label="Slot 1 replacement"></select></label>
+                <label class="field-stack"><span>Slot 2</span><select class="field" data-turn-replace-slot="2" aria-label="Slot 2 replacement"></select></label>
+                <label class="field-stack"><span>Slot 3</span><select class="field" data-turn-replace-slot="3" aria-label="Slot 3 replacement"></select></label>
+                <label class="field-stack"><span>Slot 4</span><select class="field" data-turn-replace-slot="4" aria-label="Slot 4 replacement"></select></label>
+                <label class="field-stack"><span>Slot 5</span><select class="field" data-turn-replace-slot="5" aria-label="Slot 5 replacement"></select></label>
+                <label class="field-stack"><span>Slot 6</span><select class="field" data-turn-replace-slot="6" aria-label="Slot 6 replacement"></select></label>
+                <button id="clear-turn-replace" class="icon-button" type="button" title="Clear post-turn replacements" aria-label="Clear post-turn replacements"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+                <span id="preset-turn-replace-status" class="preset-error" role="status" hidden></span>
+              </div>
+            </details>
             <div class="turn-strategy-actions">
               <span id="preset-turn-strategy-status" role="status">No turn selected</span>
               <button id="apply-turn-strategy" class="ghost-button" type="button"><img src="/icons/arrow-right.svg" width="16" height="16" alt=""> Apply Preset</button>
