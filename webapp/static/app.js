@@ -213,6 +213,7 @@ const els = {
   expballStorageTarget: document.querySelector("#expball-storage-target"),
   expballSellTarget: document.querySelector("#expball-sell-target"),
   expballOverflowAction: document.querySelector("#expball-overflow-action"),
+  expballOverflowActions: document.querySelector("#expball-overflow-actions"),
   expballEnhanceTarget: document.querySelector("#expball-enhance-target"),
   expballMaterialSelectMode: document.querySelector("#expball-material-select-mode"),
   expballServantTarget: document.querySelector("#expball-servant-target"),
@@ -220,6 +221,9 @@ const els = {
   expballMaxBatches: document.querySelector("#expball-max-batches"),
   expballAutoLimitBreak: document.querySelector("#expball-auto-limit-break"),
   expballLockCeBombs: document.querySelector("#expball-lock-ce-bombs"),
+  expballAutoStoreCeBombs: document.querySelector("#expball-auto-store-ce-bombs"),
+  expballEat3Star: document.querySelector("#expball-eat-3star"),
+  expballEat4Star: document.querySelector("#expball-eat-4star"),
   expballLockGoldServants: document.querySelector("#expball-lock-gold-servants"),
   expballLockInscribedCc: document.querySelector("#expball-lock-inscribed-cc"),
   expballAllowQpFull: document.querySelector("#expball-allow-qp-full"),
@@ -3201,6 +3205,13 @@ function parseExpballServantTargets() {
     .filter(Boolean);
 }
 
+function parseExpballOverflowActions() {
+  return String(els.expballOverflowActions?.value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function parseExpballLockTargets() {
   return String(els.expballLockTargets?.value || "")
     .split(",")
@@ -3414,8 +3425,11 @@ async function runExpballEnhance() {
       auto_limit_break: els.expballAutoLimitBreak.checked,
       ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
     } : {
+      eat_3star: Boolean(els.expballEat3Star?.checked),
+      eat_4star: Boolean(els.expballEat4Star?.checked),
       lock_full_ce_bombs: lockCeBombs,
       mark_full_ce_bombs: lockCeBombs,
+      stop_when_ce_grid_full: Boolean(els.expballAutoStoreCeBombs?.checked),
     }),
     ...(stars.length ? { stars } : {}),
   });
@@ -3428,15 +3442,19 @@ async function runExpballSummon() {
   }
   const stars = selectedExpballStars();
   const overflowAction = els.expballOverflowAction.value || "stop";
+  const overflowActions = parseExpballOverflowActions();
+  const activeOverflows = overflowActions.length ? overflowActions : [overflowAction];
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
-  const usesStorage = ["storage", "storage_then_sell"].includes(overflowAction);
-  const usesSell = ["sell", "storage_then_sell"].includes(overflowAction);
-  const isEnhancementOverflow = ["equipment_enhancement", "servant_enhancement"].includes(overflowAction);
+  const usesStorage = activeOverflows.some((item) => ["storage", "storage_then_sell"].includes(item));
+  const usesSell = activeOverflows.some((item) => ["sell", "storage_then_sell"].includes(item));
+  const usesEquipmentEnhance = activeOverflows.includes("equipment_enhancement");
+  const usesServantEnhance = activeOverflows.includes("servant_enhancement");
+  const isEnhancementOverflow = usesEquipmentEnhance || usesServantEnhance;
   const servantTargets = parseExpballServantTargets();
   const lockTargets = parseExpballLockTargets();
   const lockCeBombs = Boolean(
-    overflowAction === "equipment_enhancement" && els.expballLockCeBombs.checked,
+    usesEquipmentEnhance && els.expballLockCeBombs.checked,
   );
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
@@ -3444,6 +3462,7 @@ async function runExpballSummon() {
     banner_direction: els.expballBannerDirection?.value || "right",
     draw_100: Boolean(els.expballDraw100?.checked),
     overflow_action: overflowAction,
+    ...(overflowActions.length ? { overflow_actions: overflowActions } : {}),
     lock_lily: Boolean(els.expballLockLily?.checked),
     lock_habe: Boolean(els.expballLockHabe?.checked),
     lock_hakuno: Boolean(els.expballLockHakuno?.checked),
@@ -3460,16 +3479,18 @@ async function runExpballSummon() {
     ...(isEnhancementOverflow ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
       max_batches: readNumber(els.expballMaxBatches),
-      ...(overflowAction === "servant_enhancement"
-        ? {
-          target_level: readNumber(els.expballTargetLevel),
-          auto_limit_break: els.expballAutoLimitBreak.checked,
-          ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
-        }
-        : {
-          lock_full_ce_bombs: lockCeBombs,
-          mark_full_ce_bombs: lockCeBombs,
-        }),
+      ...(usesServantEnhance ? {
+        target_level: readNumber(els.expballTargetLevel),
+        auto_limit_break: els.expballAutoLimitBreak.checked,
+        ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
+      } : {}),
+      ...(usesEquipmentEnhance ? {
+        eat_3star: Boolean(els.expballEat3Star?.checked),
+        eat_4star: Boolean(els.expballEat4Star?.checked),
+        lock_full_ce_bombs: lockCeBombs,
+        mark_full_ce_bombs: lockCeBombs,
+        auto_store_ce_bombs: Boolean(els.expballAutoStoreCeBombs?.checked),
+      } : {}),
     } : {}),
   });
 }
@@ -4305,6 +4326,7 @@ function updateControls() {
   els.expballStorageTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballSellTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
+  els.expballOverflowActions.disabled = !supportsExpball || hasRunningJob;
   els.expballEnhanceTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballMaterialSelectMode.disabled = !supportsExpball || hasRunningJob;
   els.expballServantTarget.disabled = !supportsExpball || hasRunningJob;
@@ -4312,6 +4334,9 @@ function updateControls() {
   els.expballMaxBatches.disabled = !supportsExpball || hasRunningJob;
   els.expballAutoLimitBreak.disabled = !supportsExpball || hasRunningJob;
   els.expballLockCeBombs.disabled = !supportsExpball || hasRunningJob;
+  els.expballAutoStoreCeBombs.disabled = !supportsExpball || hasRunningJob;
+  els.expballEat3Star.disabled = !supportsExpball || hasRunningJob;
+  els.expballEat4Star.disabled = !supportsExpball || hasRunningJob;
   els.expballLockGoldServants.disabled = !supportsExpball || hasRunningJob;
   els.expballLockInscribedCc.disabled = !supportsExpball || hasRunningJob;
   els.expballAllowQpFull.disabled = !supportsExpball || hasRunningJob;

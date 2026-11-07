@@ -128,6 +128,10 @@ def test_operator_console_references_api_controls():
     assert 'id="expball-max-batches"' in index
     assert 'id="expball-auto-limit-break"' in index
     assert 'id="expball-lock-ce-bombs"' in index
+    assert 'id="expball-auto-store-ce-bombs"' in index
+    assert 'id="expball-eat-3star"' in index
+    assert 'id="expball-eat-4star"' in index
+    assert 'id="expball-overflow-actions"' in index
     assert 'id="expball-lock-gold-servants"' in index
     assert 'id="expball-lock-inscribed-cc"' in index
     assert 'id="expball-allow-qp-full"' in index
