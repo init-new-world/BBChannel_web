@@ -98,7 +98,13 @@ def test_operator_console_references_api_controls():
     assert 'id="inspect-lottery"' in index
     assert 'id="inspect-lottery-stacks"' in index
     assert 'id="run-lottery"' in index
+    assert 'id="lottery-draw-pool"' in index
+    assert 'id="lottery-tidy-giftbox"' in index
+    assert 'id="lottery-long-touch-draw"' in index
     assert 'id="lottery-pay-slot"' in index
+    assert 'id="lottery-onekey-3"' in index
+    assert 'id="lottery-onekey-4"' in index
+    assert 'id="lottery-onekey-5"' in index
     assert 'id="lottery-star-3"' in index
     assert 'id="lottery-star-4"' in index
     assert 'id="lottery-star-5"' in index
@@ -107,6 +113,7 @@ def test_operator_console_references_api_controls():
     assert 'id="lottery-keep-5"' in index
     assert 'id="lottery-first-round-count"' in index
     assert 'id="lottery-overflow-action"' in index
+    assert 'id="lottery-overflow-actions"' in index
     assert '<option value="storage_then_sell">Store then sell</option>' in index
     assert 'id="inspect-expball"' in index
     assert 'id="inspect-expball-grid"' in index
@@ -233,11 +240,16 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.lottery.inspect"' in script
     assert 'enqueueJob("event.lottery.inspect-giftbox-stacks"' in script
     assert 'enqueueJob("event.lottery.run"' in script
+    assert "draw_pool: drawPool" in script
+    assert "tidy_giftbox: tidyGiftbox" in script
+    assert "long_touch_draw: Boolean(els.lotteryLongTouchDraw?.checked)" in script
     assert "pay_slot: readNumber(els.lotteryPaySlot)" in script
-    assert "stars: selectedLotteryStars()" in script
+    assert "...(stars.length ? { stars } : {})" in script
+    assert "...(oneKeyStars.length ? { one_key_stars: oneKeyStars } : {})" in script
     assert "first_round_count: Boolean(els.lotteryFirstRoundCount?.checked)" in script
     assert "parseLotteryMaxStackCounts()" in script
     assert "overflow_action: overflowAction" in script
+    assert "...(overflowActions.length ? { overflow_actions: overflowActions } : {})" in script
     assert "selectedExpballStars()" in script
     assert 'enqueueJob("event.expball.inspect"' in script
     assert 'enqueueJob("event.expball.inspect-storage-grid"' in script

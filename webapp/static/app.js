@@ -191,7 +191,13 @@ const els = {
   inspectLottery: document.querySelector("#inspect-lottery"),
   inspectLotteryStacks: document.querySelector("#inspect-lottery-stacks"),
   runLottery: document.querySelector("#run-lottery"),
+  lotteryDrawPool: document.querySelector("#lottery-draw-pool"),
+  lotteryTidyGiftbox: document.querySelector("#lottery-tidy-giftbox"),
+  lotteryLongTouchDraw: document.querySelector("#lottery-long-touch-draw"),
   lotteryPaySlot: document.querySelector("#lottery-pay-slot"),
+  lotteryOneKey3: document.querySelector("#lottery-onekey-3"),
+  lotteryOneKey4: document.querySelector("#lottery-onekey-4"),
+  lotteryOneKey5: document.querySelector("#lottery-onekey-5"),
   lotteryStar3: document.querySelector("#lottery-star-3"),
   lotteryStar4: document.querySelector("#lottery-star-4"),
   lotteryStar5: document.querySelector("#lottery-star-5"),
@@ -200,6 +206,7 @@ const els = {
   lotteryKeep5: document.querySelector("#lottery-keep-5"),
   lotteryFirstRoundCount: document.querySelector("#lottery-first-round-count"),
   lotteryOverflowAction: document.querySelector("#lottery-overflow-action"),
+  lotteryOverflowActions: document.querySelector("#lottery-overflow-actions"),
   inspectExpball: document.querySelector("#inspect-expball"),
   expballDestination: document.querySelector("#expball-destination"),
   navigateExpball: document.querySelector("#navigate-expball"),
@@ -563,10 +570,17 @@ function bindEvents() {
   els.inspectLottery.addEventListener("click", inspectLottery);
   els.inspectLotteryStacks.addEventListener("click", inspectLotteryStacks);
   els.runLottery.addEventListener("click", runLottery);
+  els.lotteryDrawPool.addEventListener("change", updateControls);
+  els.lotteryTidyGiftbox.addEventListener("change", updateControls);
+  els.lotteryLongTouchDraw.addEventListener("change", updateControls);
+  els.lotteryOneKey3.addEventListener("change", updateControls);
+  els.lotteryOneKey4.addEventListener("change", updateControls);
+  els.lotteryOneKey5.addEventListener("change", updateControls);
   els.lotteryStar3.addEventListener("change", updateControls);
   els.lotteryStar4.addEventListener("change", updateControls);
   els.lotteryStar5.addEventListener("change", updateControls);
   els.lotteryOverflowAction.addEventListener("change", updateControls);
+  els.lotteryOverflowActions.addEventListener("input", updateControls);
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.navigateExpball.addEventListener("click", navigateExpball);
   els.inspectExpballGrid.addEventListener("click", inspectExpballGrid);
@@ -3170,6 +3184,23 @@ function selectedLotteryStars() {
     .map(([star]) => star);
 }
 
+function selectedLotteryOneKeyStars() {
+  return [
+    [3, els.lotteryOneKey3],
+    [4, els.lotteryOneKey4],
+    [5, els.lotteryOneKey5],
+  ]
+    .filter(([, input]) => input?.checked)
+    .map(([star]) => star);
+}
+
+function parseLotteryOverflowActions() {
+  return String(els.lotteryOverflowActions?.value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function parseLotteryMaxStackCounts() {
   const counts = {};
   for (const [star, input] of [
@@ -3265,23 +3296,38 @@ async function inspectLotteryStacks() {
 
 async function runLottery() {
   const settingName = els.settingSelect.value;
+  const drawPool = Boolean(els.lotteryDrawPool?.checked);
+  const tidyGiftbox = Boolean(els.lotteryTidyGiftbox?.checked);
   const stars = selectedLotteryStars();
-  if (!settingName || stars.length === 0) {
+  const oneKeyStars = selectedLotteryOneKeyStars();
+  if (
+    !settingName
+    || (!drawPool && !tidyGiftbox)
+    || (tidyGiftbox && stars.length === 0 && oneKeyStars.length === 0)
+  ) {
     return;
   }
   const overflowAction = els.lotteryOverflowAction.value || "stop";
+  const overflowActions = parseLotteryOverflowActions();
+  const activeOverflows = overflowActions.length ? overflowActions : [overflowAction];
   const overflowStars = selectedExpballStars();
   const maxStackCounts = parseLotteryMaxStackCounts();
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
-  const usesStorage = ["storage", "storage_then_sell"].includes(overflowAction);
-  const usesSell = ["sell", "storage_then_sell"].includes(overflowAction);
+  const usesStorage = activeOverflows.some((item) => ["storage", "storage_then_sell"].includes(item));
+  const usesSell = activeOverflows.some((item) => ["sell", "storage_then_sell"].includes(item));
+  const usesServantEnhance = activeOverflows.includes("servant_enhancement");
   await enqueueJob("event.lottery.run", {
     setting_name: settingName,
+    draw_pool: drawPool,
+    tidy_giftbox: tidyGiftbox,
+    long_touch_draw: Boolean(els.lotteryLongTouchDraw?.checked),
     pay_slot: readNumber(els.lotteryPaySlot),
-    stars: selectedLotteryStars(),
+    ...(stars.length ? { stars } : {}),
+    ...(oneKeyStars.length ? { one_key_stars: oneKeyStars } : {}),
     first_round_count: Boolean(els.lotteryFirstRoundCount?.checked),
     overflow_action: overflowAction,
+    ...(overflowActions.length ? { overflow_actions: overflowActions } : {}),
     ...(Object.keys(maxStackCounts).length ? { max_stack_counts: maxStackCounts } : {}),
     ...(overflowStars.length ? { overflow_stars: overflowStars } : {}),
     ...(usesStorage ? { storage_target: storageTarget } : {}),
@@ -3291,7 +3337,7 @@ async function runLottery() {
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
       allow_qp_full: Boolean(els.expballAllowQpFull?.checked),
     } : {}),
-    ...(overflowAction === "servant_enhancement" ? {
+    ...(usesServantEnhance ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
       max_batches: readNumber(els.expballMaxBatches),
       target_level: readNumber(els.expballTargetLevel),
@@ -4272,6 +4318,12 @@ function updateControls() {
     || !supportsDigdig
     || !hasDigdigMode
     || hasRunningJob;
+  const hasLotteryMode = Boolean(
+    els.lotteryDrawPool?.checked || els.lotteryTidyGiftbox?.checked,
+  );
+  const hasLotteryTidyStars = Boolean(
+    hasLotteryStars || selectedLotteryOneKeyStars().length > 0,
+  );
   els.inspectLottery.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsLottery
@@ -4284,9 +4336,16 @@ function updateControls() {
   els.runLottery.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsLottery
-    || !hasLotteryStars
+    || !hasLotteryMode
+    || (Boolean(els.lotteryTidyGiftbox?.checked) && !hasLotteryTidyStars)
     || hasRunningJob;
+  els.lotteryDrawPool.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryTidyGiftbox.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryLongTouchDraw.disabled = !supportsLottery || hasRunningJob;
   els.lotteryPaySlot.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOneKey3.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOneKey4.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOneKey5.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar3.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar4.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar5.disabled = !supportsLottery || hasRunningJob;
@@ -4295,6 +4354,7 @@ function updateControls() {
   els.lotteryKeep5.disabled = !supportsLottery || hasRunningJob;
   els.lotteryFirstRoundCount.disabled = !supportsLottery || hasRunningJob;
   els.lotteryOverflowAction.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOverflowActions.disabled = !supportsLottery || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball

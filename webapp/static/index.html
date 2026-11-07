@@ -251,6 +251,18 @@
             <button id="run-digdig" class="primary-button wide" type="button">Run Auto Dig</button>
             <div class="panel-divider"></div>
             <div class="section-label">Unlimited Lottery</div>
+            <label class="toggle-row">
+              <input id="lottery-draw-pool" type="checkbox" checked>
+              <span>Draw pool</span>
+            </label>
+            <label class="toggle-row">
+              <input id="lottery-tidy-giftbox" type="checkbox" checked>
+              <span>Tidy giftbox</span>
+            </label>
+            <label class="toggle-row">
+              <input id="lottery-long-touch-draw" type="checkbox">
+              <span>Long-touch draw</span>
+            </label>
             <label class="input-row">
               <span>Reward slot</span>
               <select id="lottery-pay-slot" class="field" aria-label="Lottery reward slot">
@@ -259,6 +271,11 @@
                 <option value="2">Reward 3</option>
               </select>
             </label>
+            <div class="inline-toggles" role="group" aria-label="One-key gift box EXP rarity">
+              <label><input id="lottery-onekey-3" type="checkbox"><span>1-key 3★</span></label>
+              <label><input id="lottery-onekey-4" type="checkbox"><span>1-key 4★</span></label>
+              <label><input id="lottery-onekey-5" type="checkbox"><span>1-key 5★</span></label>
+            </div>
             <div class="inline-toggles" role="group" aria-label="Gift box EXP rarity">
               <label><input id="lottery-star-3" type="checkbox" checked><span>3 star</span></label>
               <label><input id="lottery-star-4" type="checkbox" checked><span>4 star</span></label>
@@ -289,6 +306,10 @@
                 <option value="storage_then_sell">Store then sell</option>
                 <option value="servant_enhancement">Servant enhance</option>
               </select>
+            </label>
+            <label class="input-row">
+              <span>Overflow stages</span>
+              <input id="lottery-overflow-actions" class="field" type="text" placeholder="e.g. storage, sell, servant_enhancement" autocomplete="off">
             </label>
             <button id="inspect-lottery" class="ghost-button wide" type="button">Inspect Lottery</button>
             <button id="inspect-lottery-stacks" class="ghost-button wide" type="button">Inspect Giftbox Stacks</button>
