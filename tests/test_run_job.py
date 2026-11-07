@@ -892,3 +892,38 @@ def test_full_run_enters_ooku_and_re_enters_after_main_story_navigation():
     ]
     assert calls[0][1] == {"max_map_swipes": 4, "setting_name": "demo", "ooku": True}
     assert calls[5][1] == {"max_map_swipes": 4, "setting_name": "demo", "ooku": True}
+
+
+def test_full_run_propagates_crawl_tower_mode_and_friendship_suppression():
+    calls: list[tuple[str, dict]] = []
+
+    def stage(name: str):
+        def execute(_context, payload):
+            calls.append((name, dict(payload)))
+            if name == "complete":
+                return {"complete": True, "repeated": False, "drop_count": 0}
+            return {"ready": True, "stage": name}
+
+        return execute
+
+    handler = create_full_run_handler(
+        _ScriptData(),
+        stage("assist"),
+        stage("prepare"),
+        stage("battle"),
+        stage("complete"),
+    )
+    result = handler(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "crawl_tower_mode": "autonomous",
+        },
+    )
+
+    assert result["runs_completed"] == 1
+    by_stage = dict(calls)
+    assert by_stage["prepare"]["crawl_tower"] is True
+    assert by_stage["battle"]["crawl_tower_mode"] == "autonomous"
+    assert by_stage["complete"]["ignore_full_friendship"] is True
+

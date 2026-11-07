@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from webapp.automation.program import CRAWL_TOWER_MODES
 from webapp.runtime import JobManager, RunContext
 from webapp.services.assist import validate_assist_special_filter
 from webapp.services.script_data import ScriptDataService
@@ -101,6 +102,30 @@ def create_full_run_handler(
             stage_options["assist"].get("special_filter", "any"),
             plan.get("assist", {}).get("mode"),
         )
+        crawl_tower_mode = payload.get(
+            "crawl_tower_mode",
+            stage_options["battle"].get(
+                "crawl_tower_mode",
+                stage_options["prepare"].get("crawl_tower_mode"),
+            ),
+        )
+        if crawl_tower_mode is None:
+            crawl_tower_mode = (
+                "script"
+                if stage_options["prepare"].get("crawl_tower") is True
+                else "off"
+            )
+        if crawl_tower_mode not in CRAWL_TOWER_MODES:
+            raise ValueError(
+                "crawl_tower_mode must be off, script, or autonomous."
+            )
+        if crawl_tower_mode != "off":
+            stage_options["prepare"]["crawl_tower"] = True
+            stage_options["battle"]["crawl_tower_mode"] = crawl_tower_mode
+            stage_options["completion"].setdefault(
+                "ignore_full_friendship",
+                True,
+            )
         drop_count = 0
         run_results: list[dict[str, Any]] = []
         stopped = False

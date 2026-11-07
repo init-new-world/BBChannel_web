@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from typing import Any
 
@@ -16,6 +17,9 @@ SERVANT_SKILL_POINTS = (
     (879, 590),
 )
 SKILL_TARGET_POINTS = ((350, 440), (640, 440), (970, 440))
+SKILL_TARGET_POINTS_2 = ((476, 440), (805, 440))
+SKILL_TARGET_POINTS_1 = ((640, 440),)
+CRAWL_TOWER_MODES = frozenset({"off", "script", "autonomous"})
 MASTER_SKILL_MENU_POINT = (1217, 320)
 MASTER_SKILL_POINTS = ((905, 310), (997, 310), (1089, 310))
 SKILL_DIALOG_WAIT_SECONDS = 0.5
@@ -53,7 +57,190 @@ NAMED_SERVANT_OPTION_POINTS: dict[str, dict[Any, tuple[int, int]]] = {
 }
 
 
-def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
+def resolve_skill_target_point(
+    target: int,
+    servant_positions: Sequence[int | None] | None = None,
+) -> tuple[int, int]:
+    if isinstance(target, bool) or not isinstance(target, int) or not 1 <= target <= 3:
+        raise ValueError("Skill target must be servant position 1 through 3.")
+    if servant_positions is None or len(servant_positions) < 3:
+        return SKILL_TARGET_POINTS[target - 1]
+    frontline = list(servant_positions[:3])
+    none_count = frontline.count(None)
+    if none_count == 0:
+        return SKILL_TARGET_POINTS[target - 1]
+    if none_count == 1:
+        adjusted = target
+        if (frontline[1] is None or frontline[2] is None) and adjusted == 3:
+            adjusted = 2
+        elif frontline[0] is None and adjusted in (2, 3):
+            adjusted -= 1
+        adjusted = min(max(adjusted, 1), 2)
+        return SKILL_TARGET_POINTS_2[adjusted - 1]
+    return SKILL_TARGET_POINTS_1[0]
+
+
+def build_autonomous_skill_commands(
+    servant_names: Sequence[str] | None = None,
+    servant_positions: Sequence[int | None] | None = None,
+    *,
+    default_target: int = 1,
+) -> list[Any]:
+    if (
+        isinstance(default_target, bool)
+        or not isinstance(default_target, int)
+        or not 1 <= default_target <= 3
+    ):
+        raise ValueError("default_target must be between 1 and 3.")
+    commands: list[Any] = []
+    for index in range(9):
+        skill = index + 1
+        slot_index = index // 3
+        remainder = index % 3
+        servant_slot = (
+            servant_positions[slot_index]
+            if servant_positions is not None and slot_index < len(servant_positions)
+            else slot_index
+        )
+        servant_name = (
+            servant_names[servant_slot]
+            if (
+                servant_slot not in (None, -1)
+                and servant_names is not None
+                and 0 <= servant_slot < len(servant_names)
+            )
+            else ""
+        )
+        if servant_name == "库库尔坎":
+            if remainder == 1:
+                commands.append(["Kukulkan", skill, 1, default_target])
+            else:
+                commands.append(["Kukulkan", skill, 1])
+        elif servant_name == "UDK-巴格斯特" and remainder == 2:
+            commands.append(["Barghest", skill, 1])
+        elif servant_name == "静希草十郎" and remainder == 2:
+            commands.append(["Soujyuro", skill, "B"])
+        elif servant_name == "BB迪拜" and remainder == 2:
+            commands.append(["BBDubai", skill, 0])
+        elif servant_name in ("岸波白野(女性)", "岸波白野(男性)") and remainder == 2:
+            commands.append(["Hakuno", skill, "R"])
+        elif servant_name in ("岸波白野(女性)", "岸波白野(男性)") and remainder == 0:
+            commands.append(["Hakuno", skill, []])
+        elif servant_name == "梵高〔矿工〕" and remainder == 0:
+            commands.append(["VanGoghMiner", skill, "B"])
+        elif servant_name == "太空伊什塔尔" and remainder == 1:
+            commands.append([-skill, 3])
+        elif servant_name == "卫宫" and remainder == 2:
+            commands.append([-skill, 2])
+        elif servant_name == "但丁·阿利吉耶里" and remainder == 1:
+            commands.append(["Dante", skill, "B"])
+        elif servant_name == "玉兔" and remainder == 1:
+            commands.append(["Gyokuto", skill, "All"])
+        elif servant_name == "夏洛特·科黛" and remainder == 2:
+            commands.append(["Charlotte", skill, "技"])
+        elif servant_name == "芙萝拉" and remainder == 2:
+            commands.append(["Flora", skill, "T"])
+        else:
+            commands.append([skill, default_target])
+    return commands
+
+
+def _plan_servant_names(plan: dict[str, Any]) -> list[str]:
+    names = [""] * 6
+    for servant in plan.get("servants", []):
+        if not isinstance(servant, dict):
+            continue
+        slot = servant.get("slot")
+        name = servant.get("name")
+        if (
+            isinstance(slot, int)
+            and not isinstance(slot, bool)
+            and 0 <= slot < 6
+            and isinstance(name, str)
+        ):
+            names[slot] = name
+    return names
+
+
+def _normalize_crawl_tower_rounds(
+    plan: dict[str, Any],
+    crawl_tower_mode: str,
+) -> list[dict[str, Any]]:
+    if crawl_tower_mode == "off":
+        return plan["rounds"]
+    if crawl_tower_mode == "script":
+        normalized_rounds: list[dict[str, Any]] = []
+        for round_plan in plan["rounds"]:
+            normalized_turns: list[dict[str, Any]] = []
+            for turn in round_plan["turns"]:
+                normalized_actions: list[dict[str, Any]] = []
+                for action in turn["actions"]:
+                    command = action.get("command")
+                    if (
+                        action.get("type") == "skill"
+                        and isinstance(command, int)
+                        and not isinstance(command, bool)
+                        and 1 <= command <= 9
+                    ):
+                        normalized_actions.append(
+                            {**action, "command": [command, 1]}
+                        )
+                    else:
+                        normalized_actions.append(action)
+                normalized_turns.append({**turn, "actions": normalized_actions})
+            normalized_extra_skill = [
+                [command, 1]
+                if (
+                    isinstance(command, int)
+                    and not isinstance(command, bool)
+                    and 1 <= command <= 9
+                )
+                else command
+                for command in round_plan.get("extra_skill", [])
+            ]
+            normalized_rounds.append(
+                {
+                    **round_plan,
+                    "turns": normalized_turns,
+                    "extra_skill": normalized_extra_skill,
+                }
+            )
+        return normalized_rounds
+
+    autonomous_skills = build_autonomous_skill_commands(
+        _plan_servant_names(plan),
+        default_target=1,
+    )
+    autonomous_actions = [
+        *[{"type": "skill", "command": command} for command in autonomous_skills],
+        *[{"type": "np", "servant": servant} for servant in (1, 2, 3)],
+    ]
+    return [
+        {
+            "round": round_number,
+            "turns": [
+                {
+                    "turn": 0,
+                    "actions": deepcopy(autonomous_actions),
+                    "nps": [1, 2, 3],
+                    "strategy": None,
+                    "condition": None,
+                }
+            ],
+            "extra_skill": deepcopy(autonomous_skills),
+            "extra_strategy": None,
+        }
+        for round_number in range(1, 4)
+    ]
+
+
+def compile_battle_program(
+    plan: dict[str, Any],
+    *,
+    crawl_tower_mode: str = "off",
+) -> dict[str, Any]:
+    if crawl_tower_mode not in CRAWL_TOWER_MODES:
+        raise ValueError("crawl_tower_mode must be off, script, or autonomous.")
     rounds: list[dict[str, Any]] = []
     action_count = 0
     supported_action_count = 0
@@ -64,9 +251,10 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
     extra_unsupported_action_count = 0
     source_types: list[object] = []
     command_phases: list[dict[str, Any]] = []
-    no_chain = bool(plan.get("run", {}).get("no_chain"))
+    no_chain = bool(plan.get("run", {}).get("no_chain")) and crawl_tower_mode != "autonomous"
+    source_rounds = _normalize_crawl_tower_rounds(plan, crawl_tower_mode)
 
-    for round_plan in plan["rounds"]:
+    for round_plan in source_rounds:
         turns: list[dict[str, Any]] = []
         for turn in round_plan["turns"]:
             actions = [_compile_action(action) for action in turn["actions"]]
@@ -107,7 +295,7 @@ def compile_battle_program(plan: dict[str, Any]) -> dict[str, Any]:
         extra_command_phase = _compile_command_phase(
             {
                 "strategy": round_plan.get("extra_strategy"),
-                "nps": [],
+                "nps": [1, 2, 3] if crawl_tower_mode == "autonomous" else [],
             },
             no_chain=no_chain,
         )

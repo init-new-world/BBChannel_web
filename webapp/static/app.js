@@ -174,6 +174,7 @@ const els = {
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   fullRunCrawlTower: document.querySelector("#full-run-crawl-tower"),
+  fullRunCrawlTowerMode: document.querySelector("#full-run-crawl-tower-mode"),
   fullRunAssistFilter: document.querySelector("#full-run-assist-filter"),
   startFullRun: document.querySelector("#start-full-run"),
   restartGame: document.querySelector("#restart-game"),
@@ -559,6 +560,8 @@ function bindEvents() {
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.startBattlePlan.addEventListener("click", startBattlePlan);
   els.fullRunEntryMode.addEventListener("change", updateControls);
+  els.fullRunCrawlTower?.addEventListener("change", updateControls);
+  els.fullRunCrawlTowerMode?.addEventListener("change", updateControls);
   els.startFullRun.addEventListener("click", startFullRun);
   els.restartGame.addEventListener("click", restartGame);
   els.inspectChocolate.addEventListener("click", inspectChocolate);
@@ -3054,27 +3057,45 @@ async function startBattleDryRun() {
   });
 }
 
+function isBattlePlanReady() {
+  if (state.selectedSettingProgram?.execution?.battle?.ready) {
+    return true;
+  }
+  return Boolean(
+    els.settingSelect.value
+      && state.selectedSettingPlan?.validation?.ok
+      && els.fullRunCrawlTower?.checked
+      && els.fullRunCrawlTowerMode?.value === "autonomous",
+  );
+}
+
 async function startBattlePlan() {
   const settingName = els.settingSelect.value;
-  if (!settingName || !state.selectedSettingProgram?.execution?.battle?.ready) {
+  if (!settingName || !isBattlePlanReady()) {
     return;
   }
+  const crawlTower = Boolean(els.fullRunCrawlTower?.checked);
+  const crawlTowerMode = els.fullRunCrawlTowerMode?.value || "script";
   await enqueueJob("battle.execute-plan", {
     setting_name: settingName,
     tap_interval_seconds: Number(els.battleActionDelay.value),
+    ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
   });
 }
 
 async function startFullRun() {
   const settingName = els.settingSelect.value;
-  if (!settingName || !state.selectedSettingProgram?.execution?.battle?.ready) {
+  if (!settingName || !isBattlePlanReady()) {
     return;
   }
+  const crawlTower = Boolean(els.fullRunCrawlTower?.checked);
+  const crawlTowerMode = els.fullRunCrawlTowerMode?.value || "script";
   await enqueueJob("battle.run", {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
     max_restarts: readNumber(els.fullRunRestartLimit),
     entry_mode: els.fullRunEntryMode.value,
+    ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
     entry: {
       max_map_swipes: readNumber(els.fullRunMapSwipes),
     },
@@ -3088,6 +3109,7 @@ async function startFullRun() {
     },
     battle: {
       tap_interval_seconds: Number(els.battleActionDelay.value),
+      ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
     },
   });
 }
@@ -4311,11 +4333,14 @@ function updateControls() {
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
-    || !state.selectedSettingProgram?.execution?.battle?.ready
+    || !isBattlePlanReady()
     || hasRunningJob;
   els.startFullRun.disabled = !state.connected
-    || !state.selectedSettingProgram?.execution?.battle?.ready
+    || !isBattlePlanReady()
     || hasRunningJob;
+  if (els.fullRunCrawlTowerMode) {
+    els.fullRunCrawlTowerMode.disabled = !els.fullRunCrawlTower?.checked || hasRunningJob;
+  }
   els.restartGame.disabled = !state.connected
     || !state.selectedSettingPlan?.run?.game_crash_restart
     || hasRunningJob;

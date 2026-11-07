@@ -41,6 +41,9 @@ def create_completion_handler(
         repeat = payload.get("repeat", False)
         if not isinstance(repeat, bool):
             raise ValueError("repeat must be a boolean.")
+        ignore_full_friendship = payload.get("ignore_full_friendship", False)
+        if not isinstance(ignore_full_friendship, bool):
+            raise ValueError("ignore_full_friendship must be a boolean.")
         timeout_seconds = _number(payload, "timeout_seconds", 180, 0.1, 600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(payload, "action_wait_seconds", 0.5, 0, 10)
@@ -123,7 +126,7 @@ def create_completion_handler(
                         "actions": actions,
                         "attempts": attempts,
                     }
-            if plan["run"]["full_friendship_stop"]:
+            if plan["run"]["full_friendship_stop"] and not ignore_full_friendship:
                 friendship_marker = _match_optional(
                     recognition,
                     screenshot,

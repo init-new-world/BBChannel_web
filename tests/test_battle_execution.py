@@ -26,6 +26,11 @@ from webapp.automation.battle import (
     _wait_for_battle_transition,
     register_battle_jobs,
 )
+from webapp.automation.program import (
+    build_autonomous_skill_commands,
+    compile_battle_program,
+    resolve_skill_target_point,
+)
 from webapp.devices.coordinates import FrameNormalizer
 from webapp.devices.replay import ReplayBackend
 from webapp.runtime import JobDatabase, JobManager, JobStatus
@@ -1878,3 +1883,130 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(
         "face_card_3",
         "face_card_1" if blocked else "face_card_5",
     ]
+
+
+def test_resolve_skill_target_point_adjusts_for_frontline_losses():
+    assert resolve_skill_target_point(1, [0, 1, 2]) == (350, 440)
+    assert resolve_skill_target_point(2, [0, 1, 2]) == (640, 440)
+    assert resolve_skill_target_point(3, [0, 1, 2]) == (970, 440)
+
+    assert resolve_skill_target_point(1, [0, None, 2]) == (476, 440)
+    assert resolve_skill_target_point(3, [0, None, 2]) == (805, 440)
+    assert resolve_skill_target_point(2, [None, 1, 2]) == (476, 440)
+    assert resolve_skill_target_point(3, [None, 1, 2]) == (805, 440)
+
+    assert resolve_skill_target_point(3, [0, None, None]) == (640, 440)
+
+
+def test_execute_skill_action_uses_dynamic_target_points_when_frontline_shrinks():
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Context:
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    _execute_skill_action(
+        Context(),
+        Device(),
+        {
+            "source": {"type": "skill", "command": [1, 3]},
+            "steps": [
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590},
+                {"type": "tap", "role": "skill_target_3", "x": 970, "y": 440},
+            ],
+        },
+        0,
+        speedup_skills=False,
+        occupied_positions=[0, None, 2, None, None, None],
+    )
+
+    assert taps == [(70, 590), (805, 440)]
+
+
+def test_compile_battle_program_supports_crawl_tower_script_and_autonomous_modes():
+    plan = {
+        "name": "tower",
+        "server": "CH",
+        "servants": [
+            {"slot": 0, "name": "库库尔坎"},
+            {"slot": 1, "name": "太空伊什塔尔"},
+            {"slot": 2, "name": "岸波白野(女性)"},
+        ],
+        "rounds": [
+            {
+                "round": 1,
+                "turns": [
+                    {
+                        "turn": 0,
+                        "actions": [
+                            {"type": "skill", "command": 1},
+                            {"type": "skill", "command": 10},
+                        ],
+                        "nps": [],
+                        "strategy": None,
+                        "condition": None,
+                    }
+                ],
+                "extra_skill": [2],
+                "extra_strategy": None,
+            }
+        ],
+        "validation": {"ok": True, "errors": [], "warnings": []},
+    }
+
+    script_program = compile_battle_program(plan, crawl_tower_mode="script")
+    first_turn_actions = script_program["rounds"][0]["turns"][0]["actions"]
+    assert first_turn_actions[0]["source"]["command"] == [1, 1]
+    assert [step["role"] for step in first_turn_actions[0]["steps"]] == [
+        "servant_skill_1",
+        "skill_target_1",
+    ]
+    assert first_turn_actions[1]["source"]["command"] == 10
+    assert (
+        script_program["rounds"][0]["extra_turn"]["actions"][0]["source"]["command"]
+        == [2, 1]
+    )
+
+    autonomous_commands = build_autonomous_skill_commands(
+        ["库库尔坎", "太空伊什塔尔", "岸波白野(女性)"],
+        default_target=1,
+    )
+    assert autonomous_commands == [
+        ["Kukulkan", 1, 1],
+        ["Kukulkan", 2, 1, 1],
+        ["Kukulkan", 3, 1],
+        [4, 1],
+        [-5, 3],
+        [6, 1],
+        ["Hakuno", 7, []],
+        [8, 1],
+        ["Hakuno", 9, "R"],
+    ]
+
+    autonomous_program = compile_battle_program(
+        {**plan, "rounds": []},
+        crawl_tower_mode="autonomous",
+    )
+    assert autonomous_program["execution"]["battle"]["ready"] is True
+    assert len(autonomous_program["rounds"]) == 3
+    assert [
+        step["role"]
+        for step in autonomous_program["rounds"][0]["turns"][0]["command_phase"]["steps"]
+    ] == ["attack", "np_1", "np_2", "np_3"]
+    assert [
+        step["role"]
+        for step in autonomous_program["rounds"][0]["extra_turn"]["command_phase"]["steps"]
+    ] == ["attack", "np_1", "np_2", "np_3"]
+

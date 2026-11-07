@@ -15,9 +15,11 @@ from webapp.automation.network import reconnect_if_present
 from webapp.automation.program import (
     ATTACK_POINT,
     COMMAND_CARD_BACK_POINT,
+    CRAWL_TOWER_MODES,
     FACE_CARD_POINTS,
     NP_POINTS,
     compile_battle_program,
+    resolve_skill_target_point,
 )
 from webapp.automation.strategy import (
     StrategySelectionError,
@@ -641,7 +643,12 @@ def create_battle_execute_plan_handler(
         )
         if not isinstance(initialize_settings, bool):
             raise ValueError("initialize_settings must be a boolean.")
-        program = compile_battle_program(plan)
+        crawl_tower_mode = payload.get("crawl_tower_mode", "off")
+        if crawl_tower_mode not in CRAWL_TOWER_MODES:
+            raise ValueError(
+                "crawl_tower_mode must be off, script, or autonomous."
+            )
+        program = compile_battle_program(plan, crawl_tower_mode=crawl_tower_mode)
         execution_status = program["execution"]["battle"]
         if not execution_status["ready"]:
             raise ValueError(execution_status["reason"])
@@ -708,6 +715,7 @@ def create_battle_execute_plan_handler(
         action_count = 0
         tap_count = 0
         servant_positions = _servant_positions(plan["servants"])
+        occupied_positions: list[int | None] = list(range(6))
         compiled_rounds = {
             round_plan["round"]: round_plan for round_plan in program["rounds"]
         }
@@ -847,11 +855,16 @@ def create_battle_execute_plan_handler(
                     action,
                     tap_interval,
                     speedup_skills=speedup_skills,
+                    occupied_positions=occupied_positions,
                 )
                 state_change = action.get("state_change")
                 if state_change and state_change["type"] == "servant_exchange":
                     _apply_servant_exchange(
                         servant_positions,
+                        state_change["positions"],
+                    )
+                    _apply_servant_exchange(
+                        occupied_positions,
                         state_change["positions"],
                     )
                     context.emit(
@@ -882,6 +895,10 @@ def create_battle_execute_plan_handler(
                     continue
                 _apply_servant_replacements(
                     servant_positions,
+                    action["source"]["replacements"],
+                )
+                _apply_servant_replacements(
+                    occupied_positions,
                     action["source"]["replacements"],
                 )
                 context.emit(
@@ -937,6 +954,7 @@ def create_battle_execute_plan_handler(
                         special_keys=special_keys,
                         card_wait_seconds=card_wait_seconds,
                         speedup_skills=speedup_skills,
+                        occupied_positions=occupied_positions,
                     )
                     transition = _wait_for_battle_transition(
                         context,
@@ -989,6 +1007,7 @@ def _execute_extra_turn(
     special_keys: list[dict[str, Any]] | None = None,
     card_wait_seconds: float = 0.0,
     speedup_skills: bool = False,
+    occupied_positions: list[int | None] | None = None,
 ) -> int:
     tap_count = 0
     skill_actions = [
@@ -1036,10 +1055,16 @@ def _execute_extra_turn(
             action,
             tap_interval,
             speedup_skills=speedup_skills,
+            occupied_positions=occupied_positions,
         )
         state_change = action.get("state_change")
         if state_change and state_change["type"] == "servant_exchange":
             _apply_servant_exchange(servant_positions, state_change["positions"])
+            if occupied_positions is not None:
+                _apply_servant_exchange(
+                    occupied_positions,
+                    state_change["positions"],
+                )
             context.emit(
                 "servant_exchange",
                 "Runtime servant positions were exchanged.",
@@ -1571,6 +1596,33 @@ def _execute_steps(
     return len(steps)
 
 
+def _resolve_action_target_steps(
+    steps: list[dict[str, Any]],
+    occupied_positions: list[int | None] | None,
+) -> list[dict[str, Any]]:
+    if occupied_positions is None or len(occupied_positions) < 3:
+        return steps
+    if occupied_positions[:3].count(None) == 0:
+        return steps
+    resolved: list[dict[str, Any]] = []
+    for step in steps:
+        role = str(step.get("role", ""))
+        target: int | None = None
+        if role.startswith("skill_target_"):
+            target = int(role[len("skill_target_") :])
+        elif role.startswith("command_spell_target_"):
+            target = int(role[len("command_spell_target_") :])
+        if target is not None and 1 <= target <= 3:
+            target_x, target_y = resolve_skill_target_point(
+                target,
+                occupied_positions,
+            )
+            resolved.append({**step, "x": target_x, "y": target_y})
+        else:
+            resolved.append(step)
+    return resolved
+
+
 def _execute_skill_action(
     context: RunContext,
     device_service: DeviceService,
@@ -1578,11 +1630,13 @@ def _execute_skill_action(
     tap_interval: float | _TapTiming,
     *,
     speedup_skills: bool,
+    occupied_positions: list[int | None] | None = None,
 ) -> int:
+    steps = _resolve_action_target_steps(action["steps"], occupied_positions)
     tap_count = _execute_steps(
         context,
         device_service,
-        action["steps"],
+        steps,
         tap_interval,
     )
     if not speedup_skills or not _skill_animation_can_be_sped_up(action):

@@ -82,6 +82,7 @@ def test_operator_console_references_api_controls():
     assert 'id="full-run-apple"' in index
     assert 'id="full-run-team-check"' in index
     assert 'id="full-run-crawl-tower"' in index
+    assert 'id="full-run-crawl-tower-mode"' in index
     assert 'id="start-full-run"' in index
     assert 'id="restart-game"' in index
     assert 'id="inspect-chocolate"' in index

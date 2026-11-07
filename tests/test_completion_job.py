@@ -556,3 +556,23 @@ def test_completion_uses_mask_for_main_story_navigation(tmp_path: Path):
     )
     assert "mask_path" not in story_candidates[0][0]
     assert "mask_path" not in story_candidates[0][1]
+
+
+def test_completion_ignore_full_friendship_bypasses_bond_stop(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((90, 36), (185, 50, 50)), (250, 300))
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [(repeat_frame, None)],
+        config={"jbstop": 1},
+        payload={"ignore_full_friendship": True},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is True
+    assert result.result.get("stopped") is not True
+
