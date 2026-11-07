@@ -207,6 +207,7 @@ const els = {
   expballOverflowAction: document.querySelector("#expball-overflow-action"),
   expballEnhanceTarget: document.querySelector("#expball-enhance-target"),
   expballMaterialSelectMode: document.querySelector("#expball-material-select-mode"),
+  expballServantTarget: document.querySelector("#expball-servant-target"),
   expballTargetLevel: document.querySelector("#expball-target-level"),
   expballMaxBatches: document.querySelector("#expball-max-batches"),
   expballAutoLimitBreak: document.querySelector("#expball-auto-limit-break"),
@@ -214,9 +215,16 @@ const els = {
   expballLockGoldServants: document.querySelector("#expball-lock-gold-servants"),
   expballLockInscribedCc: document.querySelector("#expball-lock-inscribed-cc"),
   expballAllowQpFull: document.querySelector("#expball-allow-qp-full"),
+  inspectExpballServantTarget: document.querySelector("#inspect-expball-servant-target"),
   inspectExpballServantLevel: document.querySelector("#inspect-expball-servant-level"),
   runExpballEnhance: document.querySelector("#run-expball-enhance"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
+  expballLockLily: document.querySelector("#expball-lock-lily"),
+  expballLockHabe: document.querySelector("#expball-lock-habe"),
+  expballLockHakuno: document.querySelector("#expball-lock-hakuno"),
+  expballLockTargets: document.querySelector("#expball-lock-targets"),
+  expballLockEnoughStop: document.querySelector("#expball-lock-enough-stop"),
+  inspectExpballSummonLocks: document.querySelector("#inspect-expball-summon-locks"),
   runExpballSummon: document.querySelector("#run-expball-summon"),
   runExpballStorage: document.querySelector("#run-expball-storage"),
   runExpballSell: document.querySelector("#run-expball-sell"),
@@ -555,12 +563,20 @@ function bindEvents() {
   els.expballOverflowAction.addEventListener("change", updateControls);
   els.expballEnhanceTarget.addEventListener("change", updateControls);
   els.expballMaterialSelectMode.addEventListener("change", updateControls);
+  els.expballServantTarget.addEventListener("input", updateControls);
   els.expballAutoLimitBreak.addEventListener("change", updateControls);
   els.expballLockCeBombs.addEventListener("change", updateControls);
   els.expballLockGoldServants.addEventListener("change", updateControls);
   els.expballLockInscribedCc.addEventListener("change", updateControls);
+  els.inspectExpballServantTarget.addEventListener("click", inspectExpballServantTarget);
   els.inspectExpballServantLevel.addEventListener("click", inspectExpballServantLevel);
   els.runExpballEnhance.addEventListener("click", runExpballEnhance);
+  els.expballLockLily.addEventListener("change", updateControls);
+  els.expballLockHabe.addEventListener("change", updateControls);
+  els.expballLockHakuno.addEventListener("change", updateControls);
+  els.expballLockTargets.addEventListener("input", updateControls);
+  els.expballLockEnoughStop.addEventListener("change", updateControls);
+  els.inspectExpballSummonLocks.addEventListener("click", inspectExpballSummonLocks);
   els.runExpballSummon.addEventListener("click", runExpballSummon);
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
@@ -3126,6 +3142,40 @@ function selectedExpballStars() {
     .map(([star]) => star);
 }
 
+function parseExpballServantTargets() {
+  return String(els.expballServantTarget?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseExpballLockTargets() {
+  return String(els.expballLockTargets?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((token) => {
+      const colonIndex = token.lastIndexOf(":");
+      if (colonIndex > 0) {
+        const name = token.slice(0, colonIndex).trim();
+        const count = Number(token.slice(colonIndex + 1).trim());
+        if (name && Number.isSafeInteger(count) && count >= 1) {
+          return { name, max_count: count };
+        }
+      }
+      return token;
+    });
+}
+
+function hasExpballSummonLockConfig() {
+  return Boolean(
+    els.expballLockLily?.checked
+      || els.expballLockHabe?.checked
+      || els.expballLockHakuno?.checked
+      || parseExpballLockTargets().length > 0,
+  );
+}
+
 async function inspectLottery() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -3176,6 +3226,9 @@ async function runLottery() {
       max_batches: readNumber(els.expballMaxBatches),
       target_level: readNumber(els.expballTargetLevel),
       auto_limit_break: els.expballAutoLimitBreak.checked,
+      ...(parseExpballServantTargets().length
+        ? { servant_targets: parseExpballServantTargets() }
+        : {}),
     } : {}),
   });
 }
@@ -3241,6 +3294,18 @@ async function inspectExpballCeBombGrid() {
   });
 }
 
+async function inspectExpballServantTarget() {
+  const settingName = els.settingSelect.value;
+  const servantTargets = parseExpballServantTargets();
+  if (!settingName || !servantTargets.length) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-servant-target", {
+    setting_name: settingName,
+    servant_targets: servantTargets,
+  });
+}
+
 async function inspectExpballServantLevel() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
@@ -3248,6 +3313,21 @@ async function inspectExpballServantLevel() {
   }
   await enqueueJob("event.expball.inspect-servant-level", {
     setting_name: settingName,
+  });
+}
+
+async function inspectExpballSummonLocks() {
+  const settingName = els.settingSelect.value;
+  const lockTargets = parseExpballLockTargets();
+  if (!settingName || !hasExpballSummonLockConfig()) {
+    return;
+  }
+  await enqueueJob("event.expball.inspect-summon-lock-targets", {
+    setting_name: settingName,
+    lock_lily: Boolean(els.expballLockLily?.checked),
+    lock_habe: Boolean(els.expballLockHabe?.checked),
+    lock_hakuno: Boolean(els.expballLockHakuno?.checked),
+    ...(lockTargets.length ? { lock_targets: lockTargets } : {}),
   });
 }
 
@@ -3259,6 +3339,7 @@ async function runExpballEnhance() {
   const target = els.expballEnhanceTarget.value || "equipment";
   const materialSelectMode = els.expballMaterialSelectMode.value || "auto";
   const stars = selectedExpballStars();
+  const servantTargets = parseExpballServantTargets();
   const lockCeBombs = Boolean(target === "equipment" && els.expballLockCeBombs.checked);
   await enqueueJob("event.expball.enhance", {
     setting_name: settingName,
@@ -3268,6 +3349,7 @@ async function runExpballEnhance() {
     ...(target === "servant" ? {
       target_level: readNumber(els.expballTargetLevel),
       auto_limit_break: els.expballAutoLimitBreak.checked,
+      ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
     } : {
       lock_full_ce_bombs: lockCeBombs,
       mark_full_ce_bombs: lockCeBombs,
@@ -3286,6 +3368,8 @@ async function runExpballSummon() {
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
   const isEnhancementOverflow = ["equipment_enhancement", "servant_enhancement"].includes(overflowAction);
+  const servantTargets = parseExpballServantTargets();
+  const lockTargets = parseExpballLockTargets();
   const lockCeBombs = Boolean(
     overflowAction === "equipment_enhancement" && els.expballLockCeBombs.checked,
   );
@@ -3293,6 +3377,11 @@ async function runExpballSummon() {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
     overflow_action: overflowAction,
+    lock_lily: Boolean(els.expballLockLily?.checked),
+    lock_habe: Boolean(els.expballLockHabe?.checked),
+    lock_hakuno: Boolean(els.expballLockHakuno?.checked),
+    lock_enough_stop: Boolean(els.expballLockEnoughStop?.checked),
+    ...(lockTargets.length ? { lock_targets: lockTargets } : {}),
     ...(stars.length ? { stars } : {}),
     ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
     ...(overflowAction === "sell" ? {
@@ -3308,6 +3397,7 @@ async function runExpballSummon() {
         ? {
           target_level: readNumber(els.expballTargetLevel),
           auto_limit_break: els.expballAutoLimitBreak.checked,
+          ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
         }
         : {
           lock_full_ce_bombs: lockCeBombs,
@@ -3759,6 +3849,20 @@ function renderJobResult(job) {
     ].join(" · ");
     return;
   }
+  if (job.kind === "event.expball.inspect-servant-target") {
+    if (result.matched) {
+      els.jobResult.textContent = [
+        `Target: ${result.matched_target || "matched"}`,
+        result.center ? `at (${result.center.join(", ")})` : "found",
+      ].join(" · ");
+    } else {
+      els.jobResult.textContent = [
+        "Servant target not found",
+        result.scroll_at_end ? "at bottom" : "scrollable",
+      ].join(" · ");
+    }
+    return;
+  }
   if (job.kind === "event.expball.inspect-servant-level") {
     if (result.valid) {
       els.jobResult.textContent = [
@@ -3768,6 +3872,14 @@ function renderJobResult(job) {
     } else {
       els.jobResult.textContent = "Servant level not detected";
     }
+    return;
+  }
+  if (job.kind === "event.expball.inspect-summon-lock-targets") {
+    const matchCount = result.match_count || 0;
+    els.jobResult.textContent = [
+      `${matchCount} FP lock ${matchCount === 1 ? "match" : "matches"}`,
+      result.all_targets_met ? "All targets met" : "Active",
+    ].join(" · ");
     return;
   }
   if (job.kind === "event.expball.enhance") {
@@ -3795,6 +3907,9 @@ function renderJobResult(job) {
       result.completed ? "Completed" : "Stopped",
       humanizeResultValue(result.reason || "unknown"),
     ];
+    if (result.locked_count) {
+      details.push(`${result.locked_count} locked`);
+    }
     if (result.overflow_cycles) {
       details.push(`${result.overflow_cycles} overflow cycles`);
     }
@@ -3803,11 +3918,15 @@ function renderJobResult(job) {
   }
   if (job.kind === "event.expball.summon") {
     const summonCount = result.summons || 0;
-    els.jobResult.textContent = [
+    const details = [
       `${summonCount} FP ${summonCount === 1 ? "batch" : "batches"}`,
       result.completed ? "Completed" : "Stopped",
       humanizeResultValue(result.reason || "unknown"),
-    ].join(" · ");
+    ];
+    if (result.locked_count) {
+      details.push(`${result.locked_count} locked`);
+    }
+    els.jobResult.textContent = details.join(" · ");
     return;
   }
   if (job.kind === "event.expball.storage") {
@@ -4107,12 +4226,19 @@ function updateControls() {
   els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
   els.expballEnhanceTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballMaterialSelectMode.disabled = !supportsExpball || hasRunningJob;
+  els.expballServantTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballTargetLevel.disabled = !supportsExpball || hasRunningJob;
   els.expballMaxBatches.disabled = !supportsExpball || hasRunningJob;
   els.expballAutoLimitBreak.disabled = !supportsExpball || hasRunningJob;
   els.expballLockCeBombs.disabled = !supportsExpball || hasRunningJob;
   els.expballLockGoldServants.disabled = !supportsExpball || hasRunningJob;
   els.expballLockInscribedCc.disabled = !supportsExpball || hasRunningJob;
+  els.expballAllowQpFull.disabled = !supportsExpball || hasRunningJob;
+  els.inspectExpballServantTarget.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || !parseExpballServantTargets().length
+    || hasRunningJob;
   els.inspectExpballServantLevel.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
@@ -4120,6 +4246,16 @@ function updateControls() {
   els.runExpballEnhance.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
+    || hasRunningJob;
+  els.expballLockLily.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockHabe.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockHakuno.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockTargets.disabled = !supportsExpball || hasRunningJob;
+  els.expballLockEnoughStop.disabled = !supportsExpball || hasRunningJob;
+  els.inspectExpballSummonLocks.disabled = !state.connected
+    || !els.settingSelect.value
+    || !supportsExpball
+    || !hasExpballSummonLockConfig()
     || hasRunningJob;
   els.runExpballSummon.disabled = !state.connected
     || !els.settingSelect.value

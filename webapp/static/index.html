@@ -323,6 +323,10 @@
               </select>
             </label>
             <label class="input-row">
+              <span>Servant target</span>
+              <input id="expball-servant-target" class="field" type="text" placeholder="e.g. BB(SSR)_1" autocomplete="off">
+            </label>
+            <label class="input-row">
               <span>Target Lv.</span>
               <input id="expball-target-level" class="field number-field" type="number" min="1" max="120" step="1" value="100">
             </label>
@@ -350,12 +354,34 @@
               <input id="expball-allow-qp-full" type="checkbox">
               <span>Allow QP overflow</span>
             </label>
+            <button id="inspect-expball-servant-target" class="ghost-button wide" type="button">Inspect Servant Target</button>
             <button id="inspect-expball-servant-level" class="ghost-button wide" type="button">Inspect Servant Level</button>
             <button id="run-expball-enhance" class="ghost-button wide" type="button">Run Enhancement</button>
             <label class="input-row">
               <span>FP batches</span>
               <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">
             </label>
+            <label class="toggle-row">
+              <input id="expball-lock-lily" type="checkbox">
+              <span>Lock Saber Lily</span>
+            </label>
+            <label class="toggle-row">
+              <input id="expball-lock-habe" type="checkbox">
+              <span>Lock Habetrot</span>
+            </label>
+            <label class="toggle-row">
+              <input id="expball-lock-hakuno" type="checkbox">
+              <span>Lock Hakuno</span>
+            </label>
+            <label class="input-row">
+              <span>Lock targets</span>
+              <input id="expball-lock-targets" class="field" type="text" placeholder="e.g. 1.png:5, Servant004" autocomplete="off">
+            </label>
+            <label class="toggle-row">
+              <input id="expball-lock-enough-stop" type="checkbox">
+              <span>Stop when lock targets met</span>
+            </label>
+            <button id="inspect-expball-summon-locks" class="ghost-button wide" type="button">Inspect FP Lock Targets</button>
             <button id="run-expball-summon" class="primary-button wide" type="button">Run FP Cycle</button>
             <button id="run-expball-storage" class="ghost-button wide" type="button">Store Current Selection</button>
             <button id="run-expball-sell" class="danger-button wide" type="button">Sell Current Selection</button>

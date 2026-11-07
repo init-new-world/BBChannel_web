@@ -114,6 +114,7 @@ def test_operator_console_references_api_controls():
     assert 'id="expball-overflow-action"' in index
     assert 'id="expball-enhance-target"' in index
     assert 'id="expball-material-select-mode"' in index
+    assert 'id="expball-servant-target"' in index
     assert 'id="expball-target-level"' in index
     assert 'id="expball-max-batches"' in index
     assert 'id="expball-auto-limit-break"' in index
@@ -121,8 +122,15 @@ def test_operator_console_references_api_controls():
     assert 'id="expball-lock-gold-servants"' in index
     assert 'id="expball-lock-inscribed-cc"' in index
     assert 'id="expball-allow-qp-full"' in index
+    assert 'id="inspect-expball-servant-target"' in index
     assert 'id="inspect-expball-servant-level"' in index
     assert 'id="run-expball-enhance"' in index
+    assert 'id="expball-lock-lily"' in index
+    assert 'id="expball-lock-habe"' in index
+    assert 'id="expball-lock-hakuno"' in index
+    assert 'id="expball-lock-targets"' in index
+    assert 'id="expball-lock-enough-stop"' in index
+    assert 'id="inspect-expball-summon-locks"' in index
     assert 'id="run-expball-summon"' in index
     assert 'id="fp-summon-batches"' in index
     assert 'id="run-expball-storage"' in index
@@ -189,7 +197,9 @@ def test_operator_console_references_api_controls():
     assert 'job.kind === "event.expball.inspect-servant-grid"' in script
     assert 'job.kind === "event.expball.inspect-command-code-grid"' in script
     assert 'job.kind === "event.expball.inspect-ce-bomb-grid"' in script
+    assert 'job.kind === "event.expball.inspect-servant-target"' in script
     assert 'job.kind === "event.expball.inspect-servant-level"' in script
+    assert 'job.kind === "event.expball.inspect-summon-lock-targets"' in script
     assert 'job.kind === "event.expball.enhance"' in script
     assert 'job.kind === "event.expball.navigate"' in script
     assert 'job.kind === "event.expball.run"' in script
@@ -217,6 +227,8 @@ def test_operator_console_references_api_controls():
     assert 'enqueueJob("event.expball.inspect-servant-grid"' in script
     assert 'enqueueJob("event.expball.inspect-command-code-grid"' in script
     assert 'enqueueJob("event.expball.inspect-ce-bomb-grid"' in script
+    assert 'enqueueJob("event.expball.inspect-servant-target"' in script
+    assert 'enqueueJob("event.expball.inspect-summon-lock-targets"' in script
     assert 'enqueueJob("event.expball.navigate"' in script
     assert "destination: els.expballDestination.value" in script
     assert 'enqueueJob("event.expball.run"' in script
