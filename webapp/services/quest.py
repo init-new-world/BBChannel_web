@@ -12,6 +12,12 @@ FREE_QUEST_LIST_ROI = (600, 0, 200, 720)
 FREE_QUEST_LAYOUT_SCALE = 2 / 3
 MAIN_STORY_LEFT_CLOSE_ROI = (0, 0, 200, 93)
 MAIN_STORY_INFINITE_ROI = (767, 87, 367, 247)
+MAIN_STORY_UNAVAILABLE_ROI = (573, 533, 137, 60)
+MAIN_STORY_START_RWKS_ROI = (733, 533, 207, 60)
+MAIN_STORY_SKIP_TOP_ROI = (1120, 10, 147, 60)
+MAIN_STORY_SKIP_BOTTOM_ROI = (1193, 573, 67, 80)
+MAIN_STORY_SKIP_CONFIRM_ROI = (767, 533, 113, 60)
+MAIN_STORY_SKIP_TOUCH_POINT = (1197, 40)
 INTERLUDE_AP_ROI = (700, 90, 233, 243)
 INTERLUDE_GOTO_STAGE_ROI = (733, 87, 387, 273)
 INTERLUDE_GOTO_INTERLUDE_ROI = (0, 80, 187, 100)
@@ -184,6 +190,42 @@ class QuestRecognizer:
             roi=MAIN_STORY_INFINITE_ROI,
             scales=FREE_QUEST_SCALES,
         )
+        quest_unavailable = self._match_optional(
+            screenshot,
+            f"battle/{normalized_server}/notAvailable.png",
+            threshold=threshold,
+            roi=MAIN_STORY_UNAVAILABLE_ROI,
+            scales=FREE_QUEST_SCALES,
+        )
+        story_start = self._match_optional(
+            screenshot,
+            f"battle/{normalized_server}/rwks.png",
+            threshold=threshold,
+            roi=MAIN_STORY_START_RWKS_ROI,
+            scales=FREE_QUEST_SCALES,
+        )
+        story_skip_confirm = self._match_optional(
+            screenshot,
+            f"battle/{normalized_server}/listupdate.png",
+            threshold=threshold,
+            roi=MAIN_STORY_SKIP_CONFIRM_ROI,
+            scales=FREE_QUEST_SCALES,
+        )
+        story_skip = None
+        for skip_name, skip_roi in (
+            ("needSkip1", MAIN_STORY_SKIP_TOP_ROI),
+            ("needSkip", MAIN_STORY_SKIP_BOTTOM_ROI),
+        ):
+            candidate = self._match_optional(
+                screenshot,
+                f"battle/{normalized_server}/{skip_name}.png",
+                threshold=threshold,
+                roi=skip_roi,
+                scales=FREE_QUEST_SCALES,
+            )
+            if candidate is not None and candidate.matched:
+                story_skip = candidate
+                break
         ap_cost_matched = bool(ap_cost is not None and ap_cost.matched)
 
         candidates: list[dict[str, Any]] = []
@@ -244,6 +286,17 @@ class QuestRecognizer:
             "left_close": left_close.to_dict() if left_close is not None else None,
             "ooku_ao": ooku_ao.to_dict() if ooku_ao is not None else None,
             "infinite": infinite.to_dict() if infinite is not None else None,
+            "quest_unavailable": (
+                quest_unavailable.to_dict() if quest_unavailable is not None else None
+            ),
+            "story_start": story_start.to_dict() if story_start is not None else None,
+            "story_skip": story_skip.to_dict() if story_skip is not None else None,
+            "story_skip_confirm": (
+                story_skip_confirm.to_dict()
+                if story_skip_confirm is not None
+                else None
+            ),
+            "story_skip_touch": list(MAIN_STORY_SKIP_TOUCH_POINT),
         }
 
     def recognize_interlude_quests(

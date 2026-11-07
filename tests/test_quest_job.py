@@ -680,3 +680,75 @@ def test_main_story_entry_handles_popup_panel_next_and_ooku_recollection():
     assert recollection_device.taps == [(90, 48)]
 
 
+def test_main_story_entry_advances_story_only_nodes_and_dismisses_unavailable_quests():
+    stages = iter(
+        (
+            {"stage": "unknown"},
+            {"stage": "unknown"},
+            {"stage": "unknown"},
+            {"stage": "unknown"},
+            {"stage": "assist"},
+        )
+    )
+
+    class StoryFlowRecognizer:
+        def recognize_main_story_quests(self, screenshot, _server):
+            if screenshot == b"screen-1":
+                return {
+                    "candidates": [],
+                    "selected": None,
+                    "quest_unavailable": {"matched": True, "center": [640, 563]},
+                    "left_close": {"matched": True, "center": [90, 48]},
+                }
+            if screenshot == b"screen-2":
+                return {
+                    "candidates": [],
+                    "selected": None,
+                    "story_start": {"matched": True, "center": [837, 563]},
+                }
+            if screenshot == b"screen-3":
+                return {
+                    "candidates": [],
+                    "selected": None,
+                    "story_skip": {"matched": True, "center": [1200, 40]},
+                    "story_skip_touch": [1197, 40],
+                }
+            return {
+                "candidates": [],
+                "selected": None,
+                "story_skip_confirm": {"matched": True, "center": [827, 563]},
+            }
+
+    device = _Device()
+    result = create_main_story_entry_handler(
+        _ScriptData(),
+        device,
+        StoryFlowRecognizer(),
+        lambda _context, _payload: next(stages),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["stage"] == "assist"
+    assert result["actions"] == [
+        "main_story_unavailable_close",
+        "main_story_left_close",
+        "main_story_start_story",
+        "main_story_story_skip",
+        "main_story_story_skip_confirm",
+    ]
+    assert device.taps == [
+        (640, 563),
+        (90, 48),
+        (837, 563),
+        (1197, 40),
+        (827, 563),
+    ]
+
+

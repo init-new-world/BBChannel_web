@@ -279,6 +279,11 @@ def create_main_story_entry_handler(
             left_close = report.get("left_close") or {}
             ooku_ao = report.get("ooku_ao") or {}
             infinite = report.get("infinite") or {}
+            quest_unavailable = report.get("quest_unavailable") or {}
+            story_start = report.get("story_start") or {}
+            story_skip = report.get("story_skip") or {}
+            story_skip_confirm = report.get("story_skip_confirm") or {}
+            story_skip_touch = list(report.get("story_skip_touch") or [1197, 40])
             if bool(ooku_ao.get("matched")):
                 is_ooku = True
             next_candidate = next(
@@ -307,6 +312,51 @@ def create_main_story_entry_handler(
                     random_touch,
                 )
                 actions.append("main_story_close_popup")
+            elif bool(story_skip_confirm.get("matched")):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    story_skip_confirm["center"],
+                    "main_story_story_skip_confirm",
+                    random_touch,
+                )
+                actions.append("main_story_story_skip_confirm")
+            elif bool(story_skip.get("matched")):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    story_skip_touch,
+                    "main_story_story_skip",
+                    random_touch,
+                )
+                actions.append("main_story_story_skip")
+            elif bool(story_start.get("matched")):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    story_start["center"],
+                    "main_story_start_story",
+                    random_touch,
+                )
+                actions.append("main_story_start_story")
+            elif bool(quest_unavailable.get("matched")):
+                _tap_candidate(
+                    context,
+                    device_service,
+                    quest_unavailable["center"],
+                    "main_story_unavailable_close",
+                    random_touch,
+                )
+                actions.append("main_story_unavailable_close")
+                if bool(left_close.get("matched")):
+                    _tap_candidate(
+                        context,
+                        device_service,
+                        left_close["center"],
+                        "main_story_left_close",
+                        random_touch,
+                    )
+                    actions.append("main_story_left_close")
             elif bool(ap_cost.get("matched")) and isinstance(next_candidate, dict):
                 _tap_candidate(
                     context,

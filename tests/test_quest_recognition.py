@@ -303,6 +303,43 @@ def test_main_story_recognizer_combines_next_arrow_reddot_offsets_and_ooku_flags
     assert result["selected"]["touch"] == [820, 277]
     assert result["selected"]["map_touch"] == [820, 310]
     assert result["selected"]["panel_touch"] == [820, 277]
+    assert result["story_skip_touch"] == [1197, 40]
+
+
+def test_main_story_recognizer_detects_story_start_skip_and_unavailable_prompts():
+    class StoryPromptRecognition:
+        def match_template_all(self, _screenshot, _template_path, **_options):
+            return []
+
+        def match_template(self, _screenshot, template_path, **options):
+            if template_path.endswith("notAvailable.png"):
+                assert options["roi"] == (573, 533, 137, 60)
+                return _match(template_path, [640, 563], matched=True, confidence=0.92)
+            if template_path.endswith("rwks.png"):
+                assert options["roi"] == (733, 533, 207, 60)
+                return _match(template_path, [837, 563], matched=True, confidence=0.95)
+            if template_path.endswith("listupdate.png"):
+                assert options["roi"] == (767, 533, 113, 60)
+                return _match(template_path, [827, 563], matched=True, confidence=0.93)
+            if template_path.endswith("needSkip.png"):
+                assert options["roi"] == (1193, 573, 67, 80)
+                return _match(template_path, [1226, 613], matched=True, confidence=0.94)
+            return _match(template_path, [100, 100], matched=False, confidence=0.2)
+
+    result = QuestRecognizer(StoryPromptRecognition()).recognize_main_story_quests(
+        b"screen",
+        "CH",
+    )
+
+    assert result["quest_unavailable"]["matched"] is True
+    assert result["quest_unavailable"]["center"] == [640, 563]
+    assert result["story_start"]["matched"] is True
+    assert result["story_start"]["center"] == [837, 563]
+    assert result["story_skip"]["matched"] is True
+    assert result["story_skip"]["template_path"] == "battle/CH/needSkip.png"
+    assert result["story_skip_confirm"]["matched"] is True
+    assert result["story_skip_confirm"]["center"] == [827, 563]
+    assert result["story_skip_touch"] == [1197, 40]
 
 
 def test_interlude_recognizer_detects_ap_goto_stage_and_goto_interlude():
