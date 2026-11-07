@@ -6,6 +6,7 @@ from typing import Any
 from webapp.automation.interaction import (
     configured_random_time,
     match_touch_point,
+    randomized_touch_point,
     randomized_wait_seconds,
 )
 from webapp.automation.network import reconnect_if_present
@@ -18,6 +19,8 @@ from webapp.services.team import TeamRecognizer
 
 
 BATTLE_PREPARE_JOB_KIND = "battle.prepare"
+CRAWL_TOWER_TRIGGER_POINT = (297, 677)
+CRAWL_TOWER_TRIGGER_SIZE = (60, 47)
 
 
 def create_battle_entry_handler(
@@ -43,6 +46,9 @@ def create_battle_entry_handler(
         team_check_mode = payload.get("team_check_mode", "warn")
         if team_check_mode not in {"off", "warn", "strict"}:
             raise ValueError("team_check_mode must be off, warn, or strict.")
+        crawl_tower = payload.get("crawl_tower", False)
+        if not isinstance(crawl_tower, bool):
+            raise ValueError("crawl_tower must be a boolean.")
         plan = script_data.get_setting_plan(setting_name.strip())
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
@@ -61,6 +67,7 @@ def create_battle_entry_handler(
         attempts = 0
         actions: list[str] = []
         team_verification = None
+        auto_formation_confirmed = False
 
         while monotonic() - started <= timeout_seconds:
             elapsed = monotonic() - started
@@ -117,6 +124,31 @@ def create_battle_entry_handler(
                 }
             if (
                 matched_role == "team_decide"
+                and crawl_tower
+                and not auto_formation_confirmed
+            ):
+                touch_x, touch_y = randomized_touch_point(
+                    CRAWL_TOWER_TRIGGER_POINT,
+                    enabled=random_touch,
+                    size=CRAWL_TOWER_TRIGGER_SIZE,
+                )
+                operation = device_service.tap(touch_x, touch_y)
+                actions.append("auto_formation_trigger")
+                context.emit(
+                    "device_action",
+                    "Opened CrawlTower auto-formation dialog.",
+                    data={
+                        "role": "auto_formation_trigger",
+                        "x": CRAWL_TOWER_TRIGGER_POINT[0],
+                        "y": CRAWL_TOWER_TRIGGER_POINT[1],
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+            if (
+                matched_role == "team_decide"
+                and not crawl_tower
                 and team_recognizer is not None
                 and team_check_mode != "off"
                 and team_verification is None
@@ -177,6 +209,8 @@ def create_battle_entry_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
             if matched_role is not None and matched_result is not None:
+                if matched_role == "auto_formation":
+                    auto_formation_confirmed = True
                 operation = device_service.tap(
                     *match_touch_point(matched_result, enabled=random_touch)
                 )

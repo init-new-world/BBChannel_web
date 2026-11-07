@@ -243,6 +243,99 @@ def test_battle_prepare_uses_crawl_tower_auto_formation():
     assert device.taps == [(600, 430)]
 
 
+def test_battle_prepare_crawl_tower_triggers_auto_formation_from_team_screen():
+    class ScriptDataStub:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "run": {
+                    "random_touch": False,
+                    "random_time": 0,
+                    "allow_other_apple": False,
+                },
+            }
+
+    class DeviceStub:
+        def __init__(self):
+            self.frames = iter((b"team", b"formation", b"team", b"battle"))
+            self.taps = []
+
+        def snapshot(self):
+            return next(self.frames)
+
+        def tap(self, x, y):
+            self.taps.append((x, y))
+
+            class Operation:
+                def to_dict(self):
+                    return {"ok": True}
+
+            return Operation()
+
+    class RecognitionStub:
+        def match_template(self, screenshot, template_path, **_options):
+            matched = (
+                screenshot == b"team"
+                and template_path == "battle/CH/teamDecide.png"
+            ) or (
+                screenshot == b"formation"
+                and template_path == "battle/CrawlTower/CH/zdbc.png"
+            ) or (
+                screenshot == b"battle"
+                and template_path == "battle/CH/attack.png"
+            )
+            center = [600, 430] if template_path.endswith("zdbc.png") else [640, 520]
+            return MatchResult(
+                template_path=template_path,
+                matched=matched,
+                confidence=1.0 if matched else 0.0,
+                threshold=0.85,
+                top_left=[center[0] - 40, center[1] - 20],
+                size=[80, 40],
+                center=center,
+            )
+
+    class TeamRecognizerStub:
+        def recognize(self, *_args, **_kwargs):
+            raise AssertionError("CrawlTower must skip team verification")
+
+    class ContextStub:
+        def checkpoint(self, *_args, **_kwargs):
+            pass
+
+        def emit(self, *_args, **_kwargs):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    device = DeviceStub()
+    result = create_battle_entry_handler(
+        ScriptDataStub(),
+        device,
+        RecognitionStub(),
+        TeamRecognizerStub(),
+    )(
+        ContextStub(),
+        {
+            "setting_name": "tower",
+            "crawl_tower": True,
+            "team_check_mode": "strict",
+            "timeout_seconds": 1,
+            "poll_interval": 0,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["ready"] is True
+    assert result["actions"] == [
+        "auto_formation_trigger",
+        "auto_formation",
+        "team_decide",
+    ]
+    assert device.taps == [(297, 677), (600, 430), (640, 520)]
+
+
 def test_battle_prepare_does_not_treat_team_screen_as_phase_one():
     class ScriptDataStub:
         def get_setting_plan(self, _name):
