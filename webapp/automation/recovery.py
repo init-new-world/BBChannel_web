@@ -3,6 +3,9 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any
 
+import cv2
+import numpy as np
+
 from webapp.automation.interaction import (
     configured_random_time,
     match_touch_point,
@@ -18,6 +21,9 @@ from webapp.services.script_data import ScriptDataService
 
 
 BATTLE_RESTART_GAME_JOB_KIND = "battle.restart-game"
+ANNOUNCEMENT_CLOSE_POINT = (1243, 33)
+WAIT_MENU_POINT = (1183, 707)
+TITLE_START_POINT = (640, 360)
 
 
 def create_recovery_handler(
@@ -49,6 +55,9 @@ def create_recovery_handler(
         poll_interval = _number(payload, "poll_interval", 1, 0, 30)
         launch_wait_seconds = _number(payload, "launch_wait_seconds", 5, 0, 60)
         action_wait_seconds = _number(payload, "action_wait_seconds", 1, 0, 30)
+        tap_wait_menu = payload.get("tap_wait_menu", False)
+        if not isinstance(tap_wait_menu, bool):
+            raise ValueError("tap_wait_menu must be a boolean.")
         random_time = configured_random_time(plan["run"].get("random_time", 0))
         random_touch = bool(plan["run"].get("random_touch"))
         server = str(plan["server"]).upper()
@@ -103,6 +112,7 @@ def create_recovery_handler(
                     screenshot,
                     server,
                     random_touch=random_touch,
+                    tap_wait_menu=tap_wait_menu,
                 )
                 if action is not None:
                     actions.append(action)
@@ -164,6 +174,7 @@ def _navigate_startup_page(
     server: str,
     *,
     random_touch: bool,
+    tap_wait_menu: bool = False,
 ) -> str | None:
     action: str | None = None
     point: tuple[int, int] | None = None
@@ -178,17 +189,33 @@ def _navigate_startup_page(
         point = match_touch_point(reconnect, enabled=random_touch)
 
     if action is None:
+        dialog_bounds = (
+            _detect_white_dialog_bounds(screenshot) if server == "CH" else None
+        )
         terms = _match_optional(
             recognition,
             screenshot,
             f"crushRestart/{server}/yhxy.png",
+            threshold=0.7 if dialog_bounds is not None else 0.85,
+            roi=dialog_bounds,
         )
         if terms is not None and terms.matched:
-            left, top = terms.top_left
-            width, height = terms.size
             action = "accept_terms"
+            if dialog_bounds is not None:
+                dialog_x, dialog_y, dialog_w, dialog_h = dialog_bounds
+                confirm_point = (
+                    round(dialog_x + 600 * dialog_w / 980),
+                    round(dialog_y + 530 * dialog_h / 620),
+                )
+            else:
+                left, top = terms.top_left
+                width, height = terms.size
+                confirm_point = (
+                    left + round(width * 0.75),
+                    top + round(height * 0.5),
+                )
             point = randomized_touch_point(
-                (left + round(width * 0.75), top + round(height * 0.5)),
+                confirm_point,
                 enabled=random_touch,
             )
 
@@ -199,14 +226,19 @@ def _navigate_startup_page(
             f"crushRestart/{server}/yxgg.png",
         )
         if announcement is not None and announcement.matched:
+            action = "close_announcement"
             close_button = _match_optional(
                 recognition,
                 screenshot,
                 f"battle/{server}/x.png",
             )
             if close_button is not None and close_button.matched:
-                action = "close_announcement"
                 point = match_touch_point(close_button, enabled=random_touch)
+            else:
+                point = randomized_touch_point(
+                    ANNOUNCEMENT_CLOSE_POINT,
+                    enabled=random_touch,
+                )
 
     if action is None:
         enter_battle = _match_optional(
@@ -226,7 +258,14 @@ def _navigate_startup_page(
         )
         if title_menu is not None and title_menu.matched:
             action = "title_start"
-            point = randomized_touch_point((640, 360), enabled=random_touch)
+            point = randomized_touch_point(
+                TITLE_START_POINT,
+                enabled=random_touch,
+            )
+
+    if action is None and tap_wait_menu:
+        action = "wait_menu"
+        point = randomized_touch_point(WAIT_MENU_POINT, enabled=random_touch)
 
     if action is None or point is None:
         return None
@@ -239,17 +278,50 @@ def _navigate_startup_page(
     return action
 
 
+def _detect_white_dialog_bounds(
+    screenshot: bytes,
+) -> tuple[int, int, int, int] | None:
+    if not screenshot:
+        return None
+    buffer = np.frombuffer(screenshot, dtype=np.uint8)
+    decoded = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+    if decoded is None:
+        return None
+    gray = cv2.cvtColor(decoded, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(
+        thresh,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    if not contours:
+        return None
+    largest = max(contours, key=cv2.contourArea)
+    x, y, width, height = cv2.boundingRect(largest)
+    if width < 200 or height < 120:
+        return None
+    return int(x), int(y), int(width), int(height)
+
+
 def _match_optional(
     recognition: RecognitionService,
     screenshot: bytes,
     template_path: str,
+    *,
+    threshold: float = 0.85,
+    roi: tuple[int, int, int, int] | None = None,
 ):
+    options: dict[str, Any] = {
+        "threshold": threshold,
+        "scales": (1.0, 0.75, 2 / 3, 0.5),
+    }
+    if roi is not None:
+        options["roi"] = roi
     try:
         return recognition.match_template(
             screenshot,
             template_path,
-            threshold=0.85,
-            scales=(1.0, 0.75, 2 / 3, 0.5),
+            **options,
         )
     except AppError as exc:
         if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:

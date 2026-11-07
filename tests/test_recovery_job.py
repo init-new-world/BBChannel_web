@@ -1,3 +1,7 @@
+from io import BytesIO
+
+from PIL import Image, ImageDraw
+
 from webapp.automation.recovery import create_recovery_handler
 
 
@@ -177,4 +181,58 @@ def test_recovery_navigates_startup_pages_before_resuming_battle():
         (1180, 80),
         (640, 430),
         (650, 450),
+    ]
+
+
+def test_recovery_supports_contour_terms_dialog_tx_fallback_and_wait_menu():
+    terms_img = Image.new("RGB", (1280, 720), (20, 20, 30))
+    draw = ImageDraw.Draw(terms_img)
+    draw.rectangle((150, 50, 1129, 669), fill=(250, 250, 250))
+    buf = BytesIO()
+    terms_img.save(buf, format="PNG")
+    terms_bytes = buf.getvalue()
+    seen_rois = []
+
+    class ContourRecognition:
+        def match_template(self, screenshot, template_path, **options):
+            if screenshot == terms_bytes and template_path == "crushRestart/CH/yhxy.png":
+                seen_rois.append((options.get("threshold"), options.get("roi")))
+                return _Match(True, center=(400, 300), top_left=(300, 250), size=(200, 100))
+            if screenshot == b"announcement-no-x" and template_path == "crushRestart/CH/yxgg.png":
+                return _Match(True)
+            return _Match()
+
+    device = _Device([terms_bytes, b"announcement-no-x", b"splash"])
+    stages = iter(("unknown", "unknown", "unknown", "assist"))
+    handler = create_recovery_handler(
+        _ScriptData(),
+        device,
+        lambda _context, _payload: {"stage": next(stages)},
+        ContourRecognition(),
+    )
+
+    result = handler(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "launch_wait_seconds": 0,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+            "timeout_seconds": 1,
+            "tap_wait_menu": True,
+        },
+    )
+
+    assert result["recovered"] is True
+    assert result["stage"] == "assist"
+    assert seen_rois == [(0.7, (150, 50, 980, 620))]
+    assert result["actions"] == [
+        "accept_terms",
+        "close_announcement",
+        "wait_menu",
+    ]
+    assert device.taps == [
+        (750, 580),
+        (1243, 33),
+        (1183, 707),
     ]
