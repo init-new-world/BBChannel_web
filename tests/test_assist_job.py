@@ -1126,3 +1126,125 @@ def test_assist_handler_scrolls_ap_recovery_list_for_copper_and_falls_back_up_to
     ]
     assert taps == [(422, 322), (742, 601), (340, 165)]
     assert result["ap_actions"] == ["apple_silver", "apple_decide"]
+
+
+def test_assist_handler_cycles_sort_order_and_uses_shorter_scroll_step_for_servant_level():
+    state = {"screen": "wrong_order"}
+    taps = []
+    swipes = []
+    events = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return state["screen"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            if (x, y) == (1153, 128):
+                state["screen"] = "level_order_page1"
+            elif (x, y) == (340, 165):
+                state["screen"] = "team"
+            return Operation()
+
+        def swipe(self, x1, y1, x2, y2, duration_ms):
+            swipes.append((x1, y1, x2, y2, duration_ms))
+            state["screen"] = "level_order_page2"
+            return Operation()
+
+    class Match:
+        def __init__(self, matched, center=(0, 0), top_left=(0, 0), size=(20, 20)):
+            self.matched = matched
+            self.center = list(center)
+            self.top_left = list(top_left)
+            self.size = list(size)
+
+    class Recognizer:
+        def match_reconnect(self, *_args):
+            return Match(False)
+
+        def match_apple_close(self, *_args):
+            return Match(False)
+
+        def match_apple_decide(self, *_args):
+            return Match(False)
+
+        def match_sort_order(self, screenshot, _server):
+            matched = screenshot in {b"level_order_page1", b"level_order_page2"}
+            return {
+                "matched": matched,
+                "order": "level" if matched else None,
+                "match": Match(matched),
+            }
+
+        def match_no_assist(self, *_args):
+            return Match(False)
+
+        def match_scrollbar(self, *_args):
+            return Match(False)
+
+        def match_not_available(self, *_args):
+            return Match(False)
+
+        def recognize(self, screenshot, _assist, **_options):
+            if screenshot == b"level_order_page2":
+                return {
+                    "servant_name": "Support",
+                    "candidate_count": 1,
+                    "candidates": [
+                        {
+                            "anchor": [160, 205],
+                            "scale": 2 / 3,
+                            "confidence": 0.95,
+                        }
+                    ],
+                }
+            return {
+                "servant_name": "Support",
+                "candidate_count": 0,
+                "candidates": [],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {
+                    "mode": "从者礼装",
+                    "servant_level": 90,
+                    "all_not_skip": True,
+                },
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, kind, message, *, data=None):
+            events.append((kind, message, data or {}))
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {
+            "setting_name": "demo",
+            "max_scrolls": 2,
+            "scroll_wait_seconds": 0,
+            "tap_wait_seconds": 0,
+        },
+    )
+
+    assert taps == [(1153, 128), (340, 165)]
+    assert swipes == [(700, 620, 700, 407, 700)]
+    assert result["scrolls"] == 1
+    assert any(
+        data.get("role") == "assist_sort_order_confirmed" and data.get("order") == "level"
+        for _kind, _message, data in events
+    )
+

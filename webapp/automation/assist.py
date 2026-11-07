@@ -20,9 +20,12 @@ GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
 ASSIST_SCROLL_X = 700
 ASSIST_SCROLL_START_Y = 620
 ASSIST_SCROLL_END_Y = 380
+ASSIST_LEVEL_SCROLL_END_Y = 407
 ASSIST_SCROLL_DURATION_MS = 700
 ASSIST_SKILL_TOGGLE_POINT = (847, 130)
+ASSIST_SORT_ORDER_POINT = (1153, 128)
 MAX_ASSIST_CLASS_ATTEMPTS = 3
+MAX_ASSIST_SORT_ATTEMPTS = 3
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -340,6 +343,66 @@ def create_assist_handler(
                         break
                 else:
                     raise RuntimeError("Assist class selection was not confirmed after three attempts.")
+        required_servant_level = plan["assist"].get("servant_level", 1)
+        check_servant_level = (
+            plan["assist"].get("mode") not in {"不识别", "仅礼装", "冠位助战仅礼装"}
+            and isinstance(required_servant_level, int)
+            and not isinstance(required_servant_level, bool)
+            and required_servant_level > 1
+        )
+        if check_servant_level:
+            sort_order = _optional_assist_match(
+                assist_recognizer,
+                "match_sort_order",
+                snapshot_without_reconnect(),
+                plan["server"],
+            )
+            if sort_order is not None and not sort_order.get("matched"):
+                for attempt in range(1, MAX_ASSIST_SORT_ATTEMPTS + 1):
+                    context.checkpoint("select_assist_sort_order", progress=0)
+                    touch_point = randomized_touch_point(
+                        ASSIST_SORT_ORDER_POINT,
+                        enabled=random_touch,
+                    )
+                    operation = device_service.tap(*touch_point)
+                    context.emit(
+                        "device_action",
+                        "Tapped assist sort order button for servant level recognition.",
+                        data={
+                            "role": "assist_sort_order",
+                            "attempt": attempt,
+                            "point": list(touch_point),
+                            "operation": operation.to_dict(),
+                        },
+                    )
+                    context.sleep(
+                        randomized_wait_seconds(tap_wait_seconds, random_time)
+                    )
+                    sort_order = _optional_assist_match(
+                        assist_recognizer,
+                        "match_sort_order",
+                        snapshot_without_reconnect(),
+                        plan["server"],
+                    )
+                    if sort_order is None or sort_order.get("matched"):
+                        context.emit(
+                            "recognition",
+                            "Confirmed assist sort order for servant level recognition.",
+                            data={
+                                "role": "assist_sort_order_confirmed",
+                                "order": (
+                                    sort_order.get("order")
+                                    if isinstance(sort_order, dict)
+                                    else None
+                                ),
+                                "attempts": attempt,
+                            },
+                        )
+                        break
+                else:
+                    raise RuntimeError(
+                        "Assist list sort order must be Login Order or Level Order when servant_level > 1."
+                    )
         attempts = 0
         scrolls = 0
         scrolls_since_refresh = 0
@@ -585,11 +648,16 @@ def create_assist_handler(
                         )
             if scrolls_since_refresh < max_scrolls:
                 context.checkpoint("scroll_assist", progress=progress)
+                scroll_end_y = (
+                    ASSIST_LEVEL_SCROLL_END_Y
+                    if check_servant_level
+                    else ASSIST_SCROLL_END_Y
+                )
                 operation = device_service.swipe(
                     ASSIST_SCROLL_X,
                     ASSIST_SCROLL_START_Y,
                     ASSIST_SCROLL_X,
-                    ASSIST_SCROLL_END_Y,
+                    scroll_end_y,
                     ASSIST_SCROLL_DURATION_MS,
                 )
                 scrolls += 1

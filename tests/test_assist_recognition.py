@@ -1322,3 +1322,53 @@ def test_grand_assist_detects_swapped_slot_1_and_slot_3_equips(tmp_path: Path):
     assert candidate["checks"]["equip_slots"]["kizuna"]["physical_slot"] == 1
     assert candidate["checks"]["equip_slots"]["normal"]["physical_slot"] == 2
 
+
+def test_assist_recognizer_match_sort_order_recognizes_level_or_load_order(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assets.mkdir()
+    data.mkdir()
+
+    seen_specs = []
+
+    class RecognitionStub:
+        def match_templates(self, _screenshot, specs):
+            seen_specs.extend(specs)
+            return [
+                MatchResult(
+                    template_path="battle/CH/levelorder.png",
+                    matched=True,
+                    confidence=0.92,
+                    threshold=0.7,
+                    top_left=[1100, 100],
+                    size=[80, 40],
+                    center=[1140, 120],
+                    scale=2 / 3,
+                ),
+                MatchResult(
+                    template_path="battle/CH/loadorder.png",
+                    matched=False,
+                    confidence=0.25,
+                    threshold=0.7,
+                    top_left=[0, 0],
+                    size=[80, 40],
+                    center=[40, 20],
+                    scale=2 / 3,
+                ),
+            ]
+
+    resources = ResourceService(assets, data)
+    result = AssistRecognizer(resources, RecognitionStub()).match_sort_order(
+        b"frame",
+        "CH",
+    )
+
+    assert result["matched"] is True
+    assert result["order"] == "level"
+    assert [spec["template_path"] for spec in seen_specs] == [
+        "battle/CH/levelorder.png",
+        "battle/CH/loadorder.png",
+    ]
+    assert all(spec["roi"] == [1093, 93, 120, 67] for spec in seen_specs)
+
+

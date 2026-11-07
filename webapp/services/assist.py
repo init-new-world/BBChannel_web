@@ -888,6 +888,42 @@ class AssistRecognizer:
         index = int((match.center[0] - origin * NORMALIZED_FRAME_SCALE) // (spacing * NORMALIZED_FRAME_SCALE))
         return index if -1 <= index <= 9 else None
 
+    def match_sort_order(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.7,
+    ) -> dict[str, Any]:
+        paths = {
+            "level": f"battle/{server.upper()}/levelorder.png",
+            "load": f"battle/{server.upper()}/loadorder.png",
+        }
+        matches = self._recognition.match_templates(
+            screenshot,
+            [
+                {
+                    "template_path": path,
+                    "threshold": threshold,
+                    "roi": [1093, 93, 120, 67],
+                    "scales": [NORMALIZED_FRAME_SCALE],
+                }
+                for path in paths.values()
+            ],
+        )
+        matched = [match for match in matches if match.matched]
+        if not matched:
+            return {"matched": False, "order": None, "match": None}
+        best = max(matched, key=lambda match: match.confidence)
+        order = next(
+            name for name, path in paths.items() if path == best.template_path
+        )
+        return {
+            "matched": True,
+            "order": order,
+            "match": best,
+        }
+
     def match_reconnect(
         self,
         screenshot: bytes,
