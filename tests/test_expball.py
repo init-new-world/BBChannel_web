@@ -1102,6 +1102,7 @@ def _enhance_report(*names, reason=None):
         "slot": (823, 283),
         "help": (1180, 110),
         "feedjd": (830, 593),
+        "cssd": (227, 635),
         "sure": (640, 520),
         "tysd": (420, 80),
         "qhjd": (1153, 670),
@@ -2597,6 +2598,168 @@ def test_expball_summon_handler_supports_hundred_roll_and_rejects_cntw():
             _Context(),
             {"setting_name": "cntw", "draw_100": True},
         )
+
+
+def test_expball_enhance_handler_configures_auto_select_stars_and_high_star_modal():
+    reports = iter(
+        (
+            _enhance_report("slot"),
+            _enhance_report("cssd"),
+            {
+                "server": "CH",
+                "state": "feedjd",
+                "flow": "enhancement",
+                "status": "actionable",
+                "reason": None,
+                "recommended_action": "confirm_auto_select",
+                "available_template_count": 10,
+                "matches": [
+                    {
+                        "name": "feedjd",
+                        "flow": "enhancement",
+                        "status": "actionable",
+                        "reason": None,
+                        "recommended_action": "confirm_auto_select",
+                        "template_path": "expball/CH/feedjd.png",
+                        "matched": True,
+                        "confidence": 0.94,
+                        "threshold": 0.84,
+                        "top_left": [780, 540],
+                        "size": [120, 46],
+                        "center": [840, 563],
+                        "scale": 2 / 3,
+                    }
+                ],
+            },
+            _enhance_report("help"),
+            _enhance_report("qhjd2"),
+            _enhance_report("slot"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "equipment",
+            "eat_3star": True,
+            "eat_4star": True,
+            "max_batches": 1,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["eat_3star"] is True
+    assert result["eat_4star"] is True
+    assert result["actions"] == [
+        "auto_select_materials",
+        "reset_auto_select_settings",
+        "reset_auto_select_settings",
+        "reset_auto_select_settings",
+        "toggle_eat_3star",
+        "toggle_eat_4star",
+        "confirm_auto_select_settings",
+        "confirm_high_star_materials",
+        "execute_enhancement",
+        "confirm_enhancement",
+    ]
+    assert device.taps[:8] == [
+        (1090, 163),
+        (227, 635),
+        (227, 635),
+        (227, 635),
+        (707, 363),
+        (881, 363),
+        (1053, 635),
+        (840, 563),
+    ]
+
+
+def test_expball_enhance_handler_stops_when_ce_bomb_grid_is_full():
+    reports = iter(
+        (
+            _enhance_report("slot"),
+            _enhance_report("tysd", "qhjd"),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_ce_bomb_grid(self, *_args, **_kwargs):
+            return {
+                "server": "CH",
+                "rows": 3,
+                "columns": 7,
+                "full_level_slots": list(range(21)),
+                "full_level_count": 21,
+                "all_full_level": True,
+                "last_slot_full_level": True,
+                "need_lock_slots": [20],
+                "need_lock_count": 1,
+                "need_mark_slots": [20],
+                "need_mark_count": 1,
+                "need_store_slots": list(range(20)),
+                "need_store_count": 20,
+                "slots": [
+                    {
+                        "slot": idx,
+                        "center": [135 + (idx % 7) * 133, 254 + (idx // 7) * 142],
+                        "full_level": True,
+                        "locked": idx < 20,
+                        "marked": idx < 20,
+                        "need_lock": idx == 20,
+                        "need_mark": idx == 20,
+                        "need_store": idx < 20,
+                    }
+                    for idx in range(21)
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "equipment",
+            "lock_full_ce_bombs": True,
+            "mark_full_ce_bombs": True,
+            "stop_when_ce_grid_full": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "ce_bomb_grid_full"
+    assert result["locked_ce_bomb_slots"] == [20]
+    assert result["marked_ce_bomb_slots"] == [20]
+    assert result["actions"] == [
+        "open_material_slots",
+        "enable_ce_unified_lock",
+        "lock_full_ce_bomb",
+        "enable_ce_unified_mark",
+        "mark_full_ce_bomb",
+        "disable_ce_unified_mark",
+    ]
+
 
 
 

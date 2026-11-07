@@ -41,6 +41,13 @@ _STORAGE_TARGETS = {"exp", "ce_bomb"}
 _ENHANCE_TARGETS = {"equipment", "servant"}
 _CE_UNIFIED_LOCK_POINT = (32, 358)
 _CE_UNIFIED_MARK_POINT = (32, 477)
+_CE_AUTO_SELECT_INIT_POINT = (227, 635)
+_CE_AUTO_SELECT_INIT_SIZE = (160, 50)
+_CE_AUTO_SELECT_3STAR_POINT = (707, 363)
+_CE_AUTO_SELECT_4STAR_POINT = (881, 363)
+_CE_AUTO_SELECT_STAR_SIZE = (127, 47)
+_CE_AUTO_SELECT_CONFIRM_POINT = (1053, 635)
+_CE_AUTO_SELECT_CONFIRM_SIZE = (160, 50)
 _ENHANCE_ADD_BASE_POINT = (197, 157)
 _ENHANCE_FIRST_CARD_POINT = (135, 243)
 _ENHANCE_OPEN_SLOTS_POINT = (823, 283)
@@ -1474,6 +1481,22 @@ def create_expball_enhance_handler(
         if not isinstance(mark_full_ce_bombs_raw, bool):
             raise ValueError("mark_full_ce_bombs must be a boolean.")
         mark_full_ce_bombs = mark_full_ce_bombs_raw
+        stop_when_ce_grid_full_raw = payload.get(
+            "stop_when_ce_grid_full",
+            False,
+        )
+        if not isinstance(stop_when_ce_grid_full_raw, bool):
+            raise ValueError("stop_when_ce_grid_full must be a boolean.")
+        stop_when_ce_grid_full = stop_when_ce_grid_full_raw
+        eat_3star = _boolean_alias(payload, ("eat_3star", "eat3star"), False)
+        eat_4star = _boolean_alias(payload, ("eat_4star", "eat4star"), False)
+        allow_high_star_materials_raw = payload.get(
+            "allow_high_star_materials",
+            True,
+        )
+        if not isinstance(allow_high_star_materials_raw, bool):
+            raise ValueError("allow_high_star_materials must be a boolean.")
+        allow_high_star_materials = allow_high_star_materials_raw
         if selection_mode_raw is None:
             selection_mode = (
                 "grid"
@@ -1481,6 +1504,7 @@ def create_expball_enhance_handler(
                     stars is not None
                     or lock_full_ce_bombs
                     or mark_full_ce_bombs
+                    or stop_when_ce_grid_full
                 )
                 else "auto"
             )
@@ -1546,6 +1570,7 @@ def create_expball_enhance_handler(
         base_scrolls = 0
         scroll_end_hits = 0
         materials_selected = False
+        auto_select_settings_confirmed = False
         grid_cards_tapped = False
         ce_bombs_checked = False
         pending_animation_skip = False
@@ -1604,8 +1629,12 @@ def create_expball_enhance_handler(
                 "completed_servant_targets": list(completed_servant_targets),
                 "missing_servant_targets": list(missing_servant_targets),
                 "auto_limit_break": auto_limit_break,
+                "eat_3star": eat_3star,
+                "eat_4star": eat_4star,
+                "allow_high_star_materials": allow_high_star_materials,
                 "lock_full_ce_bombs": lock_full_ce_bombs,
                 "mark_full_ce_bombs": mark_full_ce_bombs,
+                "stop_when_ce_grid_full": stop_when_ce_grid_full,
                 "max_batches": max_batches,
                 "batches_completed": batches_completed,
                 "limit_breaks_completed": limit_breaks_completed,
@@ -1674,6 +1703,7 @@ def create_expball_enhance_handler(
                     for overlay in (
                         "exlevel",
                         "feedjd",
+                        "cssd",
                         "qhjd2",
                         "xzdx",
                         "tysd",
@@ -2018,12 +2048,88 @@ def create_expball_enhance_handler(
                 grid_cards_tapped = False
                 ce_bombs_checked = False
                 acted = True
+            elif "cssd" in matches and (
+                "feedjd" not in matches or eat_3star or eat_4star
+            ):
+                for _ in range(3):
+                    if not tap_point(
+                        _CE_AUTO_SELECT_INIT_POINT,
+                        "reset_auto_select_settings",
+                        size=_CE_AUTO_SELECT_INIT_SIZE,
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                if eat_3star:
+                    if not tap_point(
+                        _CE_AUTO_SELECT_3STAR_POINT,
+                        "toggle_eat_3star",
+                        size=_CE_AUTO_SELECT_STAR_SIZE,
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                if eat_4star:
+                    if not tap_point(
+                        _CE_AUTO_SELECT_4STAR_POINT,
+                        "toggle_eat_4star",
+                        size=_CE_AUTO_SELECT_STAR_SIZE,
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                if not tap_point(
+                    _CE_AUTO_SELECT_CONFIRM_POINT,
+                    "confirm_auto_select_settings",
+                    size=_CE_AUTO_SELECT_CONFIRM_SIZE,
+                ):
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="device_action_failed",
+                        report=report,
+                    )
+                materials_selected = True
+                auto_select_settings_confirmed = True
+                acted = True
             elif "feedjd" in matches:
                 feed_target = matches["feedjd"]
                 feed_center = feed_target.get("center") or (840, 633)
+                is_high_star_dialog = bool(
+                    (
+                        eat_3star
+                        or eat_4star
+                        or not allow_high_star_materials
+                        or auto_select_settings_confirmed
+                    )
+                    and isinstance(feed_center, (list, tuple))
+                    and len(feed_center) == 2
+                    and float(feed_center[1]) <= 580
+                )
+                if is_high_star_dialog and not allow_high_star_materials:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason="high_star_materials_blocked",
+                        report=report,
+                    )
+                feed_role = (
+                    "confirm_high_star_materials"
+                    if is_high_star_dialog
+                    else "confirm_auto_select"
+                )
                 if not tap_point(
                     feed_center,
-                    "confirm_auto_select",
+                    feed_role,
                     size=feed_target.get("size"),
                 ):
                     return finish(
@@ -2032,6 +2138,7 @@ def create_expball_enhance_handler(
                         reason="device_action_failed",
                         report=report,
                     )
+                auto_select_settings_confirmed = False
                 materials_selected = True
                 acted = True
             elif "xzdx" in matches:
@@ -2167,7 +2274,11 @@ def create_expball_enhance_handler(
                     ce_grid_report: dict[str, Any] | None = None
                     if (
                         target == "equipment"
-                        and (lock_full_ce_bombs or mark_full_ce_bombs)
+                        and (
+                            lock_full_ce_bombs
+                            or mark_full_ce_bombs
+                            or stop_when_ce_grid_full
+                        )
                         and not ce_bombs_checked
                     ):
                         ce_grid_report = recognizer.recognize_ce_bomb_grid(
@@ -2182,6 +2293,7 @@ def create_expball_enhance_handler(
                             data={
                                 "lock_full_ce_bombs": lock_full_ce_bombs,
                                 "mark_full_ce_bombs": mark_full_ce_bombs,
+                                "stop_when_ce_grid_full": stop_when_ce_grid_full,
                                 **ce_grid_report,
                             },
                         )
@@ -2297,6 +2409,24 @@ def create_expball_enhance_handler(
                                     report=report,
                                 )
                         ce_bombs_checked = True
+                        if stop_when_ce_grid_full and (
+                            ce_grid_report.get("last_slot_full_level") is True
+                            or ce_grid_report.get("all_full_level") is True
+                            or bool(
+                                ce_grid_report.get("slots")
+                                and all(
+                                    isinstance(slot, dict)
+                                    and slot.get("full_level") is True
+                                    for slot in ce_grid_report.get("slots", [])
+                                )
+                            )
+                        ):
+                            return finish(
+                                completed=True,
+                                stopped=False,
+                                reason="ce_bomb_grid_full",
+                                report=report,
+                            )
                     if stars is not None:
                         grid_report = recognizer.recognize_storage_grid(
                             screenshot,
@@ -2555,13 +2685,21 @@ def _summon_result(
 
 
 def _draw_100(payload: dict[str, Any]) -> bool:
-    for key in ("draw_100", "draw100by100"):
+    return _boolean_alias(payload, ("draw_100", "draw100by100"), False)
+
+
+def _boolean_alias(
+    payload: dict[str, Any],
+    keys: tuple[str, ...],
+    default: bool,
+) -> bool:
+    for key in keys:
         if key in payload and payload[key] is not None:
             value = payload[key]
             if not isinstance(value, bool):
                 raise ValueError(f"{key} must be a boolean.")
             return value
-    return False
+    return default
 
 
 def _parse_summon_lock_targets(
