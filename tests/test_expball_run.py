@@ -442,3 +442,141 @@ def test_expball_run_forwards_summon_lock_targets_and_stops_when_target_reached(
         }
     ]
 
+
+def test_expball_run_storage_then_sell_falls_back_when_storage_full():
+    nav_states = iter(
+        (
+            _navigation_report("summon_page"),
+            _navigation_report("storage_page"),
+            _navigation_report("sell_page"),
+            _navigation_report("summon_page"),
+        )
+    )
+    reports = iter(
+        (
+            _report(
+                "boxfull",
+                "summon",
+                "actionable",
+                action="handle_full_box",
+            ),
+            _report(
+                "storefull",
+                "storage",
+                "blocked",
+                reason="storage_full",
+                matches=[{"name": "storefull", "center": [640, 360]}],
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                action="open_auto_sell",
+                matches=[{"name": "autoSell", "center": [320, 610]}],
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                action="open_auto_sell",
+                matches=[
+                    {"name": "autoSell", "center": [320, 610]},
+                    {"name": "jd", "center": [1120, 650]},
+                ],
+            ),
+            _report(
+                "destroy",
+                "sell",
+                "actionable",
+                matches=[{"name": "destroy", "center": [980, 620]}],
+            ),
+            _report(
+                "ljbhclose",
+                "confirmation",
+                "actionable",
+                matches=[{"name": "ljbhclose", "center": [640, 610]}],
+            ),
+            _report(
+                "autoSell",
+                "sell",
+                "actionable",
+                action="open_auto_sell",
+                matches=[{"name": "autoSell", "center": [320, 610]}],
+            ),
+            _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                matches=[{"name": "call10", "center": [800, 520]}],
+            ),
+            _report(
+                "decide",
+                "confirmation",
+                "actionable",
+                action="confirm_summon",
+                matches=[{"name": "decide", "center": [835, 563]}],
+            ),
+            _report(
+                "again10",
+                "summon",
+                "actionable",
+                action="summon_again",
+                matches=[
+                    {"name": "again10", "center": [760, 673]},
+                    {"name": "bianhuan", "center": [1040, 670]},
+                ],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_storage_grid(self, *_args, **_kwargs):
+            return {
+                "rows": 3,
+                "columns": 7,
+                "recognized_count": 1,
+                "slots": [{"slot": 0, "star": 4, "center": [136, 248]}],
+            }
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 1,
+            "store_first": True,
+            "stars": [4],
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "summon_limit"
+    assert result["overflow_action"] == "storage_then_sell"
+    assert result["storage_full"] is True
+    assert result["overflow_cycles"] == 1
+    assert [stage["stage"] for stage in result["stages"]] == [
+        "navigate_summon",
+        "summon",
+        "navigate_storage",
+        "storage",
+        "navigate_sell",
+        "sell",
+        "navigate_summon",
+        "summon",
+    ]
+
+

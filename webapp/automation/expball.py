@@ -441,6 +441,10 @@ def create_expball_servant_target_inspect_handler(
         raw_target = payload.get("target")
         if raw_target is not None and not isinstance(raw_target, str):
             raise ValueError("target must be a string when provided.")
+        if raw_target is None:
+            parsed_targets = _parse_servant_targets(payload, None)
+            if parsed_targets:
+                raw_target = str(parsed_targets[0]["target"])
         threshold = _number(payload, "threshold", 0.85, 0, 1)
         scroll_end_threshold = _number(
             payload,
@@ -518,6 +522,12 @@ def create_expball_summon_lock_inspect_handler(
             (list, tuple),
         ):
             raise ValueError("targets must be a list of lock target names.")
+        if raw_targets is None:
+            parsed_lock_targets = _parse_summon_lock_targets(payload)
+            if parsed_lock_targets:
+                raw_targets = [
+                    str(item["target"]) for item in parsed_lock_targets
+                ]
         server = str(
             script_data.get_setting_plan(normalized_name)["server"]
         ).upper()
@@ -2581,7 +2591,11 @@ def _parse_summon_lock_targets(
                 raw_name = (
                     item.get("target")
                     if item.get("target") is not None
-                    else item.get("path")
+                    else (
+                        item.get("name")
+                        if item.get("name") is not None
+                        else item.get("path")
+                    )
                 )
                 if not isinstance(raw_name, str) or not raw_name.strip():
                     raise ValueError(
@@ -2590,7 +2604,11 @@ def _parse_summon_lock_targets(
                 raw_count = (
                     item.get("count")
                     if item.get("count") is not None
-                    else item.get("need_num", 0)
+                    else (
+                        item.get("max_count")
+                        if item.get("max_count") is not None
+                        else item.get("need_num", 0)
+                    )
                 )
                 if isinstance(raw_count, bool) or not isinstance(
                     raw_count,

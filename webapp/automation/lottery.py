@@ -7,6 +7,7 @@ from webapp.automation.expball import (
     create_expball_enhance_handler,
     create_expball_storage_handler,
 )
+from webapp.automation.expball_navigation import create_expball_navigate_handler
 from webapp.automation.expball_sell import create_expball_sell_handler
 from webapp.automation.interaction import (
     configured_random_time,
@@ -54,6 +55,7 @@ _LOTTERY_OVERFLOW_ACTIONS = {
     "stop",
     "storage",
     "sell",
+    "storage_then_sell",
     "servant_enhancement",
 }
 _DRAW_PAGE_STATES = {
@@ -543,6 +545,10 @@ def create_lottery_giftbox_receive_handler(
         stack_threshold = _number(payload, "stack_threshold", 0.7, 0, 1)
         max_select_batch = _integer(payload, "max_select_batch", 40, 1, 99)
         max_empty_pages = _integer(payload, "max_empty_pages", 6, 1, 50)
+        first_round_count_raw = payload.get("first_round_count", False)
+        if not isinstance(first_round_count_raw, bool):
+            raise ValueError("first_round_count must be a boolean.")
+        first_round_count = first_round_count_raw
         timeout_seconds = _number(payload, "timeout_seconds", 600, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.25, 0, 10)
         action_wait_seconds = _number(
@@ -719,7 +725,10 @@ def create_lottery_giftbox_receive_handler(
                         action, point = "receive_selected", RECEIVE_SELECTED_POINT
                         receive_batches += 1
                         selected_in_batch = 0
-                    elif at_bottom or empty_page_count >= max_empty_pages:
+                    elif at_bottom or (
+                        not first_round_count
+                        and empty_page_count >= max_empty_pages
+                    ):
                         if selected_in_batch > 0:
                             action, point = "receive_selected", RECEIVE_SELECTED_POINT
                             receive_batches += 1
@@ -907,6 +916,15 @@ def create_lottery_run_handler(
         if expball_recognizer is not None
         else None
     )
+    expball_navigate_handler = (
+        create_expball_navigate_handler(
+            script_data,
+            device_service,
+            expball_recognizer,
+        )
+        if expball_recognizer is not None
+        else None
+    )
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _setting_name(payload)
@@ -924,32 +942,52 @@ def create_lottery_run_handler(
             1,
             100,
         )
+        first_round_count_raw = payload.get("first_round_count", False)
+        if not isinstance(first_round_count_raw, bool):
+            raise ValueError("first_round_count must be a boolean.")
+        first_round_count = first_round_count_raw
+        store_first_raw = payload.get("store_first", False)
+        if not isinstance(store_first_raw, bool):
+            raise ValueError("store_first must be a boolean.")
         overflow_action = str(payload.get("overflow_action") or "stop").strip().lower()
+        if store_first_raw and overflow_action in {"stop", "storage", "sell"}:
+            overflow_action = "storage_then_sell"
         if overflow_action not in _LOTTERY_OVERFLOW_ACTIONS:
             raise ValueError(
-                "overflow_action must be stop, storage, sell, or servant_enhancement."
+                "overflow_action must be stop, storage, sell, "
+                "storage_then_sell, or servant_enhancement."
             )
         overflow_stars = (
             _stars(payload.get("overflow_stars"))
             if "overflow_stars" in payload and payload["overflow_stars"] is not None
             else None
         )
+        storage_stars = (
+            _stars(payload.get("storage_stars"))
+            if "storage_stars" in payload and payload["storage_stars"] is not None
+            else overflow_stars
+        )
+        sell_stars = (
+            _stars(payload.get("sell_stars"))
+            if "sell_stars" in payload and payload["sell_stars"] is not None
+            else overflow_stars
+        )
         storage_target = (
             str(payload.get("storage_target") or "exp").strip().lower()
         )
         sell_target = str(payload.get("sell_target") or "exp").strip().lower()
         if (
-            overflow_action == "storage"
+            overflow_action in {"storage", "storage_then_sell"}
             and storage_target != "ce_bomb"
-            and overflow_stars is None
+            and storage_stars is None
         ):
             raise ValueError(
                 "overflow_action requires overflow_stars to be configured for storage or sell."
             )
         if (
-            overflow_action == "sell"
+            overflow_action in {"sell", "storage_then_sell"}
             and sell_target not in {"servant", "command_code"}
-            and overflow_stars is None
+            and sell_stars is None
         ):
             raise ValueError(
                 "overflow_action requires overflow_stars to be configured for storage or sell."
@@ -991,30 +1029,38 @@ def create_lottery_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        storage_overflow_payload = dict(overflow_payload)
+        if storage_stars is not None:
+            storage_overflow_payload["stars"] = list(storage_stars)
+        for key in (
+            "storage_target",
+            "require_locked_and_marked",
+            "locker_threshold",
+            "mark_threshold",
+        ):
+            _copy_option(payload, storage_overflow_payload, key, key)
+        sell_overflow_payload = dict(overflow_payload)
+        if sell_stars is not None:
+            sell_overflow_payload["stars"] = list(sell_stars)
+        for key in (
+            "sell_target",
+            "lock_gold_servants",
+            "include_fp_gold",
+            "select_servant_cards",
+            "fp_gold_threshold",
+            "lock_inscribed_command_codes",
+            "inscribed_threshold",
+            "empty_threshold",
+            "locker_threshold",
+            "switch_command_code_tab",
+            "auto_select",
+            "allow_qp_full",
+        ):
+            _copy_option(payload, sell_overflow_payload, key, key)
         if overflow_action == "storage":
-            for key in (
-                "storage_target",
-                "require_locked_and_marked",
-                "locker_threshold",
-                "mark_threshold",
-            ):
-                _copy_option(payload, overflow_payload, key, key)
+            overflow_payload = storage_overflow_payload
         if overflow_action == "sell":
-            for key in (
-                "sell_target",
-                "lock_gold_servants",
-                "include_fp_gold",
-                "select_servant_cards",
-                "fp_gold_threshold",
-                "lock_inscribed_command_codes",
-                "inscribed_threshold",
-                "empty_threshold",
-                "locker_threshold",
-                "switch_command_code_tab",
-                "auto_select",
-                "allow_qp_full",
-            ):
-                _copy_option(payload, overflow_payload, key, key)
+            overflow_payload = sell_overflow_payload
         if overflow_action == "servant_enhancement":
             overflow_payload["target"] = "servant"
             overflow_payload["selection_mode"] = str(
@@ -1081,6 +1127,8 @@ def create_lottery_run_handler(
 
         giftbox_cycles = 0
         overflow_cycles = 0
+        storage_full = False
+        first_filter_pass = True
         draw_count = 0
         receive_batches = 0
         selected_stacks = 0
@@ -1112,6 +1160,7 @@ def create_lottery_run_handler(
                 "giftbox_cycles": giftbox_cycles,
                 "overflow_action": overflow_action,
                 "overflow_cycles": overflow_cycles,
+                "storage_full": storage_full,
                 "draw_count": draw_count,
                 "receive_batches": receive_batches,
                 "selected_stacks": selected_stacks,
@@ -1146,10 +1195,15 @@ def create_lottery_run_handler(
                     reason="giftbox_cycle_limit",
                 )
 
-            giftbox_result = giftbox_handler(context, giftbox_payload)
+            current_giftbox_payload = dict(giftbox_payload)
+            if first_round_count and first_filter_pass:
+                current_giftbox_payload["first_round_count"] = True
+            giftbox_result = giftbox_handler(context, current_giftbox_payload)
             receive_batches += int(giftbox_result.get("receive_batches") or 0)
             selected_stacks += int(giftbox_result.get("selected_stacks") or 0)
             record("receive_giftbox", giftbox_result)
+            if giftbox_result.get("completed") is True:
+                first_filter_pass = False
             if giftbox_result.get("completed") is not True:
                 giftbox_reason = str(
                     giftbox_result.get("reason") or "giftbox_receive_stopped"
@@ -1164,16 +1218,22 @@ def create_lottery_run_handler(
                             stopped=True,
                             reason="overflow_limit",
                         )
-                    if overflow_action == "storage":
+                    active_action = overflow_action
+                    if overflow_action == "storage_then_sell":
+                        active_action = "sell" if storage_full else "storage"
+                    if active_action == "storage":
                         overflow_point = BOX_FULL_STORAGE_POINT
                         active_overflow_handler = storage_handler
-                    elif overflow_action == "sell":
+                        active_overflow_payload = storage_overflow_payload
+                    elif active_action == "sell":
                         overflow_point = BOX_FULL_SELL_POINT
                         active_overflow_handler = sell_handler
+                        active_overflow_payload = sell_overflow_payload
                     else:
                         overflow_point = BOX_FULL_ENHANCE_POINT
                         active_overflow_handler = enhance_handler
-                    overflow_role = f"open_overflow_{overflow_action}"
+                        active_overflow_payload = overflow_payload
+                    overflow_role = f"open_overflow_{active_action}"
                     tx, ty = randomized_touch_point(
                         overflow_point,
                         enabled=random_touch,
@@ -1200,16 +1260,48 @@ def create_lottery_run_handler(
                     assert active_overflow_handler is not None
                     overflow_result = active_overflow_handler(
                         context,
-                        dict(overflow_payload),
+                        dict(active_overflow_payload),
                     )
-                    record(f"overflow_{overflow_action}", overflow_result)
+                    record(f"overflow_{active_action}", overflow_result)
+                    if overflow_result.get("reason") == "storage_full":
+                        storage_full = True
+                    if (
+                        overflow_action == "storage_then_sell"
+                        and active_action == "storage"
+                        and overflow_result.get("completed") is not True
+                        and overflow_result.get("reason") == "storage_full"
+                    ):
+                        assert expball_navigate_handler is not None
+                        assert sell_handler is not None
+                        sell_nav_payload = dict(common_payload)
+                        sell_nav_payload["destination"] = "sell"
+                        sell_nav_result = expball_navigate_handler(
+                            context,
+                            sell_nav_payload,
+                        )
+                        record("navigate_overflow_sell", sell_nav_result)
+                        if sell_nav_result.get("completed") is not True:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason=str(
+                                    sell_nav_result.get("reason")
+                                    or "navigation_stopped"
+                                ),
+                            )
+                        overflow_result = sell_handler(
+                            context,
+                            dict(sell_overflow_payload),
+                        )
+                        record("overflow_sell", overflow_result)
+                        active_action = "sell"
                     if overflow_result.get("completed") is not True:
                         return finish(
                             completed=False,
                             stopped=True,
                             reason=str(
                                 overflow_result.get("reason")
-                                or f"{overflow_action}_stopped"
+                                or f"{active_action}_stopped"
                             ),
                         )
                     overflow_cycles += 1

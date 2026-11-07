@@ -20,6 +20,7 @@ _OVERFLOW_ACTIONS = {
     "stop",
     "storage",
     "sell",
+    "storage_then_sell",
     "equipment_enhancement",
     "servant_enhancement",
 }
@@ -67,29 +68,36 @@ def create_expball_run_handler(
             1,
             100,
         )
+        store_first_raw = payload.get("store_first", False)
+        if not isinstance(store_first_raw, bool):
+            raise ValueError("store_first must be a boolean.")
         overflow_action = str(payload.get("overflow_action") or "stop").lower()
+        if store_first_raw and overflow_action in {"stop", "storage", "sell"}:
+            overflow_action = "storage_then_sell"
         if overflow_action not in _OVERFLOW_ACTIONS:
             raise ValueError(
                 "overflow_action must be stop, storage, sell, "
-                "equipment_enhancement, or servant_enhancement."
+                "storage_then_sell, equipment_enhancement, or servant_enhancement."
             )
         stars = _parse_card_stars(payload)
+        storage_stars = _parse_card_stars(payload, key="storage_stars") or stars
+        sell_stars = _parse_card_stars(payload, key="sell_stars") or stars
         storage_target = (
             str(payload.get("storage_target") or "exp").strip().lower()
         )
         sell_target = str(payload.get("sell_target") or "exp").strip().lower()
         if (
-            overflow_action == "storage"
+            overflow_action in {"storage", "storage_then_sell"}
             and storage_target != "ce_bomb"
-            and stars is None
+            and storage_stars is None
         ):
             raise ValueError(
                 "overflow_action requires stars to be configured for automatic storage or sell."
             )
         if (
-            overflow_action == "sell"
+            overflow_action in {"sell", "storage_then_sell"}
             and sell_target not in {"servant", "command_code"}
-            and stars is None
+            and sell_stars is None
         ):
             raise ValueError(
                 "overflow_action requires stars to be configured for automatic storage or sell."
@@ -116,30 +124,38 @@ def create_expball_run_handler(
             "grid_threshold",
             "grid_threshold",
         )
+        storage_overflow_payload = dict(overflow_payload)
+        if storage_stars is not None:
+            storage_overflow_payload["stars"] = list(storage_stars)
+        for key in (
+            "storage_target",
+            "require_locked_and_marked",
+            "locker_threshold",
+            "mark_threshold",
+        ):
+            _copy_option(payload, storage_overflow_payload, key, key)
+        sell_overflow_payload = dict(overflow_payload)
+        if sell_stars is not None:
+            sell_overflow_payload["stars"] = list(sell_stars)
+        for key in (
+            "sell_target",
+            "lock_gold_servants",
+            "include_fp_gold",
+            "select_servant_cards",
+            "fp_gold_threshold",
+            "lock_inscribed_command_codes",
+            "inscribed_threshold",
+            "empty_threshold",
+            "locker_threshold",
+            "switch_command_code_tab",
+            "auto_select",
+            "allow_qp_full",
+        ):
+            _copy_option(payload, sell_overflow_payload, key, key)
         if overflow_action == "storage":
-            for key in (
-                "storage_target",
-                "require_locked_and_marked",
-                "locker_threshold",
-                "mark_threshold",
-            ):
-                _copy_option(payload, overflow_payload, key, key)
+            overflow_payload = storage_overflow_payload
         if overflow_action == "sell":
-            for key in (
-                "sell_target",
-                "lock_gold_servants",
-                "include_fp_gold",
-                "select_servant_cards",
-                "fp_gold_threshold",
-                "lock_inscribed_command_codes",
-                "inscribed_threshold",
-                "empty_threshold",
-                "locker_threshold",
-                "switch_command_code_tab",
-                "auto_select",
-                "allow_qp_full",
-            ):
-                _copy_option(payload, overflow_payload, key, key)
+            overflow_payload = sell_overflow_payload
         if overflow_action in {"equipment_enhancement", "servant_enhancement"}:
             overflow_payload["target"] = (
                 "equipment"
@@ -205,6 +221,7 @@ def create_expball_run_handler(
 
         summons = 0
         overflow_cycles = 0
+        storage_full = False
         locked_cards: list[dict[str, Any]] = []
         stages: list[dict[str, Any]] = []
 
@@ -237,6 +254,7 @@ def create_expball_run_handler(
                 "locked_count": len(locked_cards),
                 "overflow_action": overflow_action,
                 "overflow_cycles": overflow_cycles,
+                "storage_full": storage_full,
                 "stages": stages,
             }
 
@@ -301,6 +319,72 @@ def create_expball_run_handler(
                     stopped=True,
                     reason="overflow_limit",
                 )
+            if overflow_action == "storage_then_sell":
+                if not storage_full:
+                    store_nav_payload = dict(navigation_payload)
+                    store_nav_payload["destination"] = "storage"
+                    store_nav_result = navigate_handler(
+                        context,
+                        store_nav_payload,
+                    )
+                    record("navigate_storage", store_nav_result)
+                    if store_nav_result.get("completed") is not True:
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                store_nav_result.get("reason")
+                                or "navigation_stopped"
+                            ),
+                        )
+                    storage_result = storage_handler(
+                        context,
+                        dict(storage_overflow_payload),
+                    )
+                    record("storage", storage_result)
+                    if storage_result.get("completed") is True:
+                        overflow_cycles += 1
+                        continue
+                    if storage_result.get("reason") != "storage_full":
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason=str(
+                                storage_result.get("reason")
+                                or "storage_stopped"
+                            ),
+                        )
+                    storage_full = True
+
+                sell_nav_payload = dict(navigation_payload)
+                sell_nav_payload["destination"] = "sell"
+                sell_nav_result = navigate_handler(context, sell_nav_payload)
+                record("navigate_sell", sell_nav_result)
+                if sell_nav_result.get("completed") is not True:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason=str(
+                            sell_nav_result.get("reason")
+                            or "navigation_stopped"
+                        ),
+                    )
+                sell_result = sell_handler(
+                    context,
+                    dict(sell_overflow_payload),
+                )
+                record("sell", sell_result)
+                if sell_result.get("completed") is not True:
+                    return finish(
+                        completed=False,
+                        stopped=True,
+                        reason=str(
+                            sell_result.get("reason") or "sell_stopped"
+                        ),
+                    )
+                overflow_cycles += 1
+                continue
+
             overflow_nav_payload = dict(navigation_payload)
             overflow_nav_payload["destination"] = overflow_action
             overflow_nav_result = navigate_handler(context, overflow_nav_payload)
@@ -322,6 +406,8 @@ def create_expball_run_handler(
                 overflow_handler = enhance_handler
             overflow_result = overflow_handler(context, dict(overflow_payload))
             record(overflow_action, overflow_result)
+            if overflow_result.get("reason") == "storage_full":
+                storage_full = True
             if overflow_result.get("completed") is not True:
                 return finish(
                     completed=False,
@@ -402,12 +488,16 @@ def _copy_option(
         destination[destination_key] = source[source_key]
 
 
-def _parse_card_stars(payload: dict[str, Any]) -> tuple[int, ...] | None:
-    if "stars" not in payload or payload["stars"] is None:
+def _parse_card_stars(
+    payload: dict[str, Any],
+    *,
+    key: str = "stars",
+) -> tuple[int, ...] | None:
+    if key not in payload or payload[key] is None:
         return None
-    raw = payload["stars"]
+    raw = payload[key]
     if not isinstance(raw, (list, tuple)) or not raw:
-        raise ValueError("stars must be a non-empty list of 3, 4, or 5.")
+        raise ValueError(f"{key} must be a non-empty list of 3, 4, or 5.")
     result: list[int] = []
     for item in raw:
         if (
@@ -415,7 +505,7 @@ def _parse_card_stars(payload: dict[str, Any]) -> tuple[int, ...] | None:
             or not isinstance(item, int)
             or item not in _VALID_CARD_STARS
         ):
-            raise ValueError("stars must contain only 3, 4, or 5.")
+            raise ValueError(f"{key} must contain only 3, 4, or 5.")
         if item not in result:
             result.append(item)
     return tuple(result)
