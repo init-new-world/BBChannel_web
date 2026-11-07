@@ -8,6 +8,7 @@ from webapp.automation.expball import (
     EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
+    EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND,
     create_expball_ce_bomb_grid_inspect_handler,
     create_expball_command_code_grid_inspect_handler,
     create_expball_enhance_handler,
@@ -17,6 +18,7 @@ from webapp.automation.expball import (
     create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
+    create_expball_summon_lock_inspect_handler,
     register_expball_ce_bomb_grid_inspect_job,
     register_expball_command_code_grid_inspect_job,
     register_expball_enhance_job,
@@ -26,6 +28,7 @@ from webapp.automation.expball import (
     register_expball_storage_grid_inspect_job,
     register_expball_storage_job,
     register_expball_summon_job,
+    register_expball_summon_lock_inspect_job,
 )
 from webapp.core.models import MatchResult, OperationResult
 from webapp.runtime import JobDatabase, JobManager
@@ -1942,6 +1945,271 @@ def test_expball_enhance_locks_and_marks_full_level_ce_bombs():
         (32, 477),
         (262, 254),
     ]
+
+
+def test_expball_recognizer_detects_summon_lock_targets_and_deduplicates_overlaps():
+    class LockResources:
+        def template_index(self, *, prefix, limit):
+            if prefix == "expball/needLock":
+                assert limit == 200
+                return {
+                    "entries": [
+                        {"path": "expball/needLock/1.png"},
+                        {"path": "expball/needLock/Servant004.jpg"},
+                    ]
+                }
+            assert prefix == "expball/FPgold"
+            return {
+                "entries": [
+                    {"path": "expball/FPgold/lily.png"},
+                    {"path": "expball/FPgold/habe.png"},
+                    {"path": "expball/FPgold/hakuno_0.png"},
+                    {"path": "expball/FPgold/hakuno_1.png"},
+                ]
+            }
+
+        def resolve_template(self, template_path):
+            raise FileNotFoundError(template_path)
+
+    class LockRecognition:
+        def __init__(self):
+            self.calls = []
+
+        def match_template_all(
+            self,
+            screenshot,
+            template_path,
+            *,
+            threshold,
+            scales,
+        ):
+            assert screenshot == b"png"
+            assert threshold == 0.82
+            self.calls.append((template_path, scales))
+            if template_path == "expball/needLock/1.png":
+                return [
+                    MatchResult(
+                        template_path=template_path,
+                        matched=True,
+                        confidence=0.95,
+                        threshold=threshold,
+                        top_left=[200, 150],
+                        size=[164, 176],
+                        center=[282, 238],
+                        scale=1.0,
+                    )
+                ]
+            if template_path == "expball/FPgold/hakuno_0.png":
+                return [
+                    MatchResult(
+                        template_path=template_path,
+                        matched=True,
+                        confidence=0.89,
+                        threshold=threshold,
+                        top_left=[205, 155],
+                        size=[164, 176],
+                        center=[287, 243],
+                        scale=1.0,
+                    ),
+                    MatchResult(
+                        template_path=template_path,
+                        matched=True,
+                        confidence=0.91,
+                        threshold=threshold,
+                        top_left=[450, 320],
+                        size=[164, 176],
+                        center=[532, 408],
+                        scale=1.0,
+                    ),
+                ]
+            return []
+
+    recognition = LockRecognition()
+    recognizer = ExpBallRecognizer(LockResources(), recognition)
+    report = recognizer.recognize_summon_lock_targets(
+        b"png",
+        targets=["1", "hakuno"],
+        threshold=0.82,
+    )
+
+    assert report["threshold"] == 0.82
+    assert report["available_targets"] == ["1.png", "Servant004.jpg"]
+    assert report["requested_targets"] == ["1", "hakuno"]
+    assert report["target_count"] == 2
+    assert report["match_count"] == 2
+    assert [m["target"] for m in report["matches"]] == ["1", "hakuno"]
+    assert [m["center"] for m in report["matches"]] == [
+        [282, 238],
+        [532, 408],
+    ]
+    assert [path for path, _scales in recognition.calls] == [
+        "expball/needLock/1.png",
+        "expball/FPgold/hakuno_0.png",
+        "expball/FPgold/hakuno_1.png",
+    ]
+
+
+def test_expball_summon_lock_inspect_job_emits_report(tmp_path):
+    class Recognizer:
+        def recognize_summon_lock_targets(
+            self,
+            screenshot,
+            *,
+            targets=None,
+            threshold=0.8,
+        ):
+            assert screenshot == b"expball-screen"
+            assert targets == ["lily"]
+            assert threshold == 0.85
+            return {
+                "threshold": threshold,
+                "available_targets": ["1.png"],
+                "requested_targets": ["lily"],
+                "target_count": 1,
+                "match_count": 1,
+                "matches": [
+                    {
+                        "target": "lily",
+                        "template_path": "expball/FPgold/lily.png",
+                        "center": [310, 240],
+                        "top_left": [228, 152],
+                        "size": [164, 176],
+                        "confidence": 0.93,
+                    }
+                ],
+            }
+
+    context = _Context()
+    handler = create_expball_summon_lock_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )
+    result = handler(
+        context,
+        {"setting_name": "demo", "targets": ["lily"], "threshold": 0.85},
+    )
+
+    assert result["setting_name"] == "demo"
+    assert result["server"] == "CH"
+    assert result["match_count"] == 1
+    assert any(
+        event[0] == "expball_summon_lock_targets" for event in context.events
+    )
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_summon_lock_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            Recognizer(),
+        )
+        assert manager.has_kind(EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND)
+        assert (
+            manager.requires_device(EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND)
+            is True
+        )
+
+
+def test_expball_summon_locks_matched_target_cards_and_stops_when_enough():
+    reports = iter(
+        (
+            _summon_report(
+                "call10",
+                "call10",
+                action="summon_ten",
+            ),
+            _summon_report(
+                "decide",
+                "decide",
+                action="confirm_summon",
+            ),
+            _summon_report(
+                "again10",
+                "again10",
+                "bianhuan",
+                action="summon_again",
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_summon_lock_targets(
+            self,
+            _screenshot,
+            *,
+            targets=None,
+            threshold=0.8,
+        ):
+            assert targets == ["lily"]
+            assert threshold == 0.82
+            return {
+                "threshold": threshold,
+                "available_targets": ["1.png"],
+                "requested_targets": ["lily"],
+                "target_count": 1,
+                "match_count": 1,
+                "matches": [
+                    {
+                        "target": "lily",
+                        "template_path": "expball/FPgold/lily.png",
+                        "center": [310, 240],
+                        "size": [164, 176],
+                    }
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_summon_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 5,
+            "lock_targets": [{"target": "lily", "count": 1}],
+            "lock_enough_stop": True,
+            "lock_threshold": 0.82,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "lock_target_reached"
+    assert result["summons"] == 1
+    assert result["locked_count"] == 1
+    assert result["locked_cards"] == [
+        {
+            "target": "lily",
+            "center": [310, 240],
+            "template_path": "expball/FPgold/lily.png",
+        }
+    ]
+    assert result["lock_targets"] == [
+        {"target": "lily", "count": 1, "remaining": 0, "locked": 1}
+    ]
+    assert result["actions"] == [
+        "summon_ten",
+        "confirm_summon",
+        "open_summon_card_detail",
+        "lock_summon_card",
+        "close_summon_card_detail",
+    ]
+    assert device.taps == [
+        (800, 610),
+        (830, 570),
+        (310, 240),
+        (32, 178),
+        (43, 43),
+    ]
+
 
 
 

@@ -189,9 +189,19 @@ def create_expball_run_handler(
             "max_same_state",
             "max_same_state",
         )
+        for key in (
+            "lock_targets",
+            "lock_lily",
+            "lock_habe",
+            "lock_hakuno",
+            "lock_enough_stop",
+            "lock_threshold",
+        ):
+            _copy_option(payload, summon_payload, key, key)
 
         summons = 0
         overflow_cycles = 0
+        locked_cards: list[dict[str, Any]] = []
         stages: list[dict[str, Any]] = []
 
         def record(stage: str, result: dict[str, Any]) -> None:
@@ -219,6 +229,8 @@ def create_expball_run_handler(
                 "reason": reason,
                 "max_summons": max_summons,
                 "summons": summons,
+                "locked_cards": list(locked_cards),
+                "locked_count": len(locked_cards),
                 "overflow_action": overflow_action,
                 "overflow_cycles": overflow_cycles,
                 "stages": stages,
@@ -249,6 +261,16 @@ def create_expball_run_handler(
             current_summon_payload["max_summons"] = max_summons - summons
             summon_result = summon_handler(context, current_summon_payload)
             summons += int(summon_result.get("summons") or 0)
+            cycle_locked = summon_result.get("locked_cards")
+            if isinstance(cycle_locked, list):
+                locked_cards.extend(
+                    item for item in cycle_locked if isinstance(item, dict)
+                )
+            updated_lock_targets = summon_result.get("lock_targets")
+            if isinstance(updated_lock_targets, list) and updated_lock_targets:
+                summon_payload["lock_targets"] = updated_lock_targets
+                for flag_key in ("lock_lily", "lock_habe", "lock_hakuno"):
+                    summon_payload.pop(flag_key, None)
             record("summon", summon_result)
             summon_reason = str(summon_result.get("reason") or "summon_stopped")
             if summon_result.get("completed") is True:

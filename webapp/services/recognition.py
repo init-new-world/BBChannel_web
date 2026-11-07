@@ -86,6 +86,7 @@ class RecognitionService:
                     scales=candidate.get("scales"),
                     mask_path=mask_path,
                     centered_mask=bool(candidate.get("centered_mask", False)),
+                    template_size=candidate.get("template_size"),
                     template_crop=candidate.get("template_crop"),
                     grayscale=bool(candidate.get("grayscale", False)),
                     use_alpha_mask=bool(candidate.get("use_alpha_mask", True)),
@@ -102,6 +103,7 @@ class RecognitionService:
         roi: Sequence[int] | None = None,
         scales: Sequence[float] | None = None,
         mask_path: str | None = None,
+        template_size: Sequence[int] | None = None,
         template_crop: Sequence[int] | None = None,
         max_results: int = 20,
         grayscale: bool = False,
@@ -115,6 +117,7 @@ class RecognitionService:
             roi=roi,
             scales=scales,
             mask_path=mask_path,
+            template_size=template_size,
             template_crop=template_crop,
             max_results=max_results,
             grayscale=grayscale,
@@ -323,6 +326,7 @@ class RecognitionService:
         roi: object = None,
         scales: object = None,
         mask_path: str | None = None,
+        template_size: object = None,
         template_crop: object = None,
         max_results: int,
         grayscale: bool = False,
@@ -352,10 +356,16 @@ class RecognitionService:
         result_roi = normalized_roi if roi is not None else None
         candidates: list[MatchResult] = []
         template_height, template_width = template_image.shape[:2]
+        base_width, base_height = self._normalize_template_size(
+            template_size,
+            template_width,
+            template_height,
+            template_path,
+        )
 
         for scale in normalized_scales:
-            scaled_width = max(round(template_width * scale), 1)
-            scaled_height = max(round(template_height * scale), 1)
+            scaled_width = max(round(base_width * scale), 1)
+            scaled_height = max(round(base_height * scale), 1)
             if scaled_width > roi_width or scaled_height > roi_height:
                 continue
             scaled_template, scaled_mask = self._scale_template(

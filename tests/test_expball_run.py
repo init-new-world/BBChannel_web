@@ -348,3 +348,97 @@ def test_expball_run_job_requires_connected_device(tmp_path):
 
         assert manager.has_kind(EXPBALL_RUN_JOB_KIND)
         assert manager.requires_device(EXPBALL_RUN_JOB_KIND) is True
+
+
+def test_expball_run_forwards_summon_lock_targets_and_stops_when_target_reached():
+    nav_states = iter((_navigation_report("summon_page"),))
+    reports = iter(
+        (
+            _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                matches=[{"name": "call10", "center": [800, 520]}],
+            ),
+            _report(
+                "decide",
+                "confirmation",
+                "actionable",
+                action="confirm_summon",
+                matches=[{"name": "decide", "center": [835, 563]}],
+            ),
+            _report(
+                "again10",
+                "summon",
+                "actionable",
+                action="summon_again",
+                matches=[
+                    {"name": "again10", "center": [760, 673]},
+                    {"name": "bianhuan", "center": [1040, 670]},
+                ],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_summon_lock_targets(
+            self,
+            _screenshot,
+            *,
+            targets=None,
+            threshold=0.8,
+        ):
+            assert targets == ["habe"]
+            return {
+                "threshold": threshold,
+                "available_targets": [],
+                "requested_targets": ["habe"],
+                "target_count": 1,
+                "match_count": 1,
+                "matches": [
+                    {
+                        "target": "habe",
+                        "template_path": "expball/FPgold/habe.png",
+                        "center": [420, 260],
+                        "size": [164, 176],
+                    }
+                ],
+            }
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 5,
+            "lock_targets": ["habe:1"],
+            "lock_enough_stop": True,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "lock_target_reached"
+    assert result["summons"] == 1
+    assert result["locked_count"] == 1
+    assert result["locked_cards"] == [
+        {
+            "target": "habe",
+            "center": [420, 260],
+            "template_path": "expball/FPgold/habe.png",
+        }
+    ]
+

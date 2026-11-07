@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from io import BytesIO
+from pathlib import PurePosixPath
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
@@ -865,6 +867,168 @@ class ExpBallRecognizer:
             "slots": slots,
         }
 
+    def recognize_summon_lock_targets(
+        self,
+        screenshot: bytes,
+        *,
+        targets: Sequence[str | dict[str, Any]] | None = None,
+        threshold: float = 0.8,
+    ) -> dict[str, Any]:
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+
+        need_lock_page = self._resources.template_index(
+            prefix="expball/needLock",
+            limit=200,
+        )
+        need_lock_paths = [
+            str(entry["path"]) for entry in need_lock_page["entries"]
+        ]
+        need_lock_by_name: dict[str, str] = {}
+        available_targets: list[str] = []
+        for path in need_lock_paths:
+            posix = PurePosixPath(path)
+            available_targets.append(posix.name)
+            need_lock_by_name[path.lower()] = path
+            need_lock_by_name[posix.name.lower()] = path
+            need_lock_by_name[posix.stem.lower()] = path
+
+        fp_gold_page = self._resources.template_index(
+            prefix="expball/FPgold",
+            limit=50,
+        )
+        fp_gold_paths = {
+            str(entry["path"]) for entry in fp_gold_page["entries"]
+        }
+        fp_gold_by_name: dict[str, list[str]] = {}
+        for name in _FP_GOLD_SERVANTS:
+            candidate_path = f"expball/FPgold/{name}.png"
+            if candidate_path in fp_gold_paths:
+                fp_gold_by_name[name] = [candidate_path]
+                fp_gold_by_name[f"{name}.png"] = [candidate_path]
+                fp_gold_by_name[candidate_path.lower()] = [candidate_path]
+        hakuno_paths = [
+            f"expball/FPgold/{name}.png"
+            for name in ("hakuno_0", "hakuno_1")
+            if f"expball/FPgold/{name}.png" in fp_gold_paths
+        ]
+        if hakuno_paths:
+            fp_gold_by_name["hakuno"] = hakuno_paths
+
+        requested_names: list[str] = []
+        if targets is None:
+            requested_names = list(available_targets)
+        else:
+            for item in targets:
+                if isinstance(item, str):
+                    cleaned = item.strip()
+                elif isinstance(item, dict):
+                    raw_target = (
+                        item.get("target")
+                        if item.get("target") is not None
+                        else item.get("path")
+                    )
+                    cleaned = (
+                        str(raw_target).strip()
+                        if raw_target is not None
+                        else ""
+                    )
+                else:
+                    raise ValueError(
+                        "Each lock target must be a string or object."
+                    )
+                if not cleaned:
+                    raise ValueError(
+                        "Each lock target must specify a non-empty name."
+                    )
+                if cleaned not in requested_names:
+                    requested_names.append(cleaned)
+
+        resolved_specs: list[tuple[str, str]] = []
+        for target_name in requested_names:
+            key = target_name.lower()
+            if key in need_lock_by_name:
+                resolved_specs.append((target_name, need_lock_by_name[key]))
+            elif key in fp_gold_by_name:
+                for path in fp_gold_by_name[key]:
+                    resolved_specs.append((target_name, path))
+            else:
+                try:
+                    self._resources.resolve_template(target_name)
+                except Exception as exc:
+                    raise ValueError(
+                        f"Unknown summon lock target: {target_name}"
+                    ) from exc
+                resolved_specs.append((target_name, target_name))
+
+        raw_matches: list[dict[str, Any]] = []
+        for target_name, template_path in resolved_specs:
+            scales = self._summon_lock_template_scales(template_path)
+            matched_list = self._recognition.match_template_all(
+                screenshot,
+                template_path,
+                threshold=threshold,
+                scales=scales,
+            )
+            for match in matched_list:
+                raw_matches.append(
+                    {
+                        "target": target_name,
+                        "template_path": template_path,
+                        **match.to_dict(),
+                    }
+                )
+
+        selected_matches: list[dict[str, Any]] = []
+        for candidate in sorted(
+            raw_matches,
+            key=lambda item: float(item.get("confidence", 0.0)),
+            reverse=True,
+        ):
+            if any(
+                _boxes_overlap(candidate, existing) >= 0.3
+                for existing in selected_matches
+            ):
+                continue
+            selected_matches.append(candidate)
+
+        selected_matches.sort(
+            key=lambda item: (
+                int(item["top_left"][1]),
+                int(item["top_left"][0]),
+            )
+        )
+        return {
+            "threshold": threshold,
+            "available_targets": available_targets,
+            "requested_targets": requested_names,
+            "target_count": len(requested_names),
+            "match_count": len(selected_matches),
+            "matches": selected_matches,
+        }
+
+    def _summon_lock_template_scales(
+        self,
+        template_path: str,
+    ) -> tuple[float, ...]:
+        extra_scales: list[float] = []
+        try:
+            resolved = self._resources.resolve_template(template_path)
+            with Image.open(resolved) as img:
+                width, height = img.size
+            if width > 0 and height > 0:
+                s = (width / 164 + height / 176) / 2
+                res_w = int(1280 * s)
+                res_h = int(720 * s)
+                if res_w > 0 and res_h > 0:
+                    scale_720 = min(1280 / res_w, 720 / res_h)
+                    extra_scales.extend(
+                        [round(scale_720, 4), round(scale_720 * 1.5, 4)]
+                    )
+        except Exception:
+            pass
+        return tuple(dict.fromkeys((*_SCALES, *extra_scales)))
+
 
 def _inspect_servant_frame_colors(
     screenshot: bytes,
@@ -1003,3 +1167,23 @@ def _inspect_ce_bomb_frame_colors(
             "rgb": [round(mean_r, 1), round(mean_g, 1), round(mean_b, 1)],
         }
     return result
+
+
+def _boxes_overlap(first: dict[str, Any], second: dict[str, Any]) -> float:
+    first_x, first_y = int(first["top_left"][0]), int(first["top_left"][1])
+    second_x, second_y = int(second["top_left"][0]), int(second["top_left"][1])
+    first_w, first_h = int(first["size"][0]), int(first["size"][1])
+    second_w, second_h = int(second["size"][0]), int(second["size"][1])
+    overlap_w = max(
+        0,
+        min(first_x + first_w, second_x + second_w) - max(first_x, second_x),
+    )
+    overlap_h = max(
+        0,
+        min(first_y + first_h, second_y + second_h) - max(first_y, second_y),
+    )
+    overlap_area = overlap_w * overlap_h
+    if overlap_area <= 0:
+        return 0.0
+    union_area = first_w * first_h + second_w * second_h - overlap_area
+    return overlap_area / union_area if union_area > 0 else 0.0

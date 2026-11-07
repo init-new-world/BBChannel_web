@@ -22,10 +22,15 @@ EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND = (
 )
 EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND = "event.expball.inspect-ce-bomb-grid"
 EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND = "event.expball.inspect-servant-level"
+EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND = (
+    "event.expball.inspect-summon-lock-targets"
+)
 EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
 EXPBALL_ENHANCE_JOB_KIND = "event.expball.enhance"
 _SUMMON_REQUEST_ACTIONS = {"summon_free_ten", "summon_ten"}
+_SUMMON_LOCK_CARD_POINT = (32, 178)
+_SUMMON_CLOSE_DETAIL_POINT = (43, 43)
 _VALID_CARD_STARS = {3, 4, 5}
 _STORAGE_TARGETS = {"exp", "ce_bomb"}
 _ENHANCE_TARGETS = {"equipment", "servant"}
@@ -417,6 +422,74 @@ def register_expball_servant_level_inspect_job(
     )
 
 
+def create_expball_summon_lock_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        threshold = _number(payload, "threshold", 0.8, 0, 1)
+        raw_targets = payload.get("targets")
+        if raw_targets is not None and not isinstance(
+            raw_targets,
+            (list, tuple),
+        ):
+            raise ValueError("targets must be a list of lock target names.")
+        server = str(
+            script_data.get_setting_plan(normalized_name)["server"]
+        ).upper()
+        context.checkpoint(
+            "inspect_expball_summon_lock_targets",
+            progress=0.2,
+            message="Inspecting friendship-point summon lock target cards.",
+        )
+        report = recognizer.recognize_summon_lock_targets(
+            device_service.snapshot(),
+            targets=raw_targets,
+            threshold=threshold,
+        )
+        context.emit(
+            "expball_summon_lock_targets",
+            "Friendship-point summon lock target cards were inspected.",
+            data={"server": server, **report},
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Friendship-point summon lock target inspection completed.",
+        )
+        return {
+            "setting_name": normalized_name,
+            "server": server,
+            **report,
+        }
+
+    return handler
+
+
+def register_expball_summon_lock_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND,
+        create_expball_summon_lock_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
 def create_expball_summon_handler(
     script_data: ScriptDataService,
     device_service: DeviceService,
@@ -428,6 +501,12 @@ def create_expball_summon_handler(
             raise ValueError("setting_name must be a non-empty string.")
         normalized_name = setting_name.strip()
         threshold = _number(payload, "threshold", 0.84, 0, 1)
+        lock_threshold = _number(payload, "lock_threshold", 0.8, 0, 1)
+        lock_targets = _parse_summon_lock_targets(payload)
+        lock_enough_stop_raw = payload.get("lock_enough_stop", False)
+        if not isinstance(lock_enough_stop_raw, bool):
+            raise ValueError("lock_enough_stop must be a boolean.")
+        lock_enough_stop = lock_enough_stop_raw
         timeout_seconds = _number(payload, "timeout_seconds", 600, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(
@@ -455,9 +534,11 @@ def create_expball_summon_handler(
         attempts = 0
         summons = 0
         actions: list[str] = []
+        locked_cards: list[dict[str, Any]] = []
         phase = "request"
         pending_free_summon = False
         result_counted = False
+        result_locked = False
         last_state = None
         same_state_count = 0
         idle_polls = 0
@@ -487,8 +568,46 @@ def create_expball_summon_handler(
                 attempts=attempts,
                 summons=summons,
                 actions=actions,
+                locked_cards=locked_cards,
+                lock_targets=lock_targets,
+                lock_enough_stop=lock_enough_stop,
                 report=report,
             )
+
+        def tap_point(
+            point: list[int] | tuple[int, int],
+            role: str,
+            *,
+            state_name: str | None = None,
+            size: list[int] | tuple[int, int] | None = None,
+            extra: dict[str, Any] | None = None,
+        ) -> bool:
+            x, y = randomized_touch_point(
+                point,
+                enabled=random_touch,
+                size=size,
+            )
+            operation = device_service.tap(x, y)
+            event_data: dict[str, Any] = {
+                "role": role,
+                "state": state_name,
+                "phase": phase,
+                "operation": operation.to_dict(),
+            }
+            if extra:
+                event_data.update(extra)
+            context.emit(
+                "device_action",
+                "Executed a friendship-point summon action.",
+                data=event_data,
+            )
+            if not operation.ok:
+                return False
+            actions.append(role)
+            context.sleep(
+                randomized_wait_seconds(action_wait_seconds, random_time)
+            )
+            return True
 
         def tap_match(
             report: dict[str, Any],
@@ -508,29 +627,12 @@ def create_expball_summon_handler(
             center = target.get("center")
             if not isinstance(center, list) or len(center) != 2:
                 return False
-            x, y = randomized_touch_point(
+            return tap_point(
                 center,
-                enabled=random_touch,
+                role,
+                state_name=str(report.get("state") or "unknown"),
                 size=target.get("size"),
             )
-            operation = device_service.tap(x, y)
-            context.emit(
-                "device_action",
-                "Executed a friendship-point summon action.",
-                data={
-                    "role": role,
-                    "state": report.get("state"),
-                    "phase": phase,
-                    "operation": operation.to_dict(),
-                },
-            )
-            if not operation.ok:
-                return False
-            actions.append(role)
-            context.sleep(
-                randomized_wait_seconds(action_wait_seconds, random_time)
-            )
-            return True
 
         while monotonic() - started <= timeout_seconds:
             attempts += 1
@@ -538,8 +640,9 @@ def create_expball_summon_handler(
                 "summon_expball",
                 progress=min((monotonic() - started) / timeout_seconds, 0.95),
             )
+            screenshot = device_service.snapshot()
             report = recognizer.recognize(
-                device_service.snapshot(),
+                screenshot,
                 server,
                 threshold=threshold,
             )
@@ -558,6 +661,18 @@ def create_expball_summon_handler(
                 for match in report.get("matches", [])
                 if isinstance(match, dict) and isinstance(match.get("name"), str)
             }
+
+            if (
+                lock_targets
+                and lock_enough_stop
+                and not any(item["remaining"] != 0 for item in lock_targets)
+            ):
+                return finish(
+                    completed=True,
+                    stopped=False,
+                    reason="lock_target_reached",
+                    report=report,
+                )
 
             if "boxfull" in matches or action == "handle_full_box":
                 return finish(
@@ -618,6 +733,7 @@ def create_expball_summon_handler(
                         )
                     pending_free_summon = action == "summon_free_ten"
                     result_counted = False
+                    result_locked = False
                     phase = "confirm"
                     acted = True
             elif phase == "confirm":
@@ -635,6 +751,120 @@ def create_expball_summon_handler(
                 if not result_counted:
                     summons += 1
                     result_counted = True
+                active_targets = [
+                    str(item["target"])
+                    for item in lock_targets
+                    if item["remaining"] != 0
+                ]
+                if active_targets and not result_locked:
+                    lock_report = recognizer.recognize_summon_lock_targets(
+                        screenshot,
+                        targets=active_targets,
+                        threshold=lock_threshold,
+                    )
+                    context.emit(
+                        "expball_summon_lock_targets",
+                        "Friendship-point summon lock target cards were inspected.",
+                        data={
+                            "attempt": attempts,
+                            "summons": summons,
+                            "server": server,
+                            **lock_report,
+                        },
+                    )
+                    for match_item in lock_report.get("matches", []):
+                        if not isinstance(match_item, dict):
+                            continue
+                        matched_target = str(match_item.get("target") or "")
+                        target_entry = next(
+                            (
+                                item
+                                for item in lock_targets
+                                if item["target"].lower()
+                                == matched_target.lower()
+                                and item["remaining"] != 0
+                            ),
+                            None,
+                        )
+                        if target_entry is None:
+                            continue
+                        card_center = match_item.get("center")
+                        if (
+                            not isinstance(card_center, list)
+                            or len(card_center) != 2
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="invalid_recognition_result",
+                                report=report,
+                            )
+                        if not tap_point(
+                            card_center,
+                            "open_summon_card_detail",
+                            state_name=state,
+                            size=match_item.get("size"),
+                            extra={"target": target_entry["target"]},
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        if not tap_point(
+                            _SUMMON_LOCK_CARD_POINT,
+                            "lock_summon_card",
+                            state_name=state,
+                            extra={"target": target_entry["target"]},
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        if not tap_point(
+                            _SUMMON_CLOSE_DETAIL_POINT,
+                            "close_summon_card_detail",
+                            state_name=state,
+                            extra={"target": target_entry["target"]},
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        locked_cards.append(
+                            {
+                                "target": target_entry["target"],
+                                "center": [
+                                    int(card_center[0]),
+                                    int(card_center[1]),
+                                ],
+                                "template_path": match_item.get(
+                                    "template_path"
+                                ),
+                            }
+                        )
+                        target_entry["locked"] = (
+                            int(target_entry.get("locked", 0)) + 1
+                        )
+                        if int(target_entry["remaining"]) > 0:
+                            target_entry["remaining"] = (
+                                int(target_entry["remaining"]) - 1
+                            )
+                    result_locked = True
+                    if lock_enough_stop and not any(
+                        item["remaining"] != 0 for item in lock_targets
+                    ):
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="lock_target_reached",
+                            report=report,
+                        )
                 if pending_free_summon:
                     if "close" in matches:
                         if not tap_match(
@@ -651,6 +881,7 @@ def create_expball_summon_handler(
                         phase = "request"
                         pending_free_summon = False
                         result_counted = False
+                        result_locked = False
                         acted = True
                         if summons >= max_summons:
                             return finish(
@@ -679,6 +910,7 @@ def create_expball_summon_handler(
                         )
                     phase = "confirm"
                     result_counted = False
+                    result_locked = False
                     acted = True
                 elif "again10_0" in matches:
                     return finish(
@@ -1983,6 +2215,9 @@ def _summon_result(
     attempts: int,
     summons: int,
     actions: list[str],
+    locked_cards: list[dict[str, Any]],
+    lock_targets: list[dict[str, Any]],
+    lock_enough_stop: bool,
     report: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -1993,8 +2228,139 @@ def _summon_result(
         "attempts": attempts,
         "summons": summons,
         "actions": list(actions),
+        "locked_cards": list(locked_cards),
+        "locked_count": len(locked_cards),
+        "lock_targets": [dict(item) for item in lock_targets],
+        "lock_enough_stop": lock_enough_stop,
         "last_report": report,
     }
+
+
+def _parse_summon_lock_targets(
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen_targets: set[str] = set()
+
+    def add_entry(
+        target_name: str,
+        count: int = 0,
+        remaining: int | None = None,
+        locked: int = 0,
+    ) -> None:
+        cleaned = target_name.strip()
+        if not cleaned:
+            raise ValueError(
+                "Each lock target must specify a non-empty target name."
+            )
+        key = cleaned.lower()
+        if key in seen_targets:
+            return
+        seen_targets.add(key)
+        normalized_count = int(count) if int(count) > 0 else 0
+        normalized_remaining = (
+            int(remaining)
+            if remaining is not None
+            else (normalized_count if normalized_count > 0 else -1)
+        )
+        entries.append(
+            {
+                "target": cleaned,
+                "count": normalized_count,
+                "remaining": normalized_remaining,
+                "locked": int(locked),
+            }
+        )
+
+    raw_targets = payload.get("lock_targets")
+    if raw_targets is not None:
+        if not isinstance(raw_targets, (list, tuple)):
+            raise ValueError("lock_targets must be a list of targets.")
+        for item in raw_targets:
+            if isinstance(item, str):
+                text = item.strip()
+                if ":" in text:
+                    name_part, count_part = text.rsplit(":", 1)
+                    try:
+                        parsed_count = int(count_part.strip())
+                    except ValueError as exc:
+                        raise ValueError(
+                            "lock_targets count suffix must be an integer."
+                        ) from exc
+                    if parsed_count < 0:
+                        raise ValueError(
+                            "lock_targets count must be 0 or greater."
+                        )
+                    add_entry(name_part, parsed_count)
+                else:
+                    add_entry(text, 0)
+            elif isinstance(item, dict):
+                raw_name = (
+                    item.get("target")
+                    if item.get("target") is not None
+                    else item.get("path")
+                )
+                if not isinstance(raw_name, str) or not raw_name.strip():
+                    raise ValueError(
+                        "Each lock_targets object must have a non-empty target."
+                    )
+                raw_count = (
+                    item.get("count")
+                    if item.get("count") is not None
+                    else item.get("need_num", 0)
+                )
+                if isinstance(raw_count, bool) or not isinstance(
+                    raw_count,
+                    int,
+                ):
+                    raise ValueError(
+                        "lock_targets count must be an integer."
+                    )
+                if raw_count < 0:
+                    raise ValueError(
+                        "lock_targets count must be 0 or greater."
+                    )
+                raw_remaining = item.get("remaining")
+                if raw_remaining is not None and (
+                    isinstance(raw_remaining, bool)
+                    or not isinstance(raw_remaining, int)
+                    or raw_remaining < -1
+                ):
+                    raise ValueError(
+                        "lock_targets remaining must be an integer >= -1."
+                    )
+                raw_locked = item.get("locked", 0)
+                if (
+                    isinstance(raw_locked, bool)
+                    or not isinstance(raw_locked, int)
+                    or raw_locked < 0
+                ):
+                    raise ValueError(
+                        "lock_targets locked must be a non-negative integer."
+                    )
+                add_entry(
+                    raw_name,
+                    raw_count,
+                    remaining=raw_remaining,
+                    locked=raw_locked,
+                )
+            else:
+                raise ValueError(
+                    "Each lock_targets item must be a string or object."
+                )
+
+    for flag_key, target_name in (
+        ("lock_lily", "lily"),
+        ("lock_habe", "habe"),
+        ("lock_hakuno", "hakuno"),
+    ):
+        flag_val = payload.get(flag_key, False)
+        if not isinstance(flag_val, bool):
+            raise ValueError(f"{flag_key} must be a boolean.")
+        if flag_val:
+            add_entry(target_name, 0)
+
+    return entries
 
 
 def _number(
