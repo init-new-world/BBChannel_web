@@ -137,6 +137,7 @@ def create_expball_run_handler(
                 "locker_threshold",
                 "switch_command_code_tab",
                 "auto_select",
+                "allow_qp_full",
             ):
                 _copy_option(payload, overflow_payload, key, key)
         if overflow_action in {"equipment_enhancement", "servant_enhancement"}:

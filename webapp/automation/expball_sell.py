@@ -18,6 +18,7 @@ _VALID_CARD_STARS = {3, 4, 5}
 _SELL_TARGETS = {"exp", "servant", "command_code"}
 _UNIFIED_LOCK_POINT = (32, 368)
 _COMMAND_CODE_TAB_POINT = (475, 128)
+_QP_FULL_CONFIRM_POINT = (920, 560)
 
 
 def create_expball_sell_handler(
@@ -53,6 +54,7 @@ def create_expball_sell_handler(
             True,
         )
         auto_select = _boolean(payload, "auto_select", False)
+        allow_qp_full = _boolean(payload, "allow_qp_full", False)
         stars = _parse_card_stars(payload)
         action_wait_seconds = _number(
             payload,
@@ -573,12 +575,26 @@ def create_expball_sell_handler(
             if isinstance(match, dict)
         }
         if "qpfull" in match_names:
-            return finish(
-                completed=False,
-                stopped=True,
-                reason="qp_full",
-                report=report,
-            )
+            if not allow_qp_full:
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="qp_full",
+                    report=report,
+                )
+            if not tap_point(_QP_FULL_CONFIRM_POINT, "confirm_qp_full"):
+                return finish(
+                    completed=False,
+                    stopped=True,
+                    reason="device_action_failed",
+                    report=report,
+                )
+            report = inspect("result")
+            match_names = {
+                match.get("name")
+                for match in report.get("matches", [])
+                if isinstance(match, dict)
+            }
         if "ljbhclose" not in match_names:
             return finish(
                 completed=False,

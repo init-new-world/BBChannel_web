@@ -1012,6 +1012,7 @@ def create_lottery_run_handler(
                 "locker_threshold",
                 "switch_command_code_tab",
                 "auto_select",
+                "allow_qp_full",
             ):
                 _copy_option(payload, overflow_payload, key, key)
         if overflow_action == "servant_enhancement":
