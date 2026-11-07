@@ -70,6 +70,12 @@ def _run_completion(
     goto_interlude = _pattern((180, 48), (95, 75, 165))
     goto_stage = _pattern((220, 52), (155, 105, 45))
     next_story = _pattern((161, 100), (105, 145, 65))
+    ce_detail = _pattern((76, 36), (205, 115, 75))
+    bond_ce = _pattern((38, 38), (95, 185, 155))
+    not_available = _pattern((100, 38), (185, 85, 95))
+    list_update = _pattern((92, 38), (65, 175, 135))
+    need_skip = _pattern((48, 48), (145, 115, 205))
+    need_skip_1 = _pattern((84, 38), (215, 145, 85))
     drop_item = drop_template if drop_template is not None else _pattern((40, 40), (165, 105, 45))
     next_button.save(battle_assets / "next.png")
     run_again.save(battle_assets / "run_again.png")
@@ -82,6 +88,12 @@ def _run_completion(
     apply_for_friend.save(battle_assets / "friend_apply_1.png")
     reconnect.save(battle_assets / "reconnect.png")
     battle_finish.save(battle_assets / "battleFinish.png")
+    ce_detail.save(battle_assets / "nengli.png")
+    bond_ce.save(battle_assets / "jblz.png")
+    not_available.save(battle_assets / "notAvailable.png")
+    list_update.save(battle_assets / "listupdate.png")
+    need_skip.save(battle_assets / "needSkip.png")
+    need_skip_1.save(battle_assets / "needSkip1.png")
     goto_interlude.save(interlude_assets / "gotoInterlude.png")
     goto_stage.save(interlude_assets / "gotoStage.png")
     next_story.save(main_story_assets / "nextOne.png")
@@ -575,4 +587,116 @@ def test_completion_ignore_full_friendship_bypasses_bond_stop(tmp_path: Path):
     assert result.status == JobStatus.SUCCEEDED
     assert result.result["complete"] is True
     assert result.result.get("stopped") is not True
+
+
+def test_completion_closes_non_bond_craft_essence_detail_screen(tmp_path: Path):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    ce_frame = base.copy()
+    ce_frame.paste(_pattern((76, 36), (205, 115, 75)), (550, 120))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (ce_frame, {"type": "tap", "x": 43, "y": 43}),
+            (repeat_frame, None),
+        ],
+        config={"fullFriendshipStop": 1},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is True
+    assert result.result["actions"] == ["close_drop_ce"]
+
+
+def test_completion_stops_on_bond_craft_essence_detail_screen_when_configured(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    frame.paste(_pattern((76, 36), (205, 115, 75)), (550, 120))
+    frame.paste(_pattern((38, 38), (95, 185, 155)), (780, 250))
+
+    result = _run_completion(
+        tmp_path,
+        [(frame, None)],
+        config={"fullFriendshipStop": 1},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is False
+    assert result.result["stopped"] is True
+    assert result.result["reason"] == "full_friendship"
+    assert result.result["actions"] == []
+
+
+def test_completion_dismisses_friend_full_dialog_and_falls_back_to_finish_without_friend(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    friend_apply_frame = base.copy()
+    friend_apply_frame.paste(_pattern((174, 52), (75, 135, 65)), (200, 500))
+    friend_apply_frame.paste(_pattern((308, 69), (165, 65, 105)), (700, 500))
+    friend_full_frame = base.copy()
+    friend_full_frame.paste(_pattern((100, 38), (185, 85, 95)), (590, 545))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (friend_apply_frame, {"type": "tap", "x": 854, "y": 534}),
+            (friend_full_frame, {"type": "tap", "x": 640, "y": 564}),
+            (friend_apply_frame, {"type": "tap", "x": 287, "y": 526}),
+            (repeat_frame, None),
+        ],
+        config={"addFriend": 1},
+        payload={"timeout_seconds": 10},
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["actions"] == [
+        "apply_for_friend",
+        "dismiss_friend_full",
+        "finish_without_friend",
+    ]
+
+
+def test_completion_closes_reward_dialog_and_skips_post_battle_cutscene(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    reward_dialog_frame = base.copy()
+    reward_dialog_frame.paste(_pattern((100, 38), (185, 85, 95)), (380, 545))
+    skip_prompt_frame = base.copy()
+    skip_prompt_frame.paste(_pattern((84, 38), (215, 145, 85)), (1140, 20))
+    skip_confirm_frame = base.copy()
+    skip_confirm_frame.paste(_pattern((92, 38), (65, 175, 135)), (780, 545))
+    repeat_frame = base.copy()
+    repeat_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (reward_dialog_frame, {"type": "tap", "x": 430, "y": 564}),
+            (skip_prompt_frame, {"type": "tap", "x": 1197, "y": 40}),
+            (skip_confirm_frame, {"type": "tap", "x": 826, "y": 564}),
+            (repeat_frame, None),
+        ],
+        payload={"timeout_seconds": 10},
+        wait_timeout=10,
+    )
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    assert result.result["actions"] == [
+        "close_reward_dialog",
+        "story_skip",
+        "story_skip_confirm",
+    ]
+
 

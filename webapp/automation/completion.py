@@ -25,6 +25,17 @@ from webapp.services.script_data import ScriptDataService
 
 BATTLE_COMPLETE_JOB_KIND = "battle.complete"
 SETTLEMENT_CONTINUE_POINT = (640, 650)
+DROP_CE_ROI = (533, 100, 100, 67)
+BOND_CE_ROI = (773, 240, 47, 60)
+DROP_CE_CLOSE_POINT = (43, 43)
+DROP_CE_CLOSE_SIZE = (47, 61)
+FRIEND_FULL_ROI = (553, 533, 180, 60)
+REWARD_CLOSE_ROI = (347, 533, 173, 60)
+STORY_SKIP_CONFIRM_ROI = (767, 533, 113, 60)
+STORY_SKIP_TOP_ROI = (1120, 10, 147, 60)
+STORY_SKIP_BOTTOM_ROI = (1193, 573, 67, 80)
+STORY_SKIP_POINT = (1197, 40)
+STORY_SKIP_SIZE = (100, 46)
 
 
 def create_completion_handler(
@@ -69,6 +80,7 @@ def create_completion_handler(
         actions: list[str] = []
         drop_count = initial_drop_count
         observed_drop_bounds: list[tuple[int, int, int, int]] = []
+        cant_add_friend = False
 
         while monotonic() - started <= timeout_seconds:
             elapsed = monotonic() - started
@@ -126,6 +138,53 @@ def create_completion_handler(
                         "actions": actions,
                         "attempts": attempts,
                     }
+            drop_ce_screen = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/nengli.png",
+                threshold=0.8,
+                roi=DROP_CE_ROI,
+            )
+            if drop_ce_screen is not None and drop_ce_screen.matched:
+                if plan["run"]["full_friendship_stop"] and not ignore_full_friendship:
+                    bond_ce_marker = _match_optional(
+                        recognition,
+                        screenshot,
+                        f"battle/{server}/jblz.png",
+                        threshold=0.8,
+                        roi=BOND_CE_ROI,
+                    )
+                    if bond_ce_marker is not None and bond_ce_marker.matched:
+                        context.checkpoint(
+                            "complete",
+                            progress=1.0,
+                            message="Stopped after reaching full friendship.",
+                        )
+                        return {
+                            "setting_name": setting_name.strip(),
+                            "complete": False,
+                            "stopped": True,
+                            "reason": "full_friendship",
+                            "drop_count": drop_count,
+                            "actions": actions,
+                            "attempts": attempts,
+                        }
+                operation = device_service.tap(
+                    *randomized_touch_point(
+                        DROP_CE_CLOSE_POINT,
+                        enabled=random_touch,
+                        size=DROP_CE_CLOSE_SIZE,
+                    )
+                )
+                actions.append("close_drop_ce")
+                context.emit(
+                    "device_action",
+                    "Closed the dropped Craft Essence detail screen.",
+                    data={"role": "close_drop_ce", "operation": operation.to_dict()},
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+
             if plan["run"]["full_friendship_stop"] and not ignore_full_friendship:
                 friendship_marker = _match_optional(
                     recognition,
@@ -211,7 +270,52 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
-            add_friend = bool(plan["run"].get("add_friend"))
+            friend_full = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/notAvailable.png",
+                roi=FRIEND_FULL_ROI,
+            )
+            if friend_full is not None and friend_full.matched:
+                cant_add_friend = True
+                operation = device_service.tap(
+                    *match_touch_point(friend_full, enabled=random_touch)
+                )
+                actions.append("dismiss_friend_full")
+                context.emit(
+                    "device_action",
+                    "Dismissed the friend list full dialog.",
+                    data={
+                        "role": "dismiss_friend_full",
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+
+            reward_close = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/notAvailable.png",
+                roi=REWARD_CLOSE_ROI,
+            )
+            if reward_close is not None and reward_close.matched:
+                operation = device_service.tap(
+                    *match_touch_point(reward_close, enabled=random_touch)
+                )
+                actions.append("close_reward_dialog")
+                context.emit(
+                    "device_action",
+                    "Closed the post-battle reward dialog.",
+                    data={
+                        "role": "close_reward_dialog",
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+
+            add_friend = bool(plan["run"].get("add_friend")) and not cant_add_friend
             friend_action = (
                 "apply_for_friend" if add_friend else "finish_without_friend"
             )
@@ -230,6 +334,59 @@ def create_completion_handler(
                     "device_action",
                     "Handled the post-battle friend request.",
                     data={"role": friend_action, "operation": operation.to_dict()},
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+
+            story_skip_confirm = _match_optional(
+                recognition,
+                screenshot,
+                f"battle/{server}/listupdate.png",
+                roi=STORY_SKIP_CONFIRM_ROI,
+            )
+            if story_skip_confirm is not None and story_skip_confirm.matched:
+                operation = device_service.tap(
+                    *match_touch_point(story_skip_confirm, enabled=random_touch)
+                )
+                actions.append("story_skip_confirm")
+                context.emit(
+                    "device_action",
+                    "Confirmed post-battle story cutscene skip.",
+                    data={
+                        "role": "story_skip_confirm",
+                        "operation": operation.to_dict(),
+                    },
+                )
+                context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
+                continue
+
+            story_skip_prompt = None
+            for template_name, skip_roi in (
+                ("needSkip1", STORY_SKIP_TOP_ROI),
+                ("needSkip", STORY_SKIP_BOTTOM_ROI),
+            ):
+                candidate = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/{template_name}.png",
+                    roi=skip_roi,
+                )
+                if candidate is not None and candidate.matched:
+                    story_skip_prompt = candidate
+                    break
+            if story_skip_prompt is not None:
+                operation = device_service.tap(
+                    *randomized_touch_point(
+                        STORY_SKIP_POINT,
+                        enabled=random_touch,
+                        size=STORY_SKIP_SIZE,
+                    )
+                )
+                actions.append("story_skip")
+                context.emit(
+                    "device_action",
+                    "Triggered post-battle story cutscene skip.",
+                    data={"role": "story_skip", "operation": operation.to_dict()},
                 )
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
@@ -421,12 +578,16 @@ def _match_optional(
     recognition: RecognitionService,
     screenshot: bytes,
     template_path: str,
+    *,
+    threshold: float = 0.85,
+    roi: tuple[int, int, int, int] | None = None,
 ):
     try:
         return recognition.match_template(
             screenshot,
             template_path,
-            threshold=0.85,
+            threshold=threshold,
+            roi=roi,
             scales=(1.0, 0.75, 2 / 3, 0.5),
         )
     except AppError as exc:
