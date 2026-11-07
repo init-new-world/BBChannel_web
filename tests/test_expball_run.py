@@ -580,3 +580,80 @@ def test_expball_run_storage_then_sell_falls_back_when_storage_full():
     ]
 
 
+def test_expball_run_forwards_draw_100_and_banner_direction():
+    nav_states = iter(
+        (
+            _navigation_report("menu_available"),
+            _navigation_report("menu_expanded"),
+            _navigation_report("summon_picker"),
+            _navigation_report("summon_page"),
+        )
+    )
+    reports = iter(
+        (
+            _report(
+                "call10",
+                "summon",
+                "actionable",
+                action="summon_ten",
+                matches=[{"name": "call10", "center": [640, 533]}],
+            ),
+            _report(
+                "decide",
+                "confirmation",
+                "actionable",
+                action="confirm_summon",
+                matches=[{"name": "decide", "center": [835, 563]}],
+            ),
+            _report(
+                "again10",
+                "summon",
+                "actionable",
+                action="summon_again",
+                matches=[
+                    {"name": "again10", "center": [760, 673]},
+                    {"name": "bianhuan", "center": [1040, 670]},
+                ],
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(nav_states)
+
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_run_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_summons": 1,
+            "draw_100": True,
+            "banner_direction": "right",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stages"][0]["result"]["banner_direction"] == "right"
+    assert result["stages"][0]["result"]["actions"] == [
+        "open_menu",
+        "open_summon",
+        "next_summon_banner",
+    ]
+    assert result["stages"][1]["result"]["draw_100"] is True
+    assert result["stages"][1]["result"]["actions"] == [
+        "summon_hundred",
+        "confirm_summon",
+    ]
+
+
+

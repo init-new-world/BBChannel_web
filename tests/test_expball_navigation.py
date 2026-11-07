@@ -210,6 +210,46 @@ def test_expball_navigate_switches_banner_until_summon_page_is_found():
     assert device.taps == [(1183, 650), (640, 615), (30, 360), (30, 360)]
 
 
+def test_expball_navigate_switches_banner_right_when_configured():
+    reports = iter(
+        (
+            _navigation_report("menu_available"),
+            _navigation_report("menu_expanded"),
+            _navigation_report("summon_picker"),
+            _navigation_report("summon_picker"),
+            _navigation_report("summon_page"),
+        )
+    )
+
+    class Recognizer:
+        def recognize_navigation(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_navigate_handler(
+        _ScriptData(), device, Recognizer()
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "destination": "summon",
+            "banner_direction": "right",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["banner_direction"] == "right"
+    assert result["actions"] == [
+        "open_menu",
+        "open_summon",
+        "next_summon_banner",
+        "next_summon_banner",
+    ]
+    assert device.taps == [(1183, 650), (640, 615), (1250, 360), (1250, 360)]
+
+
 @pytest.mark.parametrize(
     ("destination", "submenu_state", "submenu_action", "submenu_point"),
     (

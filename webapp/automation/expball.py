@@ -32,6 +32,8 @@ EXPBALL_STORAGE_JOB_KIND = "event.expball.storage"
 EXPBALL_SUMMON_JOB_KIND = "event.expball.summon"
 EXPBALL_ENHANCE_JOB_KIND = "event.expball.enhance"
 _SUMMON_REQUEST_ACTIONS = {"summon_free_ten", "summon_ten"}
+_SUMMON_HUNDRED_POINT = (880, 520)
+_SUMMON_HUNDRED_SIZE = (173, 13)
 _SUMMON_LOCK_CARD_POINT = (32, 178)
 _SUMMON_CLOSE_DETAIL_POINT = (43, 43)
 _VALID_CARD_STARS = {3, 4, 5}
@@ -596,6 +598,7 @@ def create_expball_summon_handler(
         if not isinstance(lock_enough_stop_raw, bool):
             raise ValueError("lock_enough_stop must be a boolean.")
         lock_enough_stop = lock_enough_stop_raw
+        draw_100 = _draw_100(payload)
         timeout_seconds = _number(payload, "timeout_seconds", 600, 0.1, 3600)
         poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
         action_wait_seconds = _number(
@@ -616,6 +619,8 @@ def create_expball_summon_handler(
         max_idle_polls = _integer(payload, "max_idle_polls", 3, 1, 100)
         plan = script_data.get_setting_plan(normalized_name)
         server = str(plan["server"]).upper()
+        if draw_100 and server not in {"CH", "JP"}:
+            raise ValueError("draw_100 is only supported on CH and JP servers.")
         run_options = plan.get("run", {})
         random_touch = bool(run_options.get("random_touch"))
         random_time = configured_random_time(run_options.get("random_time", 0))
@@ -656,6 +661,7 @@ def create_expball_summon_handler(
                 reason=reason,
                 attempts=attempts,
                 summons=summons,
+                draw_100=draw_100,
                 actions=actions,
                 locked_cards=locked_cards,
                 lock_targets=lock_targets,
@@ -813,14 +819,31 @@ def create_expball_summon_handler(
                     and action in _SUMMON_REQUEST_ACTIONS
                     and state in matches
                 ):
-                    if not tap_match(report, state, action):
-                        return finish(
-                            completed=False,
-                            stopped=True,
-                            reason="device_action_failed",
-                            report=report,
+                    if action == "summon_ten" and draw_100:
+                        if not tap_point(
+                            _SUMMON_HUNDRED_POINT,
+                            "summon_hundred",
+                            state_name=state,
+                            size=_SUMMON_HUNDRED_SIZE,
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        pending_free_summon = False
+                    else:
+                        if not tap_match(report, state, action):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        pending_free_summon = (
+                            action == "summon_free_ten" and not draw_100
                         )
-                    pending_free_summon = action == "summon_free_ten"
                     result_counted = False
                     result_locked = False
                     phase = "confirm"
@@ -2507,6 +2530,7 @@ def _summon_result(
     reason: str,
     attempts: int,
     summons: int,
+    draw_100: bool,
     actions: list[str],
     locked_cards: list[dict[str, Any]],
     lock_targets: list[dict[str, Any]],
@@ -2520,6 +2544,7 @@ def _summon_result(
         "reason": reason,
         "attempts": attempts,
         "summons": summons,
+        "draw_100": draw_100,
         "actions": list(actions),
         "locked_cards": list(locked_cards),
         "locked_count": len(locked_cards),
@@ -2527,6 +2552,16 @@ def _summon_result(
         "lock_enough_stop": lock_enough_stop,
         "last_report": report,
     }
+
+
+def _draw_100(payload: dict[str, Any]) -> bool:
+    for key in ("draw_100", "draw100by100"):
+        if key in payload and payload[key] is not None:
+            value = payload[key]
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean.")
+            return value
+    return False
 
 
 def _parse_summon_lock_targets(

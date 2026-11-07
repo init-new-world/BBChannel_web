@@ -2530,6 +2530,76 @@ def test_expball_enhance_handler_stops_when_target_servant_not_found_at_scroll_e
     assert device.swipes == [(527, 617, 527, 190, 500)]
 
 
+def test_expball_summon_handler_supports_hundred_roll_and_rejects_cntw():
+    import pytest
+
+    reports = iter(
+        (
+            _summon_report(
+                "call10",
+                "call10",
+                action="summon_ten",
+            ),
+            _summon_report(
+                "decide",
+                "decide",
+                action="confirm_summon",
+            ),
+            _summon_report(
+                "again10_1",
+                "again10_1",
+                "bianhuan",
+                action="summon_again",
+            ),
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+    device = _Device()
+    result = create_expball_summon_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "draw_100": True,
+            "max_summons": 1,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["draw_100"] is True
+    assert result["summons"] == 1
+    assert result["actions"] == ["summon_hundred", "confirm_summon"]
+    assert device.taps == [(880, 520), (830, 570)]
+
+    class CntwScriptData:
+        def get_setting_plan(self, name):
+            assert name == "cntw"
+            return {
+                "server": "CNTW",
+                "run": {"random_touch": False, "random_time": 0},
+            }
+
+    with pytest.raises(ValueError, match="draw_100"):
+        create_expball_summon_handler(
+            CntwScriptData(),
+            _Device(),
+            Recognizer(),
+        )(
+            _Context(),
+            {"setting_name": "cntw", "draw_100": True},
+        )
+
+
+
 
 
 

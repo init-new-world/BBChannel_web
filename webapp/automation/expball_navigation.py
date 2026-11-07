@@ -29,6 +29,8 @@ _CLOSE_PAGE_POINT = (105, 43)
 _CLOSE_DIALOG_POINT = (1243, 33)
 _OPEN_FROM_FULL_POINT = (347, 477)
 _PREVIOUS_SUMMON_BANNER_POINT = (30, 360)
+_NEXT_SUMMON_BANNER_POINT = (1250, 360)
+_BANNER_DIRECTIONS = {"left", "right"}
 _MENU_DESTINATIONS = {
     "summon": ("open_summon", (640, 615)),
     "sell": ("open_shop", (807, 598)),
@@ -82,6 +84,7 @@ def create_expball_navigate_handler(
             1,
             100,
         )
+        banner_direction = _banner_direction(payload)
         plan = script_data.get_setting_plan(setting_name)
         server = str(plan["server"]).upper()
         run_options = plan.get("run", {})
@@ -114,6 +117,7 @@ def create_expball_navigate_handler(
             return {
                 "setting_name": setting_name,
                 "destination": destination,
+                "banner_direction": banner_direction,
                 "completed": completed,
                 "stopped": not completed,
                 "reason": reason,
@@ -183,8 +187,12 @@ def create_expball_navigate_handler(
                         report=report,
                     )
                 action, point = (
-                    "previous_summon_banner",
-                    _PREVIOUS_SUMMON_BANNER_POINT,
+                    ("next_summon_banner", _NEXT_SUMMON_BANNER_POINT)
+                    if banner_direction == "right"
+                    else (
+                        "previous_summon_banner",
+                        _PREVIOUS_SUMMON_BANNER_POINT,
+                    )
                 )
                 banner_switches += 1
             elif state == "inventory_full":
@@ -213,7 +221,10 @@ def create_expball_navigate_handler(
                 action, point = "close_current_page", _CLOSE_PAGE_POINT
 
             action_state = f"{state}:{action}"
-            repeatable = action == "previous_summon_banner"
+            repeatable = action in {
+                "previous_summon_banner",
+                "next_summon_banner",
+            }
             if (
                 action is None
                 or point is None
@@ -290,6 +301,25 @@ def _setting_name(payload: dict[str, Any]) -> str:
     if not isinstance(setting_name, str) or not setting_name.strip():
         raise ValueError("setting_name must be a non-empty string.")
     return setting_name.strip()
+
+
+def _banner_direction(payload: dict[str, Any]) -> str:
+    if "banner_direction" in payload and payload["banner_direction"] is not None:
+        raw = payload["banner_direction"]
+        if not isinstance(raw, str):
+            raise ValueError("banner_direction must be left or right.")
+        direction = raw.strip().lower()
+        if direction not in _BANNER_DIRECTIONS:
+            raise ValueError("banner_direction must be left or right.")
+        return direction
+    if "l_or_r" in payload and payload["l_or_r"] is not None:
+        raw_lr = payload["l_or_r"]
+        if isinstance(raw_lr, bool):
+            return "right" if raw_lr else "left"
+        if isinstance(raw_lr, int) and raw_lr in {0, 1}:
+            return "right" if raw_lr == 1 else "left"
+        raise ValueError("l_or_r must be 0 or 1.")
+    return "left"
 
 
 def _number(

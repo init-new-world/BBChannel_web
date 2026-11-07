@@ -197,6 +197,8 @@ def create_expball_run_handler(
             "max_banner_switches",
             "max_banner_switches",
         )
+        for key in ("banner_direction", "l_or_r"):
+            _copy_option(payload, navigation_payload, key, key)
         _copy_option(
             payload,
             summon_payload,
@@ -210,6 +212,8 @@ def create_expball_run_handler(
             "max_same_state",
         )
         for key in (
+            "draw_100",
+            "draw100by100",
             "lock_targets",
             "lock_lily",
             "lock_habe",
