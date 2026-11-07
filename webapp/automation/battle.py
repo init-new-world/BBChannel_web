@@ -837,6 +837,10 @@ def create_battle_execute_plan_handler(
             for round_plan in program["rounds"]
             for step in round_plan["extra_turn"]["command_phase"]["steps"]
         ) or any(
+            action.get("control", {}).get("check_cards")
+            for round_plan in program["rounds"]
+            for action in round_plan["extra_turn"]["actions"]
+        ) or any(
             action.get("runtime", {}).get("type") == "hakuno_card_reroll"
             for round_plan in program["rounds"]
             for action in round_plan["extra_turn"]["actions"]
@@ -848,6 +852,10 @@ def create_battle_execute_plan_handler(
             for round_plan in program["rounds"]
             for turn in round_plan["turns"]
             for action in turn["actions"]
+        ) or any(
+            action.get("control", {}).get("check_np")
+            for round_plan in program["rounds"]
+            for action in round_plan["extra_turn"]["actions"]
         )
         effective_np_recognizer = np_recognizer or (
             NpChargeRecognizer(recognition)
@@ -893,6 +901,8 @@ def create_battle_execute_plan_handler(
         }
         battle_finished = False
         detected_round: int | None = None
+        current_round: int | None = None
+        has_exchanged = False
 
         for turn_number, (round_number, turn) in enumerate(turns, start=1):
             if detected_round is not None and round_number < detected_round:
@@ -906,11 +916,27 @@ def create_battle_execute_plan_handler(
                     },
                 )
                 continue
-            skill_actions = [
+            if round_number != current_round:
+                current_round = round_number
+                has_exchanged = False
+            raw_skill_actions = [
                 action
                 for action in turn["actions"]
                 if action["source"].get("type") == "skill"
             ]
+            skill_actions, skipped_exchange_actions = _filter_post_exchange_skill_actions(
+                raw_skill_actions,
+                has_exchanged,
+            )
+            for skipped_action in skipped_exchange_actions:
+                context.emit(
+                    "skill_skipped",
+                    "Skill was skipped because order change already occurred in this round.",
+                    data={
+                        "action": skipped_action["source"],
+                        "reason": "already_exchanged",
+                    },
+                )
             execute_conditional_skills = True
             for skill_number, action in enumerate(skill_actions, start=1):
                 control = action.get("control")
@@ -1056,6 +1082,7 @@ def create_battle_execute_plan_handler(
                 )
                 state_change = action.get("state_change")
                 if state_change and state_change["type"] == "servant_exchange":
+                    has_exchanged = True
                     _apply_servant_exchange(
                         servant_positions,
                         state_change["positions"],
@@ -1107,8 +1134,7 @@ def create_battle_execute_plan_handler(
                     },
                 )
 
-            compiled_round = compiled_rounds[round_number]
-            extra_turn = compiled_round["extra_turn"]
+            extra_turn = _resolve_fallback_extra_turn(program, round_number)
             transition = _wait_for_battle_transition(
                 context,
                 device_service,
@@ -1128,6 +1154,7 @@ def create_battle_execute_plan_handler(
                 and turn["turn"] == last_turns[round_number]
                 and transition["round"] == round_number
             ):
+                exchange_state = {"has_exchanged": has_exchanged}
                 for extra_number in range(1, 11):
                     context.emit(
                         "battle_extra_turn",
@@ -1152,7 +1179,10 @@ def create_battle_execute_plan_handler(
                         card_wait_seconds=card_wait_seconds,
                         speedup_skills=speedup_skills,
                         occupied_positions=occupied_positions,
+                        np_recognizer=effective_np_recognizer,
+                        exchange_state=exchange_state,
                     )
+                    has_exchanged = exchange_state["has_exchanged"]
                     transition = _wait_for_battle_transition(
                         context,
                         device_service,
@@ -1176,6 +1206,62 @@ def create_battle_execute_plan_handler(
             if battle_finished:
                 break
 
+        while not battle_finished and detected_round is not None:
+            active_round = detected_round
+            if active_round != current_round:
+                current_round = active_round
+                has_exchanged = False
+            extra_turn = _resolve_fallback_extra_turn(program, active_round)
+            exchange_state = {"has_exchanged": has_exchanged}
+            for extra_number in range(1, 11):
+                context.emit(
+                    "battle_extra_turn",
+                    "Executing configured extra battle turn.",
+                    data={"round": active_round, "extra_turn": extra_number},
+                )
+                tap_count += _execute_extra_turn(
+                    context,
+                    device_service,
+                    recognition,
+                    card_recognizer,
+                    program["server"],
+                    servant_positions,
+                    extra_turn,
+                    card_templates,
+                    attack_template,
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    tap_interval,
+                    special_keys=special_keys,
+                    card_wait_seconds=card_wait_seconds,
+                    speedup_skills=speedup_skills,
+                    occupied_positions=occupied_positions,
+                    np_recognizer=effective_np_recognizer,
+                    exchange_state=exchange_state,
+                )
+                has_exchanged = exchange_state["has_exchanged"]
+                transition = _wait_for_battle_transition(
+                    context,
+                    device_service,
+                    recognition,
+                    program["server"],
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    reconnect_timing=tap_interval,
+                )
+                if transition["state"] == "finished":
+                    battle_finished = True
+                    break
+                detected_round = int(transition["round"])
+                if detected_round != active_round:
+                    break
+            else:
+                raise RuntimeError(
+                    f"Round {active_round} exceeded the 10 configured extra-turn limit."
+                )
+
         context.checkpoint("complete", progress=1.0, message="Battle execution completed.")
         return {
             "setting_name": setting_name,
@@ -1185,6 +1271,92 @@ def create_battle_execute_plan_handler(
         }
 
     return execute
+
+
+def _filter_post_exchange_skill_actions(
+    skill_actions: list[dict[str, Any]],
+    has_exchanged: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not has_exchanged:
+        return skill_actions, []
+    exchange_idx: int | None = None
+    has_start = False
+    for index, action in enumerate(skill_actions):
+        control = action.get("control")
+        if control and control.get("type") == "condition_start":
+            has_start = True
+            continue
+        if control and control.get("type") == "condition_end":
+            has_start = False
+            continue
+        state_change = action.get("state_change")
+        if state_change and state_change.get("type") == "servant_exchange":
+            exchange_idx = index
+            break
+    if exchange_idx is None:
+        return skill_actions, []
+    skipped_actions = [
+        action
+        for action in skill_actions[: exchange_idx + 1]
+        if not action.get("control")
+    ]
+    remaining = list(skill_actions[exchange_idx + 1 :])
+    if has_start:
+        for index, action in enumerate(remaining):
+            control = action.get("control")
+            if control and control.get("type") == "condition_end":
+                remaining.pop(index)
+                break
+    return remaining, skipped_actions
+
+
+def _is_configured_extra_turn(extra_turn: dict[str, Any]) -> bool:
+    if extra_turn.get("actions"):
+        return True
+    return any(
+        step.get("type") == "strategy"
+        for step in extra_turn.get("command_phase", {}).get("steps", [])
+    )
+
+
+def _round_has_configured_turn_content(round_plan: dict[str, Any]) -> bool:
+    for turn in round_plan.get("turns", []):
+        if turn.get("actions") or turn.get("condition"):
+            return True
+        if any(
+            step.get("type") == "strategy"
+            or str(step.get("role", "")).startswith("np_")
+            for step in turn.get("command_phase", {}).get("steps", [])
+        ):
+            return True
+    return False
+
+
+def _resolve_fallback_extra_turn(
+    program: dict[str, Any],
+    round_number: int,
+) -> dict[str, Any]:
+    compiled_rounds = {
+        round_plan["round"]: round_plan for round_plan in program["rounds"]
+    }
+    if round_number in compiled_rounds:
+        candidate = compiled_rounds[round_number]["extra_turn"]
+        if _is_configured_extra_turn(candidate):
+            return candidate
+    max_configured_round = max(compiled_rounds, default=1)
+    if round_number >= max_configured_round:
+        for round_plan in reversed(program["rounds"]):
+            candidate = round_plan["extra_turn"]
+            if _is_configured_extra_turn(candidate):
+                return candidate
+            if (
+                round_plan["round"] < round_number
+                and _round_has_configured_turn_content(round_plan)
+            ):
+                break
+    if round_number in compiled_rounds:
+        return compiled_rounds[round_number]["extra_turn"]
+    return program["rounds"][-1]["extra_turn"]
 
 
 def _execute_extra_turn(
@@ -1205,14 +1377,104 @@ def _execute_extra_turn(
     card_wait_seconds: float = 0.0,
     speedup_skills: bool = False,
     occupied_positions: list[int | None] | None = None,
+    np_recognizer: NpChargeRecognizer | None = None,
+    exchange_state: dict[str, bool] | None = None,
 ) -> int:
     tap_count = 0
-    skill_actions = [
+    raw_skill_actions = [
         action
         for action in turn["actions"]
         if action["source"].get("type") == "skill"
     ]
+    has_exchanged = bool(exchange_state and exchange_state.get("has_exchanged"))
+    skill_actions, skipped_exchange_actions = _filter_post_exchange_skill_actions(
+        raw_skill_actions,
+        has_exchanged,
+    )
+    for skipped_action in skipped_exchange_actions:
+        context.emit(
+            "skill_skipped",
+            "Skill was skipped because order change already occurred in this round.",
+            data={
+                "action": skipped_action["source"],
+                "reason": "already_exchanged",
+            },
+        )
+    execute_conditional_skills = True
     for action in skill_actions:
+        control = action.get("control")
+        if control and control["type"] == "condition_start":
+            check_np = bool(control.get("check_np"))
+            check_cards = bool(control["check_cards"])
+            if check_cards:
+                condition = turn.get("condition")
+                if not isinstance(condition, list) or not condition:
+                    raise ValueError("Conditional skill block has no card condition.")
+            battle_screenshot: bytes | None = None
+            if check_np or check_cards:
+                battle_screenshot = _wait_for_battle_ready(
+                    context,
+                    device_service,
+                    recognition,
+                    attack_template,
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    reconnect_timing=tap_interval,
+                )
+                _sync_frontline_alive_positions(
+                    context,
+                    recognition,
+                    battle_screenshot,
+                    occupied_positions,
+                    servant_positions,
+                )
+            np_matched = True
+            if check_np:
+                if np_recognizer is None:
+                    raise ValueError("NP charge recognition is not configured.")
+                assert battle_screenshot is not None
+                np_matched = _evaluate_np_condition(
+                    context,
+                    np_recognizer,
+                    battle_screenshot,
+                    server,
+                    servant_positions,
+                    control["np_checks"],
+                )
+            card_matched = True
+            if check_cards:
+                card_matched, condition_taps = _evaluate_card_condition(
+                    context,
+                    device_service,
+                    recognition,
+                    card_recognizer,
+                    server,
+                    _frontline_servants(servant_positions),
+                    condition,
+                    card_templates,
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    tap_interval,
+                    special_keys=special_keys,
+                    card_wait_seconds=card_wait_seconds,
+                    checks=control["checks"],
+                )
+                tap_count += condition_taps
+            matched = np_matched and card_matched
+            execute_conditional_skills = matched == control["execute_when_matched"]
+            continue
+        if control and control["type"] == "condition_end":
+            execute_conditional_skills = True
+            continue
+        if not execute_conditional_skills:
+            context.emit(
+                "skill_skipped",
+                "Skill was skipped because its condition did not match.",
+                data={"action": action["source"]},
+            )
+            continue
         runtime = action.get("runtime")
         if runtime and runtime["type"] == "hakuno_card_reroll":
             if card_recognizer is None:
@@ -1281,6 +1543,8 @@ def _execute_extra_turn(
         )
         state_change = action.get("state_change")
         if state_change and state_change["type"] == "servant_exchange":
+            if exchange_state is not None:
+                exchange_state["has_exchanged"] = True
             _apply_servant_exchange(servant_positions, state_change["positions"])
             if occupied_positions is not None:
                 _apply_servant_exchange(

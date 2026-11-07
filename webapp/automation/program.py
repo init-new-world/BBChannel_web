@@ -317,7 +317,7 @@ def compile_battle_program(
                 "extra_turn": {
                     "actions": extra_actions,
                     "command_phase": extra_command_phase,
-                    "condition": None,
+                    "condition": turns[-1]["condition"] if turns else None,
                 },
             }
         )

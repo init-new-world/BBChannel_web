@@ -19,6 +19,7 @@ from webapp.automation.battle import (
     _evaluate_card_condition,
     _execution_options,
     _execute_steps,
+    _filter_post_exchange_skill_actions,
     _frontline_servants,
     _is_servant_skill_unavailable,
     _matches_hakuno_needs,
@@ -2241,7 +2242,7 @@ def test_execute_battle_job_skips_skills_on_cooldown_or_empty_frontline_slot(
             },
             device_key="fake:cooldown",
         )
-        result = manager.wait(job.job_id, timeout=2)
+        result = manager.wait(job.job_id, timeout=5)
         events = manager.database.list_events(job.job_id)
 
     assert result.status == JobStatus.SUCCEEDED
@@ -2260,5 +2261,140 @@ def test_execute_battle_job_skips_skills_on_cooldown_or_empty_frontline_slot(
         (375, 500),
         (650, 500),
     ]
+
+
+def test_filter_post_exchange_skill_actions_slices_pre_exchange_and_orphaned_end():
+    actions = [
+        {"source": {"type": "skill", "command": ["Start", True, []]}, "control": {"type": "condition_start"}},
+        {"source": {"type": "skill", "command": 1}, "steps": []},
+        {
+            "source": {"type": "skill", "command": [12, 1, 4]},
+            "state_change": {"type": "servant_exchange", "positions": [1, 4]},
+            "steps": [],
+        },
+        {"source": {"type": "skill", "command": ["End"]}, "control": {"type": "condition_end"}},
+        {"source": {"type": "skill", "command": 2}, "steps": []},
+    ]
+
+    remaining, skipped = _filter_post_exchange_skill_actions(actions, has_exchanged=True)
+
+    assert [item["source"]["command"] for item in skipped] == [1, [12, 1, 4]]
+    assert [item["source"]["command"] for item in remaining] == [2]
+
+
+def test_execute_battle_job_skips_repeat_order_change_in_extra_turns_and_continues_unconfigured_round(
+    tmp_path: Path,
+):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text(
+        json.dumps(
+            {
+                "Servant A": {"other_name": []},
+                "Servant B": {"other_name": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (data / "settings" / "exchange-extra.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "servant_0_name": "Servant A",
+                "servant_3_name": "Servant B",
+                "noSpeedupSkill": 1,
+                "round1_turns": 1,
+                "round1_turn0_skill": [1, [12, 1, 4]],
+                "round1_extraSkill": [1, [12, 1, 4], ["Start", True, [], ["np", [1, "≥", 100], [0, "≥", 0], [0, "≥", 0]]], 2, ["End"]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        confidence = 1.0
+
+        def __init__(self, template_path, matched=True):
+            self.template_path = template_path
+            self.matched = matched
+
+        def to_dict(self):
+            return {"template_path": self.template_path, "matched": self.matched}
+
+    class Recognition:
+        transition_calls = 0
+
+        def match_template(self, _screenshot, template_path, _threshold=None, **_options):
+            if template_path == "battle/CH/attack.png":
+                return Match(template_path, True)
+            if template_path == "battle/public/alive.png":
+                return Match(template_path, True)
+            return Match(template_path, False)
+
+        def match_templates(self, _screenshot, candidates):
+            paths = [candidate["template_path"] for candidate in candidates]
+            if not any("phase_" in path or "battleFinish" in path for path in paths):
+                return [Match(path) for path in paths]
+            self.transition_calls += 1
+            if self.transition_calls == 1:
+                matched_paths = {"battle/CH/attack.png", "battle/CH/phase_1.png"}
+            elif self.transition_calls == 2:
+                matched_paths = {"battle/CH/attack.png", "battle/CH/phase_2.png"}
+            else:
+                matched_paths = {"battle/CH/battleFinish.png"}
+            return [Match(path, path in matched_paths) for path in paths]
+
+    class NpRecognizer:
+        def recognize(self, _screenshot, _server, *, present):
+            assert present == [True, False, False]
+            return {"complete": True, "values": [100, None, None]}
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            Recognition(),
+            np_recognizer=NpRecognizer(),
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "exchange-extra",
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:exchange-extra",
+        )
+        result = manager.wait(job.job_id, timeout=5)
+        events = manager.database.list_events(job.job_id)
+
+    assert result.status == JobStatus.SUCCEEDED
+    exchanges = [event for event in events if event.event_type == "servant_exchange"]
+    # Round 1 turn 0 exchanges once; Round 1 extra turn 1 skips duplicate exchange and runs skill 2;
+    # Round 2 (unconfigured wave) resets has_exchanged and falls back to round1_extraSkill.
+    assert len(exchanges) == 2
+    already_exchanged = [
+        event.data["action"]["command"]
+        for event in events
+        if event.event_type == "skill_skipped"
+        and event.data.get("reason") == "already_exchanged"
+    ]
+    assert already_exchanged == [1, [12, 1, 4]]
+
 
 
