@@ -149,6 +149,8 @@ _CE_BOMB_MARK_ROIS = tuple(
 )
 _CE_FULL_LV_RGB = (60, 54, 41)
 _CE_NON_FULL_LV_RGB = (147, 130, 100)
+_SERVANT_TARGET_ROI = (60, 173, 953, 547)
+_SERVANT_SCROLL_END_ROI = (993, 675, 40, 26)
 
 _NAVIGATION_STATE_SPECS = (
     ("summon_page", "friendpointcall.png", (507, 333, 263, 133)),
@@ -1028,6 +1030,223 @@ class ExpBallRecognizer:
         except Exception:
             pass
         return tuple(dict.fromkeys((*_SCALES, *extra_scales)))
+
+    def recognize_servant_target(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        target: str | None = None,
+        threshold: float = 0.85,
+        scroll_end_threshold: float = 0.8,
+    ) -> dict[str, Any]:
+        normalized_server = server.strip().upper()
+        if normalized_server not in {"CH", "CNTW", "JP"}:
+            raise ValueError("server must be CH, CNTW, or JP.")
+        if not 0 <= threshold <= 1:
+            raise ValueError("threshold must be between 0 and 1.")
+        if not 0 <= scroll_end_threshold <= 1:
+            raise ValueError("scroll_end_threshold must be between 0 and 1.")
+
+        custom_page = self._resources.template_index(
+            prefix="expball/levelupServant",
+            limit=200,
+        )
+        custom_by_name: dict[str, str] = {}
+        available_custom_targets: list[str] = []
+        for entry in custom_page.get("entries", []):
+            path = str(entry["path"])
+            stem = PurePosixPath(path).stem
+            name = PurePosixPath(path).name
+            custom_by_name[stem.lower()] = path
+            custom_by_name[name.lower()] = path
+            available_custom_targets.append(stem)
+
+        servant_face_page = self._resources.template_index(
+            prefix="servantface",
+            limit=200,
+        )
+        servant_face_by_name: dict[str, str] = {}
+        for entry in servant_face_page.get("entries", []):
+            path = str(entry["path"])
+            stem = PurePosixPath(path).stem
+            name = PurePosixPath(path).name
+            servant_face_by_name[stem.lower()] = path
+            servant_face_by_name[name.lower()] = path
+
+        server_page = self._resources.template_index(
+            prefix=f"expball/{normalized_server}",
+            limit=200,
+        )
+        server_paths = {
+            str(entry["path"]) for entry in server_page.get("entries", [])
+        }
+        scroll_end_path = f"expball/{normalized_server}/scrollEnd.png"
+        has_scroll_end = scroll_end_path in server_paths
+
+        normalized_target = target.strip() if isinstance(target, str) else ""
+        template_path: str | None = None
+        is_custom = False
+        if normalized_target:
+            key = normalized_target.lower()
+            if key in custom_by_name:
+                template_path = custom_by_name[key]
+                is_custom = True
+            elif key in servant_face_by_name:
+                template_path = servant_face_by_name[key]
+                is_custom = False
+            else:
+                direct_candidates = [normalized_target]
+                if not normalized_target.lower().endswith((".png", ".jpg")):
+                    direct_candidates.extend(
+                        [
+                            f"servantface/{normalized_target}.png",
+                            f"expball/levelupServant/{normalized_target}.png",
+                            f"expball/levelupServant/{normalized_target}.jpg",
+                        ]
+                    )
+                else:
+                    direct_candidates.extend(
+                        [
+                            f"servantface/{normalized_target}",
+                            f"expball/levelupServant/{normalized_target}",
+                        ]
+                    )
+                for candidate_path in direct_candidates:
+                    try:
+                        self._resources.resolve_template(candidate_path)
+                        template_path = candidate_path
+                        is_custom = candidate_path.startswith(
+                            "expball/levelupServant/"
+                        )
+                        break
+                    except Exception:
+                        continue
+                if template_path is None:
+                    raise ValueError(
+                        f"Unknown servant enhancement target: {normalized_target}"
+                    )
+
+        candidates: list[dict[str, Any]] = []
+        if template_path is not None:
+            crop, scales = self._servant_target_crop_and_scales(
+                template_path,
+                custom=is_custom,
+            )
+            target_candidate: dict[str, Any] = {
+                "template_path": template_path,
+                "threshold": threshold,
+                "roi": _SERVANT_TARGET_ROI,
+                "scales": scales,
+            }
+            if crop is not None:
+                target_candidate["crop"] = crop
+            candidates.append(target_candidate)
+        if has_scroll_end:
+            candidates.append(
+                {
+                    "template_path": scroll_end_path,
+                    "threshold": scroll_end_threshold,
+                    "roi": _SERVANT_SCROLL_END_ROI,
+                    "scales": _SCALES,
+                }
+            )
+
+        results = (
+            self._recognition.match_templates(screenshot, candidates)
+            if candidates
+            else []
+        )
+        result_index = 0
+        target_match = None
+        if template_path is not None and result_index < len(results):
+            target_match = results[result_index]
+            result_index += 1
+        scroll_end_match = None
+        if has_scroll_end and result_index < len(results):
+            scroll_end_match = results[result_index]
+
+        matched = bool(target_match is not None and target_match.matched)
+        scroll_end = bool(
+            scroll_end_match is not None and scroll_end_match.matched
+        )
+        return {
+            "server": normalized_server,
+            "target": normalized_target or None,
+            "template_path": template_path,
+            "custom": is_custom,
+            "threshold": threshold,
+            "scroll_end_threshold": scroll_end_threshold,
+            "roi": list(_SERVANT_TARGET_ROI),
+            "available_custom_targets": available_custom_targets,
+            "matched": matched,
+            "confidence": (
+                round(float(target_match.confidence), 4)
+                if target_match is not None
+                else 0.0
+            ),
+            "center": (
+                list(target_match.center)
+                if matched
+                and target_match is not None
+                and target_match.center is not None
+                else None
+            ),
+            "match": (
+                target_match.to_dict()
+                if matched and target_match is not None
+                else None
+            ),
+            "scroll_end": scroll_end,
+            "scroll_end_match": (
+                scroll_end_match.to_dict()
+                if scroll_end and scroll_end_match is not None
+                else None
+            ),
+        }
+
+    def _servant_target_crop_and_scales(
+        self,
+        template_path: str,
+        *,
+        custom: bool,
+    ) -> tuple[tuple[int, int, int, int] | None, tuple[float, ...]]:
+        crop: tuple[int, int, int, int] | None = None
+        extra_scales: list[float] = []
+        try:
+            resolved = self._resources.resolve_template(template_path)
+            with Image.open(resolved) as img:
+                width, height = img.size
+            if width > 0 and height > 0:
+                if custom:
+                    scale = (width / 175 + height / 191) / 2
+                    left = max(0, min(width - 1, round(16 * scale)))
+                    top = max(0, min(height - 1, round(34 * scale)))
+                    right = max(left + 1, min(width, round(175 * scale)))
+                    bottom = max(top + 1, min(height, round(118 * scale)))
+                    crop = (left, top, right - left, bottom - top)
+                    res_w = int(1920 * scale)
+                    res_h = int(1080 * scale)
+                    if res_w > 0 and res_h > 0:
+                        scale_720 = min(1280 / res_w, 720 / res_h)
+                        scale_1080 = min(1920 / res_w, 1080 / res_h)
+                        extra_scales.extend(
+                            [round(scale_720, 4), round(scale_1080, 4)]
+                        )
+                else:
+                    left = max(0, min(width - 1, round(35 * width / 170)))
+                    top = max(0, min(height - 1, round(30 * height / 170)))
+                    right = max(left + 1, min(width, round(160 * width / 170)))
+                    bottom = max(top + 1, min(height, round(110 * height / 170)))
+                    crop = (left, top, right - left, bottom - top)
+                    scale_1080 = 170 / width
+                    scale_720 = scale_1080 * (2 / 3)
+                    extra_scales.extend(
+                        [round(scale_720, 4), round(scale_1080, 4)]
+                    )
+        except Exception:
+            pass
+        return crop, tuple(dict.fromkeys((*extra_scales, *_SCALES)))
 
 
 def _inspect_servant_frame_colors(

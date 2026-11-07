@@ -5,6 +5,7 @@ from webapp.automation.expball import (
     EXPBALL_INSPECT_JOB_KIND,
     EXPBALL_SERVANT_GRID_INSPECT_JOB_KIND,
     EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND,
+    EXPBALL_SERVANT_TARGET_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_GRID_INSPECT_JOB_KIND,
     EXPBALL_STORAGE_JOB_KIND,
     EXPBALL_SUMMON_JOB_KIND,
@@ -15,6 +16,7 @@ from webapp.automation.expball import (
     create_expball_inspect_handler,
     create_expball_servant_grid_inspect_handler,
     create_expball_servant_level_inspect_handler,
+    create_expball_servant_target_inspect_handler,
     create_expball_storage_grid_inspect_handler,
     create_expball_storage_handler,
     create_expball_summon_handler,
@@ -25,6 +27,7 @@ from webapp.automation.expball import (
     register_expball_inspect_job,
     register_expball_servant_grid_inspect_job,
     register_expball_servant_level_inspect_job,
+    register_expball_servant_target_inspect_job,
     register_expball_storage_grid_inspect_job,
     register_expball_storage_job,
     register_expball_summon_job,
@@ -309,6 +312,7 @@ class _ScriptData:
 class _Device:
     def __init__(self):
         self.taps = []
+        self.swipes = []
 
     def snapshot(self):
         return b"expball-screen"
@@ -316,6 +320,20 @@ class _Device:
     def tap(self, x, y):
         self.taps.append((x, y))
         return OperationResult(ok=True, action="tap", data={"x": x, "y": y})
+
+    def swipe(self, x1, y1, x2, y2, duration_ms=300):
+        self.swipes.append((x1, y1, x2, y2, duration_ms))
+        return OperationResult(
+            ok=True,
+            action="swipe",
+            data={
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "duration_ms": duration_ms,
+            },
+        )
 
 
 class _Context:
@@ -2209,6 +2227,307 @@ def test_expball_summon_locks_matched_target_cards_and_stops_when_enough():
         (32, 178),
         (43, 43),
     ]
+
+
+def test_expball_recognizer_recognizes_servant_target_and_scroll_end(tmp_path):
+    from PIL import Image
+
+    face_path = tmp_path / "BB(SSR)_1.png"
+    Image.new("RGBA", (130, 130), (200, 100, 50, 255)).save(face_path)
+
+    class Resources:
+        def template_index(self, *, prefix, limit):
+            if prefix == "expball/levelupServant":
+                return {
+                    "entries": [
+                        {"path": "expball/levelupServant/custom_svt.png"}
+                    ]
+                }
+            if prefix == "servantface":
+                return {"entries": [{"path": "servantface/BB(SSR)_1.png"}]}
+            if prefix == "expball/CH":
+                return {"entries": [{"path": "expball/CH/scrollEnd.png"}]}
+            raise AssertionError(f"Unexpected prefix {prefix}")
+
+        def resolve_template(self, path):
+            assert path == "servantface/BB(SSR)_1.png"
+            return face_path
+
+    class Recognition:
+        def __init__(self):
+            self.candidates = None
+
+        def match_templates(self, _screenshot, candidates):
+            self.candidates = candidates
+            return [
+                MatchResult(
+                    template_path=candidates[0]["template_path"],
+                    matched=True,
+                    confidence=0.91,
+                    threshold=candidates[0]["threshold"],
+                    top_left=[220, 260],
+                    size=[83, 53],
+                    center=[261, 286],
+                    scale=candidates[0]["scales"][0],
+                    roi=list(candidates[0]["roi"]),
+                ),
+                MatchResult(
+                    template_path=candidates[1]["template_path"],
+                    matched=False,
+                    confidence=0.22,
+                    threshold=candidates[1]["threshold"],
+                    top_left=[995, 678],
+                    size=[20, 16],
+                    center=[1005, 686],
+                    scale=2 / 3,
+                    roi=list(candidates[1]["roi"]),
+                ),
+            ]
+
+    recognition = Recognition()
+    report = ExpBallRecognizer(
+        Resources(),
+        recognition,
+    ).recognize_servant_target(
+        b"xzdx-screen",
+        "CH",
+        target="BB(SSR)_1",
+        threshold=0.85,
+    )
+
+    assert report["server"] == "CH"
+    assert report["target"] == "BB(SSR)_1"
+    assert report["template_path"] == "servantface/BB(SSR)_1.png"
+    assert report["custom"] is False
+    assert report["matched"] is True
+    assert report["center"] == [261, 286]
+    assert report["scroll_end"] is False
+    assert report["available_custom_targets"] == ["custom_svt"]
+    assert recognition.candidates[0]["crop"] == (27, 23, 95, 61)
+    assert recognition.candidates[0]["roi"] == (60, 173, 953, 547)
+    assert recognition.candidates[1]["roi"] == (993, 675, 40, 26)
+
+
+def test_expball_servant_target_inspect_job_emits_report(tmp_path):
+    class Recognizer:
+        def recognize_servant_target(
+            self,
+            screenshot,
+            server,
+            *,
+            target=None,
+            threshold=0.85,
+            scroll_end_threshold=0.8,
+        ):
+            assert screenshot == b"expball-screen"
+            assert server == "CH"
+            assert target == "BB(SSR)_1"
+            assert threshold == 0.86
+            assert scroll_end_threshold == 0.8
+            return {
+                "server": server,
+                "target": target,
+                "template_path": "servantface/BB(SSR)_1.png",
+                "custom": False,
+                "threshold": threshold,
+                "scroll_end_threshold": scroll_end_threshold,
+                "roi": [60, 173, 953, 547],
+                "available_custom_targets": [],
+                "matched": True,
+                "confidence": 0.92,
+                "center": [261, 286],
+                "match": {"center": [261, 286]},
+                "scroll_end": False,
+                "scroll_end_match": None,
+            }
+
+    context = _Context()
+    handler = create_expball_servant_target_inspect_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+    )
+    result = handler(
+        context,
+        {"setting_name": "demo", "target": "BB(SSR)_1", "threshold": 0.86},
+    )
+
+    assert result["setting_name"] == "demo"
+    assert result["matched"] is True
+    assert result["center"] == [261, 286]
+    assert any(
+        event[0] == "expball_servant_target" for event in context.events
+    )
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_expball_servant_target_inspect_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            Recognizer(),
+        )
+        assert manager.has_kind(EXPBALL_SERVANT_TARGET_INSPECT_JOB_KIND)
+        assert (
+            manager.requires_device(EXPBALL_SERVANT_TARGET_INSPECT_JOB_KIND)
+            is True
+        )
+
+
+def test_expball_enhance_handler_scrolls_and_selects_target_servant():
+    reports = iter(
+        (
+            _enhance_report("exlevel"),
+            _enhance_report("xzdx"),
+            _enhance_report("xzdx"),
+            _enhance_report("slot", "help"),
+            _enhance_report("feedjd", "help"),
+            _enhance_report("help"),
+            _enhance_report("qhjd2"),
+            _enhance_report(),
+            _enhance_report("slot", "help"),
+        )
+    )
+    target_reports = iter(
+        (
+            {
+                "server": "CH",
+                "target": "BB(SSR)_1",
+                "template_path": "servantface/BB(SSR)_1.png",
+                "custom": False,
+                "matched": False,
+                "confidence": 0.35,
+                "center": None,
+                "scroll_end": False,
+            },
+            {
+                "server": "CH",
+                "target": "BB(SSR)_1",
+                "template_path": "servantface/BB(SSR)_1.png",
+                "custom": False,
+                "matched": True,
+                "confidence": 0.92,
+                "center": [420, 380],
+                "scroll_end": False,
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_servant_target(
+            self,
+            _screenshot,
+            server,
+            *,
+            target=None,
+            threshold=0.85,
+            scroll_end_threshold=0.8,
+        ):
+            assert server == "CH"
+            assert target == "BB(SSR)_1"
+            assert threshold == 0.85
+            assert scroll_end_threshold == 0.84
+            return next(target_reports)
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "servant",
+            "servant_target": "BB(SSR)_1",
+            "max_batches": 1,
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is True
+    assert result["stopped"] is False
+    assert result["reason"] == "batch_limit"
+    assert result["servant_target"] == "BB(SSR)_1"
+    assert result["selected_servant_targets"] == ["BB(SSR)_1"]
+    assert result["actions"] == [
+        "open_base_selection",
+        "scroll_servant_list",
+        "select_base_card",
+        "auto_select_materials",
+        "confirm_auto_select",
+        "execute_enhancement",
+        "confirm_enhancement",
+        "skip_enhancement_animation",
+    ]
+    assert device.swipes == [(527, 617, 527, 190, 500)]
+    assert device.taps[1] == (420, 380)
+
+
+def test_expball_enhance_handler_stops_when_target_servant_not_found_at_scroll_end():
+    reports = iter(
+        (
+            _enhance_report("xzdx"),
+            _enhance_report("xzdx"),
+        )
+    )
+    target_reports = iter(
+        (
+            {
+                "server": "CH",
+                "target": "BB(SSR)_1",
+                "template_path": "servantface/BB(SSR)_1.png",
+                "custom": False,
+                "matched": False,
+                "confidence": 0.25,
+                "center": None,
+                "scroll_end": True,
+            },
+            {
+                "server": "CH",
+                "target": "BB(SSR)_1",
+                "template_path": "servantface/BB(SSR)_1.png",
+                "custom": False,
+                "matched": False,
+                "confidence": 0.24,
+                "center": None,
+                "scroll_end": True,
+            },
+        )
+    )
+
+    class Recognizer:
+        def recognize(self, *_args, **_kwargs):
+            return next(reports)
+
+        def recognize_servant_target(self, *_args, **_kwargs):
+            return next(target_reports)
+
+    device = _Device()
+    result = create_expball_enhance_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "target": "servant",
+            "servant_target": "BB(SSR)_1",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result["completed"] is False
+    assert result["stopped"] is True
+    assert result["reason"] == "servant_not_found"
+    assert result["missing_servant_targets"] == ["BB(SSR)_1"]
+    assert result["actions"] == ["scroll_servant_list"]
+    assert device.swipes == [(527, 617, 527, 190, 500)]
 
 
 

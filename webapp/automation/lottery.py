@@ -1028,6 +1028,10 @@ def create_lottery_run_handler(
                 "max_batches",
                 "target_level",
                 "level_threshold",
+                "servant_target",
+                "servant_targets",
+                "servant_target_threshold",
+                "max_base_scrolls",
                 "auto_limit_break",
             ):
                 _copy_option(payload, overflow_payload, key, key)

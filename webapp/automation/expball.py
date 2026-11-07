@@ -22,6 +22,9 @@ EXPBALL_COMMAND_CODE_GRID_INSPECT_JOB_KIND = (
 )
 EXPBALL_CE_BOMB_GRID_INSPECT_JOB_KIND = "event.expball.inspect-ce-bomb-grid"
 EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND = "event.expball.inspect-servant-level"
+EXPBALL_SERVANT_TARGET_INSPECT_JOB_KIND = (
+    "event.expball.inspect-servant-target"
+)
 EXPBALL_SUMMON_LOCK_INSPECT_JOB_KIND = (
     "event.expball.inspect-summon-lock-targets"
 )
@@ -46,6 +49,9 @@ _ENHANCE_SKIP_ANIMATION_POINT = (823, 498)
 _ENHANCE_LIMIT_BREAK_POINT = (1050, 557)
 _ENHANCE_SKIP_LIMIT_BREAK_POINT = (633, 257)
 _ENHANCE_RETURN_FROM_LIMIT_BREAK_POINT = (1047, 285)
+_SERVANT_LIST_SWIPE_START = (527, 617)
+_SERVANT_LIST_SWIPE_END = (527, 190)
+_SERVANT_LIST_SWIPE_DURATION_MS = 500
 
 
 def create_expball_inspect_handler(
@@ -414,6 +420,79 @@ def register_expball_servant_level_inspect_job(
     job_manager.register(
         EXPBALL_SERVANT_LEVEL_INSPECT_JOB_KIND,
         create_expball_servant_level_inspect_handler(
+            script_data,
+            device_service,
+            recognizer,
+        ),
+        requires_device=True,
+    )
+
+
+def create_expball_servant_target_inspect_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        raw_target = payload.get("target")
+        if raw_target is not None and not isinstance(raw_target, str):
+            raise ValueError("target must be a string when provided.")
+        threshold = _number(payload, "threshold", 0.85, 0, 1)
+        scroll_end_threshold = _number(
+            payload,
+            "scroll_end_threshold",
+            0.8,
+            0,
+            1,
+        )
+        server = str(
+            script_data.get_setting_plan(normalized_name)["server"]
+        ).upper()
+        context.checkpoint(
+            "inspect_expball_servant_target",
+            progress=0.2,
+            message="Inspecting servant enhancement target selection.",
+        )
+        report = recognizer.recognize_servant_target(
+            device_service.snapshot(),
+            server,
+            target=raw_target,
+            threshold=threshold,
+            scroll_end_threshold=scroll_end_threshold,
+        )
+        context.emit(
+            "expball_servant_target",
+            "Servant enhancement target selection was inspected.",
+            data=report,
+        )
+        context.checkpoint(
+            "complete",
+            progress=1.0,
+            message="Servant enhancement target inspection completed.",
+        )
+        return {
+            "setting_name": normalized_name,
+            **report,
+        }
+
+    return handler
+
+
+def register_expball_servant_target_inspect_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    recognizer: ExpBallRecognizer,
+) -> None:
+    if job_manager.has_kind(EXPBALL_SERVANT_TARGET_INSPECT_JOB_KIND):
+        return
+    job_manager.register(
+        EXPBALL_SERVANT_TARGET_INSPECT_JOB_KIND,
+        create_expball_servant_target_inspect_handler(
             script_data,
             device_service,
             recognizer,
@@ -1379,6 +1458,15 @@ def create_expball_enhance_handler(
         target_level: int | None = None
         if payload.get("target_level") is not None:
             target_level = _integer(payload, "target_level", 100, 1, 120)
+        servant_targets = _parse_servant_targets(payload, target_level)
+        servant_target_threshold = _number(
+            payload,
+            "servant_target_threshold",
+            0.85,
+            0,
+            1,
+        )
+        max_base_scrolls = _integer(payload, "max_base_scrolls", 10, 1, 100)
         auto_limit_break_raw = payload.get("auto_limit_break")
         if auto_limit_break_raw is None:
             auto_limit_break = bool(target == "servant")
@@ -1415,6 +1503,15 @@ def create_expball_enhance_handler(
         selected_slots: list[int] = []
         locked_ce_bomb_slots: list[int] = []
         marked_ce_bomb_slots: list[int] = []
+        selected_servant_targets: list[str] = []
+        completed_servant_targets: list[str] = []
+        missing_servant_targets: list[str] = []
+        current_target_index = 0
+        base_servant_selected = not bool(
+            target == "servant" and servant_targets
+        )
+        base_scrolls = 0
+        scroll_end_hits = 0
         materials_selected = False
         grid_cards_tapped = False
         ce_bombs_checked = False
@@ -1424,6 +1521,18 @@ def create_expball_enhance_handler(
         idle_polls = 0
         last_report: dict[str, Any] | None = None
         last_level_report: dict[str, Any] | None = None
+        last_servant_target_report: dict[str, Any] | None = None
+
+        def active_servant_entry() -> dict[str, Any] | None:
+            if target != "servant" or current_target_index >= len(servant_targets):
+                return None
+            return servant_targets[current_target_index]
+
+        def active_target_level() -> int | None:
+            entry = active_servant_entry()
+            if entry is not None and entry.get("target_level") is not None:
+                return int(entry["target_level"])
+            return target_level
 
         def finish(
             *,
@@ -1441,12 +1550,26 @@ def create_expball_enhance_handler(
                     else "Enhancement automation stopped."
                 ),
             )
+            entry = active_servant_entry()
             return {
                 "setting_name": normalized_name,
                 "target": target,
                 "selection_mode": selection_mode,
                 "material_select_mode": selection_mode,
-                "target_level": target_level,
+                "target_level": active_target_level(),
+                "servant_target": (
+                    entry["target"]
+                    if entry is not None
+                    else (
+                        selected_servant_targets[-1]
+                        if selected_servant_targets
+                        else None
+                    )
+                ),
+                "servant_targets": [dict(item) for item in servant_targets],
+                "selected_servant_targets": list(selected_servant_targets),
+                "completed_servant_targets": list(completed_servant_targets),
+                "missing_servant_targets": list(missing_servant_targets),
                 "auto_limit_break": auto_limit_break,
                 "lock_full_ce_bombs": lock_full_ce_bombs,
                 "mark_full_ce_bombs": mark_full_ce_bombs,
@@ -1464,6 +1587,7 @@ def create_expball_enhance_handler(
                 "marked_ce_bomb_slots": list(marked_ce_bomb_slots),
                 "servant_level": last_level_report,
                 "last_level_report": last_level_report,
+                "servant_target_report": last_servant_target_report,
                 "last_report": report,
             }
 
@@ -1507,9 +1631,11 @@ def create_expball_enhance_handler(
             matches: dict[str, dict[str, Any]],
         ) -> bool:
             nonlocal last_level_report
+            effective_level = active_target_level()
             if (
                 target != "servant"
-                or target_level is None
+                or not base_servant_selected
+                or effective_level is None
                 or any(
                     overlay in matches
                     for overlay in (
@@ -1541,7 +1667,7 @@ def create_expball_enhance_handler(
                 "Servant enhancement level digits were inspected.",
                 data={
                     "server": server,
-                    "target_level": target_level,
+                    "target_level": effective_level,
                     **level_report,
                 },
             )
@@ -1549,7 +1675,7 @@ def create_expball_enhance_handler(
             valid = level_report.get("valid", True)
             if not valid or not isinstance(current_level, int):
                 return False
-            if current_level >= target_level:
+            if current_level >= effective_level:
                 return True
             if auto_limit_break and ("sbzl" in matches or "ljzl" in matches):
                 return False
@@ -1627,15 +1753,35 @@ def create_expball_enhance_handler(
                     grid_cards_tapped = False
                     ce_bombs_checked = False
                     if inspect_level_if_needed(screenshot, matches):
-                        return finish(
-                            completed=True,
-                            stopped=False,
-                            reason="target_level_reached",
-                            report=report,
+                        entry = active_servant_entry()
+                        if entry is not None:
+                            completed_servant_targets.append(entry["target"])
+                            if current_target_index + 1 < len(servant_targets):
+                                current_target_index += 1
+                                base_servant_selected = False
+                                base_scrolls = 0
+                                scroll_end_hits = 0
+                            else:
+                                return finish(
+                                    completed=True,
+                                    stopped=False,
+                                    reason="target_level_reached",
+                                    report=report,
+                                )
+                        else:
+                            return finish(
+                                completed=True,
+                                stopped=False,
+                                reason="target_level_reached",
+                                report=report,
+                            )
+                    if (
+                        batches_completed >= max_batches
+                        and base_servant_selected
+                        and not (
+                            auto_limit_break
+                            and ("sbzl" in matches or "ljzl" in matches)
                         )
-                    if batches_completed >= max_batches and not (
-                        auto_limit_break
-                        and ("sbzl" in matches or "ljzl" in matches)
                     ):
                         return finish(
                             completed=True,
@@ -1711,12 +1857,28 @@ def create_expball_enhance_handler(
                 and not in_limit_break
                 and inspect_level_if_needed(screenshot, matches)
             ):
-                return finish(
-                    completed=True,
-                    stopped=False,
-                    reason="target_level_reached",
-                    report=report,
-                )
+                entry = active_servant_entry()
+                if entry is not None:
+                    completed_servant_targets.append(entry["target"])
+                    if current_target_index + 1 < len(servant_targets):
+                        current_target_index += 1
+                        base_servant_selected = False
+                        base_scrolls = 0
+                        scroll_end_hits = 0
+                    else:
+                        return finish(
+                            completed=True,
+                            stopped=False,
+                            reason="target_level_reached",
+                            report=report,
+                        )
+                else:
+                    return finish(
+                        completed=True,
+                        stopped=False,
+                        reason="target_level_reached",
+                        report=report,
+                    )
 
             acted = False
             if "gotoqhcz" in matches:
@@ -1840,20 +2002,133 @@ def create_expball_enhance_handler(
                 materials_selected = True
                 acted = True
             elif "xzdx" in matches:
-                if not tap_point(
-                    _ENHANCE_FIRST_CARD_POINT,
-                    "select_base_card",
-                ):
-                    return finish(
-                        completed=False,
-                        stopped=True,
-                        reason="device_action_failed",
-                        report=report,
+                entry = active_servant_entry()
+                if entry is not None:
+                    target_name = str(entry["target"])
+                    target_report = recognizer.recognize_servant_target(
+                        screenshot,
+                        server,
+                        target=target_name,
+                        threshold=servant_target_threshold,
+                        scroll_end_threshold=threshold,
                     )
-                materials_selected = False
-                grid_cards_tapped = False
-                ce_bombs_checked = False
-                acted = True
+                    last_servant_target_report = target_report
+                    context.emit(
+                        "expball_servant_target",
+                        "Servant enhancement target selection was inspected.",
+                        data={
+                            "target_index": current_target_index,
+                            "scroll_count": base_scrolls,
+                            "scroll_end_hits": scroll_end_hits,
+                            **target_report,
+                        },
+                    )
+                    if target_report.get("matched") is True:
+                        target_center = (
+                            target_report.get("center")
+                            or _ENHANCE_FIRST_CARD_POINT
+                        )
+                        if not tap_point(
+                            target_center,
+                            "select_base_card",
+                            extra={"servant_target": target_name},
+                        ):
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        selected_servant_targets.append(target_name)
+                        base_servant_selected = True
+                        base_scrolls = 0
+                        scroll_end_hits = 0
+                        materials_selected = False
+                        grid_cards_tapped = False
+                        ce_bombs_checked = False
+                        acted = True
+                    else:
+                        if target_report.get("scroll_end") is True:
+                            scroll_end_hits += 1
+                        if (
+                            scroll_end_hits >= 2
+                            or base_scrolls >= max_base_scrolls
+                        ):
+                            missing_servant_targets.append(target_name)
+                            if current_target_index + 1 < len(servant_targets):
+                                current_target_index += 1
+                                base_scrolls = 0
+                                scroll_end_hits = 0
+                                idle_polls = 0
+                                continue
+                            return finish(
+                                completed=bool(completed_servant_targets),
+                                stopped=not bool(completed_servant_targets),
+                                reason=(
+                                    "target_level_reached"
+                                    if completed_servant_targets
+                                    else "servant_not_found"
+                                ),
+                                report=report,
+                            )
+                        start_x, start_y = randomized_touch_point(
+                            _SERVANT_LIST_SWIPE_START,
+                            enabled=random_touch,
+                        )
+                        end_x, end_y = randomized_touch_point(
+                            _SERVANT_LIST_SWIPE_END,
+                            enabled=random_touch,
+                        )
+                        operation = device_service.swipe(
+                            start_x,
+                            start_y,
+                            end_x,
+                            end_y,
+                            duration_ms=_SERVANT_LIST_SWIPE_DURATION_MS,
+                        )
+                        base_scrolls += 1
+                        context.emit(
+                            "device_action",
+                            "Scrolled the servant selection list.",
+                            data={
+                                "role": "scroll_servant_list",
+                                "target": target,
+                                "servant_target": target_name,
+                                "scroll_count": base_scrolls,
+                                "operation": operation.to_dict(),
+                            },
+                        )
+                        if not operation.ok:
+                            return finish(
+                                completed=False,
+                                stopped=True,
+                                reason="device_action_failed",
+                                report=report,
+                            )
+                        actions.append("scroll_servant_list")
+                        context.sleep(
+                            randomized_wait_seconds(
+                                action_wait_seconds,
+                                random_time,
+                            )
+                        )
+                        acted = True
+                else:
+                    if not tap_point(
+                        _ENHANCE_FIRST_CARD_POINT,
+                        "select_base_card",
+                    ):
+                        return finish(
+                            completed=False,
+                            stopped=True,
+                            reason="device_action_failed",
+                            report=report,
+                        )
+                    base_servant_selected = True
+                    materials_selected = False
+                    grid_cards_tapped = False
+                    ce_bombs_checked = False
+                    acted = True
             elif "tysd" in matches or "qhjd" in matches:
                 if not grid_cards_tapped:
                     ce_grid_report: dict[str, Any] | None = None
@@ -2099,7 +2374,10 @@ def create_expball_enhance_handler(
                     grid_cards_tapped = False
                     ce_bombs_checked = False
                     acted = True
-            elif "exlevel" in matches:
+            elif "exlevel" in matches or (
+                not base_servant_selected
+                and ("help" in matches or "slot" in matches)
+            ):
                 if not tap_point(
                     _ENHANCE_ADD_BASE_POINT,
                     "open_base_selection",
@@ -2110,6 +2388,11 @@ def create_expball_enhance_handler(
                         reason="device_action_failed",
                         report=report,
                     )
+                base_servant_selected = not bool(
+                    target == "servant" and active_servant_entry() is not None
+                )
+                base_scrolls = 0
+                scroll_end_hits = 0
                 materials_selected = False
                 grid_cards_tapped = False
                 ce_bombs_checked = False
@@ -2359,6 +2642,98 @@ def _parse_summon_lock_targets(
             raise ValueError(f"{flag_key} must be a boolean.")
         if flag_val:
             add_entry(target_name, 0)
+
+    return entries
+
+
+def _parse_servant_targets(
+    payload: dict[str, Any],
+    default_target_level: int | None,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_entry(name: str, level: int | None) -> None:
+        cleaned = name.strip()
+        if not cleaned:
+            raise ValueError("servant_targets entries must be non-empty.")
+        key = cleaned.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        entries.append(
+            {
+                "target": cleaned,
+                "target_level": level if level is not None else default_target_level,
+            }
+        )
+
+    def parse_str_entry(raw_text: str) -> None:
+        text = raw_text.strip()
+        if not text:
+            raise ValueError("servant_target must be a non-empty string.")
+        if ":" in text:
+            name_part, level_part = text.rsplit(":", 1)
+            if level_part.strip():
+                try:
+                    parsed_level = int(level_part.strip())
+                except ValueError as exc:
+                    raise ValueError(
+                        "servant_targets level suffix must be an integer."
+                    ) from exc
+                if not 1 <= parsed_level <= 120:
+                    raise ValueError(
+                        "servant_targets level must be between 1 and 120."
+                    )
+                add_entry(name_part, parsed_level)
+                return
+        add_entry(text, None)
+
+    raw_single = payload.get("servant_target")
+    if raw_single is not None:
+        if not isinstance(raw_single, str) or not raw_single.strip():
+            raise ValueError("servant_target must be a non-empty string.")
+        parse_str_entry(raw_single)
+
+    raw_list = payload.get("servant_targets")
+    if raw_list is not None:
+        if not isinstance(raw_list, (list, tuple)):
+            raise ValueError("servant_targets must be a list of targets.")
+        for item in raw_list:
+            if isinstance(item, str):
+                parse_str_entry(item)
+            elif isinstance(item, dict):
+                raw_name = (
+                    item.get("target")
+                    if item.get("target") is not None
+                    else item.get("path")
+                )
+                if not isinstance(raw_name, str) or not raw_name.strip():
+                    raise ValueError(
+                        "Each servant_targets object must have a non-empty target."
+                    )
+                raw_level = (
+                    item.get("target_level")
+                    if item.get("target_level") is not None
+                    else item.get("level")
+                )
+                if raw_level is not None:
+                    if isinstance(raw_level, bool) or not isinstance(
+                        raw_level,
+                        int,
+                    ):
+                        raise ValueError(
+                            "servant_targets target_level must be an integer."
+                        )
+                    if not 1 <= raw_level <= 120:
+                        raise ValueError(
+                            "servant_targets target_level must be between 1 and 120."
+                        )
+                add_entry(raw_name, raw_level)
+            else:
+                raise ValueError(
+                    "Each servant_targets item must be a string or object."
+                )
 
     return entries
 
