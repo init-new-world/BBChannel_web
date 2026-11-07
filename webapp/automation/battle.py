@@ -52,6 +52,8 @@ SKILL_NOT_AVAILABLE_ROI = (550, 530, 180, 70)
 SKILL_NOT_AVAILABLE_CLOSE_POINT = (642, 563)
 SKILL_NOT_AVAILABLE_CLOSE_SIZE = (197, 53)
 SERVANT_DETAIL_CLOSE_ROI = (1047, 20, 87, 80)
+COMMAND_CARD_BACK_ROI = (1100, 610, 180, 110)
+COMMAND_CARD_BACK_SIZE = (73, 53)
 NAMED_SKILL_COMMANDS = {
     "Kukulkan",
     "Barghest",
@@ -2296,6 +2298,35 @@ def _battle_popup_dismiss_if_present(
             "Dismissed servant detail modal.",
             data={
                 "popup": "servant_detail",
+                "operation": operation.to_dict(),
+            },
+        )
+        wait_after = randomized_wait_seconds(
+            normalized.interval,
+            normalized.random_time,
+        )
+        if wait_after:
+            context.sleep(wait_after)
+        return True
+    command_card_back = _match_optional_battle_template(
+        recognition,
+        screenshot,
+        f"battle/{server}/back.png",
+        roi=COMMAND_CARD_BACK_ROI,
+        threshold=0.8,
+    )
+    if command_card_back is not None and command_card_back.matched:
+        touch_point = randomized_touch_point(
+            COMMAND_CARD_BACK_POINT,
+            size=COMMAND_CARD_BACK_SIZE,
+            enabled=normalized.random_touch,
+        )
+        operation = device_service.tap(*touch_point)
+        context.emit(
+            "battle_popup_closed",
+            "Closed command card screen to return to battle controls.",
+            data={
+                "popup": "command_card_back",
                 "operation": operation.to_dict(),
             },
         )

@@ -2397,4 +2397,87 @@ def test_execute_battle_job_skips_repeat_order_change_in_extra_turns_and_continu
     assert already_exchanged == [1, [12, 1, 4]]
 
 
+def test_wait_for_battle_ready_closes_command_card_back_screen(tmp_path: Path):
+    data = tmp_path / "data"
+    (data / "settings").mkdir(parents=True)
+    (data / "servant_info_CH.json").write_text("{}", encoding="utf-8")
+    (data / "settings" / "resume-from-cards.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "noSpeedupSkill": 1,
+                "round1_turns": 1,
+                "round1_turn0_skill": [1],
+            }
+        ),
+        encoding="utf-8",
+    )
+    taps = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            return Operation()
+
+    class Match:
+        confidence = 1.0
+
+        def __init__(self, template_path, matched=True):
+            self.template_path = template_path
+            self.matched = matched
+
+        def to_dict(self):
+            return {"template_path": self.template_path, "matched": self.matched}
+
+    class Recognition:
+        card_screen_open = True
+
+        def match_template(self, _screenshot, template_path, _threshold=None, **options):
+            if template_path == "battle/CH/attack.png":
+                return Match(template_path, not self.card_screen_open)
+            if template_path == "battle/CH/back.png":
+                assert options.get("roi") == (1100, 610, 180, 110)
+                if self.card_screen_open:
+                    self.card_screen_open = False
+                    return Match(template_path, True)
+                return Match(template_path, False)
+            return Match(template_path, False)
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_battle_jobs(
+            manager,
+            ScriptDataService(data),
+            Device(),
+            Recognition(),
+        )
+        job = manager.start(
+            "battle.execute-skills",
+            {
+                "setting_name": "resume-from-cards",
+                "round": 1,
+                "turn": 0,
+                "timeout_seconds": 1,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:resume-from-cards",
+        )
+        result = manager.wait(job.job_id, timeout=2)
+        events = manager.database.list_events(job.job_id)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert taps == [(1250, 683), (70, 590)]
+    popups = [
+        event.data["popup"]
+        for event in events
+        if event.event_type == "battle_popup_closed"
+    ]
+    assert popups == ["command_card_back"]
 

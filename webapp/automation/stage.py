@@ -57,6 +57,7 @@ def create_stage_handler(
                     f"{battle_root}/{template_name}.png"
                     for template_name in (
                         "attack",
+                        "back",
                         "phase_1",
                         "phase_2",
                         "phase_3",
@@ -73,6 +74,7 @@ def create_stage_handler(
                         "teamDecide",
                         "start_task",
                         "start_battle",
+                        "tips",
                     )
                 )
                 + (f"battle/CrawlTower/{server}/zdbc.png",),

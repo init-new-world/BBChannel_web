@@ -41,7 +41,9 @@ class _Recognition:
         ("jbup", "completion"),
         ("jbup1", "completion"),
         ("attack", "battle"),
+        ("back", "battle"),
         ("teamDecide", "prepare"),
+        ("tips", "prepare"),
         ("listupdatebtn", "assist"),
     ],
 )
