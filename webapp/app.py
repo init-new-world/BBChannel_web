@@ -19,6 +19,7 @@ from webapp.automation import (
     create_battle_execute_plan_handler,
     create_completion_handler,
     create_free_quest_entry_handler,
+    create_interlude_entry_handler,
     create_main_story_entry_handler,
     create_recovery_handler,
     create_stage_handler,
@@ -47,6 +48,7 @@ from webapp.automation import (
     register_expball_summon_job,
     register_full_run_job,
     register_free_quest_entry_job,
+    register_interlude_entry_job,
     register_main_story_entry_job,
     register_lottery_draw_job,
     register_lottery_giftbox_receive_job,
@@ -473,6 +475,13 @@ def create_app(
         quest_recognizer,
         stage_handler,
     )
+    register_interlude_entry_job(
+        job_manager,
+        script_data,
+        device_service,
+        quest_recognizer,
+        stage_handler,
+    )
     register_recovery_job(
         job_manager,
         script_data,
@@ -512,6 +521,12 @@ def create_app(
             stage_handler,
         ),
         enter_main_story=create_main_story_entry_handler(
+            script_data,
+            device_service,
+            quest_recognizer,
+            stage_handler,
+        ),
+        enter_interlude=create_interlude_entry_handler(
             script_data,
             device_service,
             quest_recognizer,

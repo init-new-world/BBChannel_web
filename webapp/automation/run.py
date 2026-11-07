@@ -23,6 +23,7 @@ def create_full_run_handler(
     recover_game: StageHandler | None = None,
     enter_free_quest: StageHandler | None = None,
     enter_main_story: StageHandler | None = None,
+    enter_interlude: StageHandler | None = None,
     screen_is_stuck: ScreenStuckCheck | None = None,
 ):
 
@@ -45,9 +46,9 @@ def create_full_run_handler(
         ):
             raise ValueError("max_clear_runs must be between 1 and 10000.")
         entry_mode = payload.get("entry_mode", "current")
-        if entry_mode not in {"current", "free_quest", "main_story"}:
+        if entry_mode not in {"current", "free_quest", "main_story", "interlude"}:
             raise ValueError(
-                "entry_mode must be current, free_quest, or main_story."
+                "entry_mode must be current, free_quest, main_story, or interlude."
             )
         max_restarts = payload.get("max_restarts", 3)
         if (
@@ -211,6 +212,27 @@ def create_full_run_handler(
                 stopped = True
                 stop_reason = str(
                     entry_result.get("reason") or "main_story_entry_failed"
+                )
+        elif entry_mode == "interlude":
+            if enter_interlude is None:
+                raise RuntimeError("Interlude entry is not available.")
+            context.checkpoint(
+                "run.enter_interlude",
+                progress=0.0,
+                message="Entering a visible interlude quest.",
+            )
+            entry_result = enter_interlude(
+                context,
+                {
+                    **stage_options["entry"],
+                    "setting_name": normalized_name,
+                },
+            ) or {}
+            initial_stage = str(entry_result.get("stage") or "unknown")
+            if not entry_result.get("entered"):
+                stopped = True
+                stop_reason = str(
+                    entry_result.get("reason") or "interlude_entry_failed"
                 )
         elif resume and detect_stage is not None:
             detected = detect_stage(context, {"setting_name": normalized_name}) or {}
@@ -455,6 +477,7 @@ def register_full_run_job(
     recover_game: StageHandler | None = None,
     enter_free_quest: StageHandler | None = None,
     enter_main_story: StageHandler | None = None,
+    enter_interlude: StageHandler | None = None,
     screen_is_stuck: ScreenStuckCheck | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
@@ -471,6 +494,7 @@ def register_full_run_job(
             recover_game,
             enter_free_quest,
             enter_main_story,
+            enter_interlude,
             screen_is_stuck,
         ),
         requires_device=True,

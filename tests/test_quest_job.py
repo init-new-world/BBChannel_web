@@ -2,11 +2,14 @@ from pathlib import Path
 
 from webapp.automation.quest import (
     FREE_QUEST_ENTER_JOB_KIND,
+    INTERLUDE_ENTER_JOB_KIND,
     MAIN_STORY_ENTER_JOB_KIND,
     _free_map_swipe,
     create_free_quest_entry_handler,
+    create_interlude_entry_handler,
     create_main_story_entry_handler,
     register_free_quest_entry_job,
+    register_interlude_entry_job,
     register_main_story_entry_job,
 )
 from webapp.core.models import OperationResult
@@ -454,3 +457,132 @@ def test_main_story_entry_job_requires_connected_device(tmp_path: Path):
 
         assert manager.has_kind(MAIN_STORY_ENTER_JOB_KIND)
         assert manager.requires_device(MAIN_STORY_ENTER_JOB_KIND) is True
+
+
+def test_interlude_entry_clicks_goto_stage_then_mission_until_assist_is_reached():
+    stages = iter(("unknown", "unknown", "assist"))
+
+    class Recognizer:
+        def recognize_interlude_quests(self, screenshot, server):
+            assert server == "CH"
+            if screenshot == b"screen-1":
+                return {
+                    "ap_cost": {"matched": False, "touch": [1048, 172]},
+                    "goto_stage": {"matched": True, "touch": [1048, 172]},
+                    "goto_interlude": {"matched": False, "touch": [105, 133]},
+                    "selected": {"role": "goto_stage", "touch": [1048, 172]},
+                }
+            return {
+                "ap_cost": {"matched": True, "touch": [1048, 172]},
+                "goto_stage": {"matched": False, "touch": [1048, 172]},
+                "goto_interlude": {"matched": True, "touch": [105, 133]},
+                "selected": {"role": "ap_cost", "touch": [1048, 172]},
+            }
+
+    device = _Device()
+    result = create_interlude_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "action_wait_seconds": 0,
+            "poll_interval": 0,
+        },
+    )
+
+    assert result == {
+        "setting_name": "demo",
+        "entered": True,
+        "stage": "assist",
+        "reason": None,
+        "attempts": 3,
+        "actions": ["goto_stage", "interlude_quest"],
+    }
+    assert device.taps == [(1048, 172), (1048, 172)]
+
+
+def test_interlude_entry_returns_to_interlude_list_and_swipes_when_stage_is_unavailable():
+    stages = iter(("unknown", "unknown", "unknown", "assist"))
+
+    class Recognizer:
+        def recognize_interlude_quests(self, screenshot, _server):
+            if screenshot == b"screen-1":
+                return {
+                    "ap_cost": {"matched": False, "touch": [1048, 172]},
+                    "goto_stage": {"matched": False, "touch": [1048, 172]},
+                    "goto_interlude": {"matched": True, "touch": [105, 133]},
+                    "selected": None,
+                }
+            return {
+                "ap_cost": {"matched": True, "touch": [1048, 172]},
+                "goto_stage": {"matched": False, "touch": [1048, 172]},
+                "goto_interlude": {"matched": False, "touch": [105, 133]},
+                "selected": {"role": "ap_cost", "touch": [1048, 172]},
+            }
+
+    device = _Device()
+    result = create_interlude_entry_handler(
+        _ScriptData(),
+        device,
+        Recognizer(),
+        lambda _context, _payload: {"stage": next(stages)},
+    )(
+        _Context(),
+        {
+            "setting_name": "demo",
+            "max_map_swipes": 2,
+            "action_wait_seconds": 0,
+        },
+    )
+
+    assert result["entered"] is True
+    assert result["actions"] == [
+        "goto_interlude",
+        "interlude_list_swipe",
+        "interlude_quest",
+    ]
+    assert device.taps == [(105, 133), (1048, 172)]
+    assert device.swipes == [(1257, 113, 1257, 33, 200)]
+
+
+def test_interlude_entry_reports_when_no_visible_interlude_exists():
+    class Recognizer:
+        def recognize_interlude_quests(self, _screenshot, _server):
+            return {
+                "ap_cost": {"matched": False, "touch": [1048, 172]},
+                "goto_stage": {"matched": False, "touch": [1048, 172]},
+                "goto_interlude": {"matched": False, "touch": [105, 133]},
+                "selected": None,
+            }
+
+    result = create_interlude_entry_handler(
+        _ScriptData(),
+        _Device(),
+        Recognizer(),
+        lambda _context, _payload: {"stage": "unknown"},
+    )(
+        _Context(),
+        {"setting_name": "demo", "max_map_swipes": 0},
+    )
+
+    assert result["entered"] is False
+    assert result["reason"] == "no_visible_interlude"
+
+
+def test_interlude_entry_job_requires_connected_device(tmp_path: Path):
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_interlude_entry_job(
+            manager,
+            _ScriptData(),
+            _Device(),
+            object(),
+            lambda _context, _payload: {"stage": "unknown"},
+        )
+
+        assert manager.has_kind(INTERLUDE_ENTER_JOB_KIND)
+        assert manager.requires_device(INTERLUDE_ENTER_JOB_KIND) is True
+

@@ -17,6 +17,7 @@ from webapp.services.script_data import ScriptDataService
 
 FREE_QUEST_ENTER_JOB_KIND = "battle.enter-free-quest"
 MAIN_STORY_ENTER_JOB_KIND = "battle.enter-main-story"
+INTERLUDE_ENTER_JOB_KIND = "battle.enter-interlude"
 _BATTLE_FLOW_STAGES = {"assist", "prepare", "battle", "completion"}
 
 
@@ -326,6 +327,193 @@ def register_main_story_entry_job(
     job_manager.register(
         MAIN_STORY_ENTER_JOB_KIND,
         create_main_story_entry_handler(
+            script_data,
+            device_service,
+            quest_recognizer,
+            detect_stage,
+        ),
+        requires_device=True,
+    )
+
+
+def create_interlude_entry_handler(
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    quest_recognizer: QuestRecognizer,
+    detect_stage: StageHandler,
+):
+    def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
+        setting_name = payload.get("setting_name")
+        if not isinstance(setting_name, str) or not setting_name.strip():
+            raise ValueError("setting_name must be a non-empty string.")
+        normalized_name = setting_name.strip()
+        timeout_seconds = _number(payload, "timeout_seconds", 60, 0.1, 600)
+        poll_interval = _number(payload, "poll_interval", 0.5, 0, 10)
+        action_wait_seconds = _number(payload, "action_wait_seconds", 1, 0, 30)
+        max_actions = _integer(payload, "max_actions", 20, 1, 200)
+        default_list_swipes = payload.get(
+            "max_list_swipes",
+            payload.get("max_map_swipes", 5),
+        )
+        max_list_swipes = _integer(
+            {"max_list_swipes": default_list_swipes},
+            "max_list_swipes",
+            5,
+            0,
+            100,
+        )
+        plan = script_data.get_setting_plan(normalized_name)
+        server = str(plan["server"]).upper()
+        run_options = plan.get("run", {})
+        random_touch = bool(run_options.get("random_touch"))
+        random_time = configured_random_time(run_options.get("random_time", 0))
+        started = monotonic()
+        attempts = 0
+        actions: list[str] = []
+        list_swipes = 0
+        stage_entry_attempted = False
+        needs_list_scroll = False
+
+        while monotonic() - started <= timeout_seconds:
+            attempts += 1
+            context.checkpoint(
+                "enter_interlude",
+                progress=min((monotonic() - started) / timeout_seconds, 0.95),
+            )
+            stage_result = detect_stage(
+                context,
+                {"setting_name": normalized_name},
+            ) or {}
+            stage = str(stage_result.get("stage") or "unknown")
+            if stage in _BATTLE_FLOW_STAGES:
+                context.checkpoint(
+                    "complete",
+                    progress=1.0,
+                    message="Interlude battle flow was reached.",
+                )
+                return _result(normalized_name, True, stage, None, attempts, actions)
+            if len(actions) >= max_actions:
+                return _result(
+                    normalized_name,
+                    False,
+                    "unknown",
+                    "navigation_limit",
+                    attempts,
+                    actions,
+                )
+
+            screenshot = device_service.snapshot()
+            report = quest_recognizer.recognize_interlude_quests(
+                screenshot,
+                server,
+            )
+            context.emit(
+                "quest_recognition",
+                "Visible interlude quests were recognized.",
+                data=report,
+            )
+            goto_stage = bool((report.get("goto_stage") or {}).get("matched"))
+            ap_cost = bool((report.get("ap_cost") or {}).get("matched"))
+            goto_interlude = bool((report.get("goto_interlude") or {}).get("matched"))
+            mission_touch = list(report.get("mission_touch") or [1048, 172])
+            return_touch = list(report.get("return_touch") or [105, 133])
+
+            if needs_list_scroll and list_swipes < max_list_swipes:
+                operation = device_service.swipe(1257, 113, 1257, 33, 200)
+                context.emit(
+                    "device_action",
+                    "Scrolled the interlude quest list.",
+                    data={
+                        "role": "interlude_list_swipe",
+                        "scan_index": list_swipes,
+                        "operation": operation.to_dict(),
+                    },
+                )
+                list_swipes += 1
+                needs_list_scroll = False
+                actions.append("interlude_list_swipe")
+            elif goto_stage:
+                stage_entry_attempted = False
+                _tap_candidate(
+                    context,
+                    device_service,
+                    mission_touch,
+                    "goto_stage",
+                    random_touch,
+                )
+                actions.append("goto_stage")
+            elif ap_cost and not (stage_entry_attempted and goto_interlude):
+                stage_entry_attempted = True
+                _tap_candidate(
+                    context,
+                    device_service,
+                    mission_touch,
+                    "interlude_quest",
+                    random_touch,
+                )
+                actions.append("interlude_quest")
+            elif goto_interlude:
+                stage_entry_attempted = False
+                needs_list_scroll = max_list_swipes > 0
+                _tap_candidate(
+                    context,
+                    device_service,
+                    return_touch,
+                    "goto_interlude",
+                    random_touch,
+                )
+                actions.append("goto_interlude")
+            elif list_swipes < max_list_swipes:
+                operation = device_service.swipe(1257, 113, 1257, 33, 200)
+                context.emit(
+                    "device_action",
+                    "Scrolled the interlude quest list.",
+                    data={
+                        "role": "interlude_list_swipe",
+                        "scan_index": list_swipes,
+                        "operation": operation.to_dict(),
+                    },
+                )
+                list_swipes += 1
+                actions.append("interlude_list_swipe")
+            else:
+                reason = (
+                    "no_visible_interlude"
+                    if max_list_swipes == 0
+                    else "list_scan_exhausted"
+                )
+                return _result(
+                    normalized_name,
+                    False,
+                    "unknown",
+                    reason,
+                    attempts,
+                    actions,
+                )
+
+            wait_seconds = action_wait_seconds if actions else poll_interval
+            context.sleep(randomized_wait_seconds(wait_seconds, random_time))
+
+        raise TimeoutError(
+            "Interlude battle flow was not reached within "
+            f"{timeout_seconds:.2f} seconds."
+        )
+
+    return handler
+
+
+def register_interlude_entry_job(
+    job_manager: JobManager,
+    script_data: ScriptDataService,
+    device_service: DeviceService,
+    quest_recognizer: QuestRecognizer,
+    detect_stage: StageHandler,
+) -> None:
+    if job_manager.has_kind(INTERLUDE_ENTER_JOB_KIND):
+        return
+    job_manager.register(
+        INTERLUDE_ENTER_JOB_KIND,
+        create_interlude_entry_handler(
             script_data,
             device_service,
             quest_recognizer,

@@ -254,3 +254,53 @@ def test_main_story_recognizer_selects_first_visible_ap_target():
     assert result["candidate_count"] == 2
     assert result["candidates"][0]["center"] == [420, 240]
     assert result["selected"] == result["candidates"][0]
+
+
+def test_interlude_recognizer_detects_ap_goto_stage_and_goto_interlude():
+    class InterludeRecognition:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def match_template(self, _screenshot, template_path, **options):
+            self.calls.append({"template_path": template_path, **options})
+            if template_path.endswith("AP.png"):
+                return _match(template_path, [810, 175], matched=True, confidence=0.88)
+            if template_path.endswith("gotoStage.png"):
+                return _match(template_path, [920, 220], matched=True, confidence=0.92)
+            return _match(template_path, [105, 133], matched=False, confidence=0.31)
+
+    recognition = InterludeRecognition()
+    result = QuestRecognizer(recognition).recognize_interlude_quests(
+        b"screen",
+        "jp",
+    )
+
+    assert recognition.calls == [
+        {
+            "template_path": "battle/Interlude/JP/gotoStage.png",
+            "threshold": 0.8,
+            "roi": (733, 87, 387, 273),
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+        },
+        {
+            "template_path": "battle/JP/AP.png",
+            "threshold": 0.7,
+            "roi": (700, 90, 233, 243),
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+        },
+        {
+            "template_path": "battle/Interlude/JP/gotoInterlude.png",
+            "threshold": 0.8,
+            "roi": (0, 80, 187, 100),
+            "scales": (1.0, 0.75, 2 / 3, 0.5),
+        },
+    ]
+    assert result["server"] == "JP"
+    assert result["ap_cost"]["matched"] is True
+    assert result["goto_stage"]["matched"] is True
+    assert result["goto_interlude"]["matched"] is False
+    assert result["mission_touch"] == [1048, 172]
+    assert result["return_touch"] == [105, 133]
+    assert result["selected"]["action"] == "goto_stage"
+    assert result["selected"]["touch"] == [1048, 172]
+

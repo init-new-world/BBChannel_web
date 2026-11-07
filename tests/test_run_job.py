@@ -522,6 +522,55 @@ def test_full_run_enters_main_story_before_starting_battle_flow(tmp_path: Path):
     assert calls[0][1] == {"max_map_swipes": 6, "setting_name": "demo"}
 
 
+def test_full_run_enters_interlude_before_starting_battle_flow(tmp_path: Path):
+    calls: list[tuple[str, dict]] = []
+
+    def stage(name: str, result=None):
+        def execute(_context, payload):
+            calls.append((name, dict(payload)))
+            return dict(result or {})
+
+        return execute
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        register_full_run_job(
+            manager,
+            _ScriptData(),
+            stage("assist"),
+            stage("prepare", {"ready": True}),
+            stage("battle"),
+            stage("complete", {"complete": True, "drop_count": 0}),
+            enter_interlude=stage(
+                "enter_interlude",
+                {"entered": True, "stage": "assist", "reason": None},
+            ),
+        )
+        job = manager.start(
+            FULL_RUN_JOB_KIND,
+            {
+                "setting_name": "demo",
+                "max_runs": 1,
+                "entry_mode": "interlude",
+                "entry": {"max_map_swipes": 4},
+            },
+            device_key="replay:demo",
+        )
+        result = manager.wait(job.job_id, timeout=3)
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["runs_completed"] == 1
+    assert result.result["entry"]["stage"] == "assist"
+    assert [name for name, _payload in calls] == [
+        "enter_interlude",
+        "assist",
+        "prepare",
+        "battle",
+        "complete",
+    ]
+    assert calls[0][1] == {"max_map_swipes": 4, "setting_name": "demo"}
+
+
+
 def test_full_run_stops_when_free_quest_entry_cannot_find_a_target(tmp_path: Path):
     calls: list[str] = []
 

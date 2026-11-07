@@ -110,10 +110,13 @@ from webapp.automation.lottery import (
 from webapp.automation.program import compile_battle_program
 from webapp.automation.quest import (
     FREE_QUEST_ENTER_JOB_KIND,
+    INTERLUDE_ENTER_JOB_KIND,
     MAIN_STORY_ENTER_JOB_KIND,
     create_free_quest_entry_handler,
+    create_interlude_entry_handler,
     create_main_story_entry_handler,
     register_free_quest_entry_job,
+    register_interlude_entry_job,
     register_main_story_entry_job,
 )
 from webapp.automation.recovery import (
@@ -161,6 +164,7 @@ __all__ = [
     "EXPBALL_SUMMON_JOB_KIND",
     "FULL_RUN_JOB_KIND",
     "FREE_QUEST_ENTER_JOB_KIND",
+    "INTERLUDE_ENTER_JOB_KIND",
     "MAIN_STORY_ENTER_JOB_KIND",
     "LOTTERY_DRAW_JOB_KIND",
     "LOTTERY_GIFTBOX_RECEIVE_JOB_KIND",
@@ -193,6 +197,7 @@ __all__ = [
     "create_completion_handler",
     "create_full_run_handler",
     "create_free_quest_entry_handler",
+    "create_interlude_entry_handler",
     "create_main_story_entry_handler",
     "create_lottery_draw_handler",
     "create_lottery_giftbox_receive_handler",
@@ -227,6 +232,7 @@ __all__ = [
     "register_expball_summon_job",
     "register_full_run_job",
     "register_free_quest_entry_job",
+    "register_interlude_entry_job",
     "register_main_story_entry_job",
     "register_lottery_draw_job",
     "register_lottery_giftbox_receive_job",
