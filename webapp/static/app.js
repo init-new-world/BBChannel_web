@@ -173,6 +173,7 @@ const els = {
   fullRunMapSwipes: document.querySelector("#full-run-map-swipes"),
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
+  fullRunCrawlTower: document.querySelector("#full-run-crawl-tower"),
   fullRunAssistFilter: document.querySelector("#full-run-assist-filter"),
   startFullRun: document.querySelector("#start-full-run"),
   restartGame: document.querySelector("#restart-game"),
@@ -212,6 +213,7 @@ const els = {
   expballLockCeBombs: document.querySelector("#expball-lock-ce-bombs"),
   expballLockGoldServants: document.querySelector("#expball-lock-gold-servants"),
   expballLockInscribedCc: document.querySelector("#expball-lock-inscribed-cc"),
+  expballAllowQpFull: document.querySelector("#expball-allow-qp-full"),
   inspectExpballServantLevel: document.querySelector("#inspect-expball-servant-level"),
   runExpballEnhance: document.querySelector("#run-expball-enhance"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
@@ -3024,6 +3026,7 @@ async function startFullRun() {
     prepare: {
       apple: els.fullRunApple.value,
       team_check_mode: els.fullRunTeamCheck.value,
+      crawl_tower: Boolean(els.fullRunCrawlTower?.checked),
     },
     battle: {
       tap_interval_seconds: Number(els.battleActionDelay.value),
@@ -3166,6 +3169,7 @@ async function runLottery() {
       sell_target: sellTarget,
       lock_gold_servants: els.expballLockGoldServants.checked,
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
+      allow_qp_full: Boolean(els.expballAllowQpFull?.checked),
     } : {}),
     ...(overflowAction === "servant_enhancement" ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
@@ -3295,6 +3299,7 @@ async function runExpballSummon() {
       sell_target: sellTarget,
       lock_gold_servants: els.expballLockGoldServants.checked,
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
+      allow_qp_full: Boolean(els.expballAllowQpFull?.checked),
     } : {}),
     ...(isEnhancementOverflow ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
@@ -3338,6 +3343,7 @@ async function runExpballSell() {
     sell_target: sellTarget,
     lock_gold_servants: els.expballLockGoldServants.checked,
     lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
+    allow_qp_full: Boolean(els.expballAllowQpFull?.checked),
     ...(stars.length ? { stars } : {}),
   });
 }
@@ -4132,7 +4138,11 @@ function updateControls() {
     || state.selectedSettingPlan?.run?.stuck_restart);
   els.fullRunAssistFilter.disabled = !state.selectedSettingPlan
     || ["不识别", "仅礼装", "冠位助战仅礼装"].includes(state.selectedSettingPlan.assist?.mode);
-  els.fullRunMapSwipes.disabled = !["free_quest", "main_story"].includes(
+  els.fullRunMapSwipes.disabled = ![
+    "free_quest",
+    "main_story",
+    "interlude",
+  ].includes(
     els.fullRunEntryMode.value,
   );
   els.pauseJob.disabled = selectedJobStatus !== "running";

@@ -77,9 +77,11 @@ def test_operator_console_references_api_controls():
     assert 'id="full-run-restart-limit"' in index
     assert 'id="full-run-entry-mode"' in index
     assert '<option value="main_story">Main story</option>' in index
+    assert '<option value="interlude">Interlude</option>' in index
     assert 'id="full-run-map-swipes"' in index
     assert 'id="full-run-apple"' in index
     assert 'id="full-run-team-check"' in index
+    assert 'id="full-run-crawl-tower"' in index
     assert 'id="start-full-run"' in index
     assert 'id="restart-game"' in index
     assert 'id="inspect-chocolate"' in index
@@ -118,6 +120,7 @@ def test_operator_console_references_api_controls():
     assert 'id="expball-lock-ce-bombs"' in index
     assert 'id="expball-lock-gold-servants"' in index
     assert 'id="expball-lock-inscribed-cc"' in index
+    assert 'id="expball-allow-qp-full"' in index
     assert 'id="inspect-expball-servant-level"' in index
     assert 'id="run-expball-enhance"' in index
     assert 'id="run-expball-summon"' in index
@@ -164,8 +167,9 @@ def test_operator_console_references_api_controls():
     assert 'id="notebook-content"' in index
     assert 'id="save-notebook"' in index
     assert "team_check_mode: els.fullRunTeamCheck.value" in script
+    assert "crawl_tower: Boolean(els.fullRunCrawlTower?.checked)" in script
     assert "entry_mode: els.fullRunEntryMode.value" in script
-    assert '!["free_quest", "main_story"].includes(' in script
+    assert '"interlude"' in script
     assert "els.fullRunEntryMode.value" in script
     assert "max_map_swipes: readNumber(els.fullRunMapSwipes)" in script
     assert "max_restarts: readNumber(els.fullRunRestartLimit)" in script
