@@ -19,6 +19,7 @@ FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
 NORMALIZED_FRAME_SCALE = 2 / 3
 GRAND_ASSIST_MODES = {"冠位助战", "冠位助战仅礼装"}
+GRAND_EQUIP_SLOT_NAMES = ("normal", "kizuna", "houshuu")
 GRAND_BOND_TEMPLATES = {
     "初始": "UIimage/jb_normal.png",
     "NP50": "UIimage/jb_np.png",
@@ -83,6 +84,11 @@ class AssistRecognizer:
         grand_only_equip = mode == "冠位助战仅礼装"
         only_equip = mode == "仅礼装" or grand_only_equip
         grand_layout = mode in GRAND_ASSIST_MODES
+        grand_equip_slots = (
+            self._normalize_grand_equip_slots(assist)
+            if grand_layout and not only_servant
+            else None
+        )
         configured_tags = assist.get("tags")
         tag_image_size = (
             self._recognition.image_size(screenshot)
@@ -92,7 +98,11 @@ class AssistRecognizer:
         canonical_name = assist.get("servant_canonical_name")
         templates = [] if only_equip else self._servant_templates(canonical_name)
         equip_templates = (
-            {} if only_servant else self._equip_templates(assist.get("equip_names"))
+            {}
+            if only_servant
+            else self._equip_templates(
+                self._collect_equip_names(assist, grand_equip_slots)
+            )
         )
         equip_matches = {
             equip_name: [
@@ -194,6 +204,9 @@ class AssistRecognizer:
             candidates = self._grand_equip_candidates(
                 grand_marker,
                 equip_matches,
+                equip_slots=grand_equip_slots,
+                check_limit_break=check_limit_break,
+                limit_break_matches=limit_break_matches,
             )
         elif only_equip:
             candidates = self._equip_only_candidates(equip_matches)
@@ -202,6 +215,9 @@ class AssistRecognizer:
         if only_equip and check_limit_break:
             matched_candidates = []
             for candidate in candidates:
+                if candidate["checks"].get("full_limit_break"):
+                    matched_candidates.append(candidate)
+                    continue
                 limit_break_match = self._candidate_limit_break_match(
                     candidate["anchor"],
                     limit_break_matches,
@@ -229,17 +245,51 @@ class AssistRecognizer:
             }
             if any(self._overlaps(candidate["bounds"], found["bounds"]) for found in candidates):
                 continue
-            if equip_templates:
-                equip_match = self._candidate_equip_match(candidate["anchor"], equip_matches)
-                if equip_match is None:
+            if grand_layout and grand_equip_slots is not None:
+                grand_equip_result = self._candidate_grand_equip_matches(
+                    candidate["anchor"],
+                    grand_equip_slots,
+                    equip_matches,
+                    check_limit_break=check_limit_break,
+                    limit_break_matches=limit_break_matches,
+                )
+                if grand_equip_result is None:
                     continue
-                equip_name, match = equip_match
-                candidate["checks"] = {
-                    "equip_name": equip_name,
-                    "equip_template": match.template_path,
-                    "equip_confidence": match.confidence,
-                }
-            if check_limit_break:
+                candidate["checks"].update(grand_equip_result["checks"])
+            elif equip_templates:
+                equip_match = None
+                if grand_layout:
+                    grand_fallback = self._candidate_grand_equip_matches(
+                        candidate["anchor"],
+                        {
+                            "normal": list(equip_templates.keys()),
+                            "kizuna": [],
+                            "houshuu": [],
+                        },
+                        equip_matches,
+                        check_limit_break=check_limit_break,
+                        limit_break_matches=limit_break_matches,
+                    )
+                    if grand_fallback is not None:
+                        candidate["checks"].update(grand_fallback["checks"])
+                        equip_match = (
+                            grand_fallback["checks"]["equip_name"],
+                            grand_fallback["primary_match"],
+                        )
+                if equip_match is None:
+                    equip_match = self._candidate_equip_match(
+                        candidate["anchor"],
+                        equip_matches,
+                    )
+                    if equip_match is None:
+                        continue
+                    equip_name, match = equip_match
+                    candidate["checks"] = {
+                        "equip_name": equip_name,
+                        "equip_template": match.template_path,
+                        "equip_confidence": match.confidence,
+                    }
+            if check_limit_break and not candidate["checks"].get("full_limit_break"):
                 limit_break_match = self._candidate_limit_break_match(
                     candidate["anchor"],
                     limit_break_matches,
@@ -461,6 +511,10 @@ class AssistRecognizer:
         cls,
         marker: Any,
         equip_matches: dict[str, list[Any]],
+        *,
+        equip_slots: dict[str, list[str]] | None = None,
+        check_limit_break: bool = False,
+        limit_break_matches: list[Any] = (),
     ) -> list[dict[str, Any]]:
         if not marker.matched:
             return []
@@ -476,25 +530,51 @@ class AssistRecognizer:
                 continue
             anchor_x = marker_x - 347904 / 1788 * GRAND_LAYOUT_SCALE
             anchor_y = row_y + 107460 / 1006 * GRAND_LAYOUT_SCALE
-            equip_roi = (
-                round(anchor_x - 120 * 1280 / 1788),
-                round(anchor_y + 50 * 720 / 1006),
-                round(anchor_x + 75 * 1280 / 1788),
-                round(anchor_y + 130 * 720 / 1006),
-            )
-            row_matches = [
-                (equip_name, match)
-                for equip_name, matches in equip_matches.items()
-                for match in matches
-                if cls._bounds_inside(match, equip_roi)
-            ]
-            if not row_matches:
-                continue
-            equip_name, equip_match = max(
-                row_matches,
-                key=lambda item: item[1].confidence,
-            )
             anchor = [round(anchor_x), round(anchor_y)]
+            if equip_slots is not None:
+                slot_result = cls._candidate_grand_equip_matches(
+                    anchor,
+                    equip_slots,
+                    equip_matches,
+                    check_limit_break=check_limit_break,
+                    limit_break_matches=limit_break_matches,
+                )
+                if slot_result is None:
+                    continue
+                equip_match = slot_result["primary_match"]
+                checks = {
+                    **slot_result["checks"],
+                    "grand_marker": True,
+                    "grand_marker_template": marker.template_path,
+                    "grand_marker_confidence": marker.confidence,
+                }
+            else:
+                equip_roi = (
+                    round(anchor_x - 120 * 1280 / 1788),
+                    round(anchor_y + 50 * 720 / 1006),
+                    round(anchor_x + 75 * 1280 / 1788),
+                    round(anchor_y + 130 * 720 / 1006),
+                )
+                row_matches = [
+                    (equip_name, match)
+                    for equip_name, matches in equip_matches.items()
+                    for match in matches
+                    if cls._bounds_inside(match, equip_roi)
+                ]
+                if not row_matches:
+                    continue
+                equip_name, equip_match = max(
+                    row_matches,
+                    key=lambda item: item[1].confidence,
+                )
+                checks = {
+                    "equip_name": equip_name,
+                    "equip_template": equip_match.template_path,
+                    "equip_confidence": equip_match.confidence,
+                    "grand_marker": True,
+                    "grand_marker_template": marker.template_path,
+                    "grand_marker_confidence": marker.confidence,
+                }
             candidates.append(
                 {
                     "bounds": [*equip_match.top_left, *equip_match.size],
@@ -511,17 +591,225 @@ class AssistRecognizer:
                             )
                         ),
                     ],
-                    "checks": {
-                        "equip_name": equip_name,
-                        "equip_template": equip_match.template_path,
-                        "equip_confidence": equip_match.confidence,
-                        "grand_marker": True,
-                        "grand_marker_template": marker.template_path,
-                        "grand_marker_confidence": marker.confidence,
-                    },
+                    "checks": checks,
                 }
             )
         return candidates
+
+    @staticmethod
+    def _normalize_grand_equip_slots(
+        assist: dict[str, Any],
+    ) -> dict[str, list[str]] | None:
+        def extract_names(entry: Any) -> list[str]:
+            names: list[str] = []
+            if isinstance(entry, str) and entry:
+                names.append(entry)
+            elif isinstance(entry, list):
+                for item in entry:
+                    for nested in extract_names(item):
+                        if nested not in names:
+                            names.append(nested)
+            return names
+
+        raw_slots = assist.get("equip_slots")
+        if isinstance(raw_slots, dict):
+            slots = {
+                slot: extract_names(raw_slots.get(slot))
+                for slot in GRAND_EQUIP_SLOT_NAMES
+            }
+            return slots if any(slots.values()) else None
+
+        raw_assist_equip = assist.get("assistEquip")
+        if isinstance(raw_assist_equip, list) and (
+            len(raw_assist_equip) == 3
+            or any(
+                isinstance(item, list) or item is None
+                for item in raw_assist_equip
+            )
+        ):
+            slots = {
+                slot: extract_names(
+                    raw_assist_equip[index]
+                    if index < len(raw_assist_equip)
+                    else None
+                )
+                for index, slot in enumerate(GRAND_EQUIP_SLOT_NAMES)
+            }
+            return slots if any(slots.values()) else None
+        return None
+
+    @staticmethod
+    def _collect_equip_names(
+        assist: dict[str, Any],
+        grand_equip_slots: dict[str, list[str]] | None,
+    ) -> list[str]:
+        names: list[str] = []
+        raw_names = assist.get("equip_names")
+        if isinstance(raw_names, list):
+            for name in raw_names:
+                if isinstance(name, str) and name and name not in names:
+                    names.append(name)
+        if grand_equip_slots is not None:
+            for slot in GRAND_EQUIP_SLOT_NAMES:
+                for name in grand_equip_slots.get(slot, ()):
+                    if isinstance(name, str) and name and name not in names:
+                        names.append(name)
+        return names
+
+    @staticmethod
+    def _grand_slot_roi(
+        anchor: list[int],
+        slot_index: int,
+    ) -> tuple[int, int, int, int]:
+        anchor_x, anchor_y = anchor
+        return (
+            round(anchor_x - 117 * 1280 / 1788),
+            round(anchor_y + (-87 + 65 * slot_index) * 720 / 1006),
+            round(anchor_x + 312 * 1280 / 1788),
+            round(anchor_y + (-7 + 65 * slot_index) * 720 / 1006),
+        )
+
+    @classmethod
+    def _candidate_grand_slot_equip_match(
+        cls,
+        anchor: list[int],
+        slot_index: int,
+        slot_equip_names: list[str],
+        equip_matches: dict[str, list[Any]],
+    ) -> tuple[str, Any] | None:
+        roi = cls._grand_slot_roi(anchor, slot_index)
+        roi_left, roi_top, roi_right, roi_bottom = roi
+        matches = [
+            (equip_name, match)
+            for equip_name in slot_equip_names
+            for match in equip_matches.get(equip_name, ())
+            if cls._bounds_inside(match, roi)
+            or (
+                roi_left <= match.center[0] <= roi_right
+                and roi_top <= match.center[1] <= roi_bottom
+            )
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item[1].confidence)
+
+    @classmethod
+    def _candidate_grand_equip_matches(
+        cls,
+        anchor: list[int],
+        equip_slots: dict[str, list[str]],
+        equip_matches: dict[str, list[Any]],
+        *,
+        check_limit_break: bool = False,
+        limit_break_matches: list[Any] = (),
+    ) -> dict[str, Any] | None:
+        kizuna_names = equip_slots.get("kizuna") or []
+        if kizuna_names:
+            kizuna_match = cls._candidate_grand_slot_equip_match(
+                anchor,
+                1,
+                kizuna_names,
+                equip_matches,
+            )
+            if kizuna_match is None:
+                return None
+            if check_limit_break:
+                kizuna_lb = cls._candidate_limit_break_match(
+                    anchor,
+                    list(limit_break_matches),
+                    grand_layout=True,
+                    slot_index=1,
+                )
+                if kizuna_lb is None:
+                    return None
+
+        attempts = [
+            (False, (("normal", 0), ("kizuna", 1), ("houshuu", 2))),
+        ]
+        if (equip_slots.get("normal") or []) != (equip_slots.get("houshuu") or []):
+            attempts.append(
+                (True, (("houshuu", 0), ("kizuna", 1), ("normal", 2))),
+            )
+
+        for swapped, slot_mapping in attempts:
+            matched_slots: dict[str, dict[str, Any]] = {}
+            matched_lb_slots: dict[str, dict[str, Any]] = {}
+            primary_match = None
+            primary_name = None
+            first_lb_match = None
+            failed = False
+
+            for logical_slot, physical_slot in slot_mapping:
+                required_names = equip_slots.get(logical_slot) or []
+                if not required_names:
+                    continue
+                slot_match = cls._candidate_grand_slot_equip_match(
+                    anchor,
+                    physical_slot,
+                    required_names,
+                    equip_matches,
+                )
+                if slot_match is None:
+                    failed = True
+                    break
+                equip_name, raw_match = slot_match
+                slot_entry: dict[str, Any] = {
+                    "equip_name": equip_name,
+                    "equip_template": raw_match.template_path,
+                    "equip_confidence": raw_match.confidence,
+                    "physical_slot": physical_slot,
+                }
+                if check_limit_break:
+                    lb_match = cls._candidate_limit_break_match(
+                        anchor,
+                        list(limit_break_matches),
+                        grand_layout=True,
+                        slot_index=physical_slot,
+                    )
+                    if lb_match is None:
+                        failed = True
+                        break
+                    slot_entry.update(
+                        {
+                            "full_limit_break": True,
+                            "limit_break_template": lb_match.template_path,
+                            "limit_break_confidence": lb_match.confidence,
+                        }
+                    )
+                    matched_lb_slots[logical_slot] = {
+                        "physical_slot": physical_slot,
+                        "template_path": lb_match.template_path,
+                        "confidence": lb_match.confidence,
+                    }
+                    if first_lb_match is None:
+                        first_lb_match = lb_match
+                matched_slots[logical_slot] = slot_entry
+                if primary_match is None:
+                    primary_name = equip_name
+                    primary_match = raw_match
+
+            if not failed and primary_match is not None and primary_name is not None:
+                checks: dict[str, Any] = {
+                    "equip_name": primary_name,
+                    "equip_template": primary_match.template_path,
+                    "equip_confidence": primary_match.confidence,
+                    "equip_slots": matched_slots,
+                    "equip_slot_swapped": swapped,
+                }
+                if check_limit_break and first_lb_match is not None:
+                    checks.update(
+                        {
+                            "full_limit_break": True,
+                            "limit_break_template": first_lb_match.template_path,
+                            "limit_break_confidence": first_lb_match.confidence,
+                            "limit_break_slots": matched_lb_slots,
+                        }
+                    )
+                return {
+                    "primary_match": primary_match,
+                    "checks": checks,
+                }
+        return None
 
     @staticmethod
     def _bounds_inside(match: Any, roi: tuple[int, int, int, int]) -> bool:
@@ -1122,11 +1410,13 @@ class AssistRecognizer:
         matches: list[Any],
         *,
         grand_layout: bool = False,
+        slot_index: int = 0,
     ):
         anchor_x, anchor_y = anchor
         if grand_layout:
+            slot_offset_y = round(65 * slot_index * 720 / 1006)
             left, right = anchor_x + 190, anchor_x + 260
-            top, bottom = anchor_y - 50, anchor_y + 20
+            top, bottom = anchor_y - 50 + slot_offset_y, anchor_y + 20 + slot_offset_y
         else:
             left, right = anchor_x + 40, anchor_x + 90
             top, bottom = anchor_y + 45, anchor_y + 110

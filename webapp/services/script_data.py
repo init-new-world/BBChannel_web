@@ -676,7 +676,13 @@ class ScriptDataService:
                 servant_class = class_name if isinstance(class_name, str) else None
                 break
 
-        equip_names = self._assist_equip_names(config.get("assistEquip"))
+        raw_assist_equip = config.get("assistEquip")
+        equip_names = self._assist_equip_names(raw_assist_equip)
+        equip_slots = (
+            self._assist_equip_slots(raw_assist_equip)
+            if config.get("assistMode") in {"冠位助战", "冠位助战仅礼装"}
+            else None
+        )
         try:
             tags = self._plan_assist_tags(config.get("assistTags"))
         except ValueError:
@@ -685,7 +691,7 @@ class ScriptDataService:
 
         skill_levels = config.get("skillsLevel")
         skill_levels = (skill_levels + [0] * 8)[:8] if isinstance(skill_levels, list) else [0] * 8
-        return {
+        assist_plan: dict[str, Any] = {
             "mode": config.get("assistMode"),
             "slot": slot,
             "servant_name": servant_name,
@@ -705,6 +711,32 @@ class ScriptDataService:
             "bond_equip_type": config.get("jbType", "任意"),
             "all_not_skip": bool(config.get("allNotSkip", 1)),
             "tags": tags,
+        }
+        if equip_slots is not None:
+            assist_plan["equip_slots"] = equip_slots
+        return assist_plan
+
+    @classmethod
+    def _assist_equip_slots(cls, value: Any) -> dict[str, list[str]]:
+        if isinstance(value, dict):
+            return {
+                slot: cls._assist_equip_names(value.get(slot))
+                for slot in ("normal", "kizuna", "houshuu")
+            }
+        if isinstance(value, list) and (
+            len(value) == 3
+            or any(isinstance(item, list) or item is None for item in value)
+        ):
+            return {
+                slot: cls._assist_equip_names(
+                    value[index] if index < len(value) else None
+                )
+                for index, slot in enumerate(("normal", "kizuna", "houshuu"))
+            }
+        return {
+            "normal": cls._assist_equip_names(value),
+            "kizuna": [],
+            "houshuu": [],
         }
 
     @staticmethod

@@ -438,6 +438,11 @@ def test_get_setting_plan_flattens_grand_assist_equip_groups(tmp_path: Path):
         "Tea Time",
         "Event CE",
     ]
+    assert plan["assist"]["equip_slots"] == {
+        "normal": ["Holmes", "Bond CE", "Tea Time"],
+        "kizuna": [],
+        "houshuu": ["Tea Time", "Event CE", "Holmes"],
+    }
 
 
 def test_get_setting_plan_normalizes_run_options(tmp_path: Path):

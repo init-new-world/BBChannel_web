@@ -1144,3 +1144,181 @@ def test_assist_recognizer_compares_arbitrary_skill_levels(tmp_path: Path):
     assert result["candidate_count"] == 1
     assert result["candidates"][0]["anchor"] == [100, 265]
     assert result["candidates"][0]["checks"]["skill_levels"] == [6, 9, 10]
+
+
+def test_grand_assist_matches_three_equip_slots_and_per_slot_limit_break(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    equip_assets = assets / "assist" / "assist_equip"
+    servant_faces.mkdir(parents=True)
+    equip_assets.mkdir(parents=True)
+    data.mkdir()
+
+    (servant_faces / "Support_1.png").write_bytes(b"servant")
+    for name in ("Black Grail", "Heracles Bond", "Chaldea Lunchtime"):
+        (equip_assets / f"{name}.png").write_bytes(b"equip")
+
+    # Row 1 at anchor [170, 240] has all 3 slots, but slot 2 (houshuu) lacks MLB star.
+    # Row 2 at anchor [170, 440] has all 3 slots and all 3 MLB stars.
+    servant_matches = [
+        MatchResult(
+            template_path="servantface/Support_1.png",
+            matched=True,
+            confidence=0.96,
+            threshold=0.85,
+            top_left=[140, 210],
+            size=[60, 60],
+            center=[170, 240],
+            scale=1.0,
+        ),
+        MatchResult(
+            template_path="servantface/Support_1.png",
+            matched=True,
+            confidence=0.95,
+            threshold=0.85,
+            top_left=[140, 410],
+            size=[60, 60],
+            center=[170, 440],
+            scale=1.0,
+        ),
+    ]
+    equip_by_template = {
+        "assist/assist_equip/Black Grail.png": [
+            _match_result("assist/assist_equip/Black Grail.png", [180, 240 - 34]),
+            _match_result("assist/assist_equip/Black Grail.png", [180, 440 - 34]),
+        ],
+        "assist/assist_equip/Heracles Bond.png": [
+            _match_result("assist/assist_equip/Heracles Bond.png", [180, 240 + 13]),
+            _match_result("assist/assist_equip/Heracles Bond.png", [180, 440 + 13]),
+        ],
+        "assist/assist_equip/Chaldea Lunchtime.png": [
+            _match_result("assist/assist_equip/Chaldea Lunchtime.png", [180, 240 + 60]),
+            _match_result("assist/assist_equip/Chaldea Lunchtime.png", [180, 440 + 60]),
+        ],
+    }
+    lb_matches = [
+        _match_result("assist/满破标记.png", [170 + 220, 240 - 15]),
+        _match_result("assist/满破标记.png", [170 + 220, 240 - 15 + 47]),
+        # Row 1 is missing slot 2 MLB star at y = 240 - 15 + 93
+        _match_result("assist/满破标记.png", [170 + 220, 440 - 15]),
+        _match_result("assist/满破标记.png", [170 + 220, 440 - 15 + 47]),
+        _match_result("assist/满破标记.png", [170 + 220, 440 - 15 + 93]),
+    ]
+
+    class RecognitionStub:
+        def match_template_all(self, _screenshot, template_path, **_options):
+            if template_path == "servantface/Support_1.png":
+                return servant_matches
+            if template_path == "assist/满破标记.png":
+                return lb_matches
+            return equip_by_template.get(template_path, [])
+
+    resources = ResourceService(assets, data)
+    result = AssistRecognizer(resources, RecognitionStub()).recognize(
+        b"frame",
+        {
+            "mode": "冠位助战",
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "equip_slots": {
+                "normal": ["Black Grail"],
+                "kizuna": ["Heracles Bond"],
+                "houshuu": ["Chaldea Lunchtime"],
+            },
+            "full_limit_break": True,
+        },
+    )
+
+    assert result["candidate_count"] == 1
+    candidate = result["candidates"][0]
+    assert candidate["anchor"] == [170, 440]
+    assert candidate["checks"]["equip_slot_swapped"] is False
+    assert candidate["checks"]["full_limit_break"] is True
+    assert candidate["checks"]["equip_slots"]["normal"]["physical_slot"] == 0
+    assert candidate["checks"]["equip_slots"]["kizuna"]["physical_slot"] == 1
+    assert candidate["checks"]["equip_slots"]["houshuu"]["physical_slot"] == 2
+
+
+def test_grand_assist_detects_swapped_slot_1_and_slot_3_equips(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    equip_assets = assets / "assist" / "assist_equip"
+    servant_faces.mkdir(parents=True)
+    equip_assets.mkdir(parents=True)
+    data.mkdir()
+
+    (servant_faces / "Support_1.png").write_bytes(b"servant")
+    for name in ("Black Grail", "Heracles Bond", "Chaldea Lunchtime"):
+        (equip_assets / f"{name}.png").write_bytes(b"equip")
+
+    # Row 1 at [170, 240] has kizuna misplaced into physical slot 0 -> must be rejected.
+    # Row 2 at [170, 440] has houshuu ("Chaldea Lunchtime") in physical slot 0,
+    # kizuna ("Heracles Bond") in physical slot 1, and normal ("Black Grail") in physical slot 2.
+    servant_matches = [
+        MatchResult(
+            template_path="servantface/Support_1.png",
+            matched=True,
+            confidence=0.96,
+            threshold=0.85,
+            top_left=[140, 210],
+            size=[60, 60],
+            center=[170, 240],
+            scale=1.0,
+        ),
+        MatchResult(
+            template_path="servantface/Support_1.png",
+            matched=True,
+            confidence=0.95,
+            threshold=0.85,
+            top_left=[140, 410],
+            size=[60, 60],
+            center=[170, 440],
+            scale=1.0,
+        ),
+    ]
+    equip_by_template = {
+        "assist/assist_equip/Black Grail.png": [
+            _match_result("assist/assist_equip/Black Grail.png", [180, 240 + 13]),
+            _match_result("assist/assist_equip/Black Grail.png", [180, 440 + 60]),
+        ],
+        "assist/assist_equip/Heracles Bond.png": [
+            _match_result("assist/assist_equip/Heracles Bond.png", [180, 240 - 34]),
+            _match_result("assist/assist_equip/Heracles Bond.png", [180, 440 + 13]),
+        ],
+        "assist/assist_equip/Chaldea Lunchtime.png": [
+            _match_result("assist/assist_equip/Chaldea Lunchtime.png", [180, 240 + 60]),
+            _match_result("assist/assist_equip/Chaldea Lunchtime.png", [180, 440 - 34]),
+        ],
+    }
+
+    class RecognitionStub:
+        def match_template_all(self, _screenshot, template_path, **_options):
+            if template_path == "servantface/Support_1.png":
+                return servant_matches
+            return equip_by_template.get(template_path, [])
+
+    resources = ResourceService(assets, data)
+    result = AssistRecognizer(resources, RecognitionStub()).recognize(
+        b"frame",
+        {
+            "mode": "冠位助战",
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "assistEquip": [
+                ["Black Grail"],
+                "Heracles Bond",
+                ["Chaldea Lunchtime"],
+            ],
+        },
+    )
+
+    assert result["candidate_count"] == 1
+    candidate = result["candidates"][0]
+    assert candidate["anchor"] == [170, 440]
+    assert candidate["checks"]["equip_slot_swapped"] is True
+    assert candidate["checks"]["equip_slots"]["houshuu"]["physical_slot"] == 0
+    assert candidate["checks"]["equip_slots"]["kizuna"]["physical_slot"] == 1
+    assert candidate["checks"]["equip_slots"]["normal"]["physical_slot"] == 2
+
