@@ -29,6 +29,7 @@ from webapp.automation.strategy import (
 )
 from webapp.core.errors import AppError, ErrorCode
 from webapp.runtime import JobManager, RunContext
+from webapp.services.battle_servants import FrontlineServantRecognizer
 from webapp.services.cards import CommandCardRecognizer, recognize_card_blocks
 from webapp.services.devices import DeviceService
 from webapp.services.np_charge import NpChargeRecognizer
@@ -342,6 +343,115 @@ def _sync_frontline_alive_positions(
     return alive_slots
 
 
+def _sync_frontline_servant_names(
+    context: RunContext,
+    device_service: DeviceService,
+    frontline_recognizer: FrontlineServantRecognizer | None,
+    screenshot: bytes,
+    server: str,
+    servant_positions: list[dict[str, Any] | None],
+    occupied_positions: list[int | None] | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+    *,
+    max_attempts: int = 4,
+    retry_wait_seconds: float = 0.5,
+) -> dict[str, Any] | None:
+    if frontline_recognizer is None or not frontline_recognizer.has_assets():
+        return None
+    present = (
+        [occupied_positions[index] is not None for index in range(3)]
+        if occupied_positions is not None and len(occupied_positions) >= 3
+        else [servant_positions[index] is not None for index in range(3)]
+    )
+    if not any(present):
+        return None
+    try:
+        classes = frontline_recognizer.recognize_classes(screenshot, present=present)
+    except (AppError, ValueError):
+        return None
+    if not any(classes):
+        return None
+    current_screenshot = screenshot
+    recognized: dict[str, Any] | None = None
+    attempts = max(int(max_attempts), 1)
+    for remaining in range(attempts, 0, -1):
+        name_threshold = 0.5 if remaining == 1 and attempts > 1 else 0.7
+        recognized = frontline_recognizer.recognize_names(
+            current_screenshot,
+            classes=classes,
+            present=present,
+            threshold=name_threshold,
+            final_attempt=remaining == 1,
+        )
+        if recognized["complete"] or remaining == 1:
+            break
+        if retry_wait_seconds > 0:
+            context.sleep(retry_wait_seconds)
+        current_screenshot = device_service.snapshot()
+    assert recognized is not None
+    changed = frontline_recognizer.apply_recognized_names(
+        recognized["names"],
+        servant_positions,
+        occupied_positions=occupied_positions,
+        party_servants=party_servants,
+        server=server,
+    )
+    recognized["changed"] = changed
+    context.emit(
+        "frontline_servants",
+        "Frontline servant classes and portraits were checked.",
+        data={
+            "classes": recognized["classes"],
+            "names": recognized["names"],
+            "complete": recognized["complete"],
+            "changed": changed,
+            "frontline": _frontline_servants(servant_positions),
+        },
+    )
+    return recognized
+
+
+def _update_servant_diff_state(
+    context: RunContext,
+    servant_positions: list[dict[str, Any] | None],
+    servant_diff_state: dict[str, Any] | None,
+    *,
+    names_changed: bool = False,
+) -> bool:
+    if servant_diff_state is None:
+        return False
+    if servant_diff_state.get("has_diff"):
+        return True
+    current_signature = [
+        (
+            servant.get("sn")
+            or servant.get("canonical_name")
+            or servant.get("name")
+            or ("assist" if servant.get("is_assist") else None)
+        )
+        if isinstance(servant, dict)
+        else None
+        for servant in servant_positions[:3]
+    ]
+    recorded = servant_diff_state.get("recorded")
+    if recorded is None:
+        servant_diff_state["recorded"] = list(current_signature)
+        if not names_changed:
+            return False
+    if names_changed or servant_diff_state.get("recorded") != current_signature:
+        servant_diff_state["has_diff"] = True
+        context.emit(
+            "servant_diff",
+            "Frontline servant lineup changed during extra battle turns.",
+            data={
+                "recorded": servant_diff_state.get("recorded"),
+                "current": current_signature,
+            },
+        )
+        return True
+    return False
+
+
 def _is_servant_skill_unavailable(
     recognition: RecognitionService,
     screenshot: bytes,
@@ -466,6 +576,132 @@ def _recognize_command_cards(
     )
 
 
+def _recognize_command_cards_with_recovery(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer,
+    screenshot: bytes,
+    server: str,
+    servants: list[dict[str, Any]],
+    threshold: float,
+    special_keys: list[dict[str, Any]] | None,
+    *,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+    card_templates: list[str] | None = None,
+    attack_template: str | None = None,
+    timeout_seconds: float = 15.0,
+    poll_interval: float = 0.25,
+    tap_interval: float | _TapTiming = 0.0,
+    card_wait_seconds: float = 0.0,
+) -> tuple[dict[str, Any], bytes, int]:
+    recognized = _recognize_command_cards(
+        card_recognizer,
+        screenshot,
+        server,
+        servants,
+        threshold,
+        special_keys,
+    )
+    if (
+        recognized["complete"]
+        or frontline_recognizer is None
+        or not frontline_recognizer.has_assets()
+        or servant_positions is None
+    ):
+        return recognized, screenshot, 0
+    recovery_taps = _execute_steps(
+        context,
+        device_service,
+        [
+            {
+                "type": "tap",
+                "role": "card_recognition_back",
+                "x": COMMAND_CARD_BACK_POINT[0],
+                "y": COMMAND_CARD_BACK_POINT[1],
+            }
+        ],
+        tap_interval,
+    )
+    battle_screenshot = _wait_for_battle_ready(
+        context,
+        device_service,
+        recognition,
+        attack_template or f"battle/{server}/attack.png",
+        threshold,
+        timeout_seconds,
+        poll_interval,
+        reconnect_timing=tap_interval,
+    )
+    _sync_frontline_alive_positions(
+        context,
+        recognition,
+        battle_screenshot,
+        occupied_positions,
+        servant_positions,
+    )
+    name_sync = _sync_frontline_servant_names(
+        context,
+        device_service,
+        frontline_recognizer,
+        battle_screenshot,
+        server,
+        servant_positions,
+        occupied_positions,
+        party_servants,
+        retry_wait_seconds=poll_interval,
+    )
+    servants[:] = _frontline_servants(servant_positions)
+    recovery_taps += _execute_steps(
+        context,
+        device_service,
+        [
+            {
+                "type": "tap",
+                "role": "card_recognition_attack",
+                "x": ATTACK_POINT[0],
+                "y": ATTACK_POINT[1],
+            }
+        ],
+        tap_interval,
+    )
+    effective_card_templates = card_templates or [
+        f"battle/{server}/{color}.png" for color in ("Arts", "Buster", "Quick")
+    ]
+    screenshot = _wait_for_command_cards(
+        context,
+        device_service,
+        recognition,
+        effective_card_templates,
+        threshold,
+        timeout_seconds,
+        poll_interval,
+        reconnect_timing=tap_interval,
+        settle_seconds=card_wait_seconds,
+    )
+    recognized = _recognize_command_cards(
+        card_recognizer,
+        screenshot,
+        server,
+        servants,
+        threshold,
+        special_keys,
+    )
+    context.emit(
+        "card_recognition_recovery",
+        "Re-checked frontline servant names after unrecognized command cards.",
+        data={
+            "names": name_sync["names"] if name_sync is not None else None,
+            "complete": recognized["complete"],
+            "recognized_count": recognized["recognized_count"],
+        },
+    )
+    return recognized, screenshot, recovery_taps
+
+
 def _execute_hakuno_reroll(
     context: RunContext,
     device_service: DeviceService,
@@ -483,6 +719,11 @@ def _execute_hakuno_reroll(
     special_keys: list[dict[str, Any]] | None = None,
     card_wait_seconds: float = 0.0,
     speedup_skills: bool = False,
+    *,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
 ) -> int:
     tap_count = 0
     need_cards = runtime["need_cards"]
@@ -522,14 +763,28 @@ def _execute_hakuno_reroll(
             reconnect_timing=tap_interval,
             settle_seconds=card_wait_seconds,
         )
-        recognized = _recognize_command_cards(
+        recognized, screenshot, recovery_taps = _recognize_command_cards_with_recovery(
+            context,
+            device_service,
+            recognition,
             card_recognizer,
             screenshot,
             server,
             servants,
             threshold,
             special_keys,
+            frontline_recognizer=frontline_recognizer,
+            servant_positions=servant_positions,
+            occupied_positions=occupied_positions,
+            party_servants=party_servants,
+            card_templates=card_templates,
+            attack_template=attack_template,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+            tap_interval=tap_interval,
+            card_wait_seconds=card_wait_seconds,
         )
+        tap_count += recovery_taps
         matched = _matches_hakuno_needs(recognized["cards"], need_cards)
         tap_count += _execute_steps(
             context,
@@ -674,6 +929,7 @@ def register_battle_jobs(
     recognition: RecognitionService | None = None,
     card_recognizer: CommandCardRecognizer | None = None,
     np_recognizer: NpChargeRecognizer | None = None,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
 ) -> None:
     def dry_run(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
@@ -760,6 +1016,7 @@ def register_battle_jobs(
                 device_service,
                 recognition,
                 card_recognizer,
+                frontline_recognizer,
             ),
             requires_device=True,
         )
@@ -776,6 +1033,7 @@ def register_battle_jobs(
                 recognition,
                 card_recognizer,
                 np_recognizer,
+                frontline_recognizer,
             ),
             requires_device=True,
         )
@@ -787,6 +1045,7 @@ def create_battle_execute_plan_handler(
     recognition: RecognitionService,
     card_recognizer: CommandCardRecognizer | None,
     np_recognizer: NpChargeRecognizer | None = None,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
 ):
     def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
@@ -794,6 +1053,7 @@ def create_battle_execute_plan_handler(
             payload
         )
         plan = script_data.get_setting_plan(setting_name)
+        party_servants = plan["servants"]
         special_keys = plan.get("special_keys", [])
         card_wait_seconds = _configured_card_wait(
             plan["run"].get("interval_before_choose_card", 0.5)
@@ -866,6 +1126,11 @@ def create_battle_execute_plan_handler(
         )
         if needs_np_recognition and effective_np_recognizer is None:
             raise ValueError("NP charge recognition is not configured.")
+        effective_frontline_recognizer = frontline_recognizer or (
+            FrontlineServantRecognizer(recognition._resources)
+            if isinstance(recognition, RecognitionService)
+            else None
+        )
         if initialize_settings:
             initialize_battle_settings(
                 context,
@@ -890,10 +1155,11 @@ def create_battle_execute_plan_handler(
         action_count = 0
         tap_count = 0
         servant_positions = _servant_positions(
-            plan["servants"],
+            party_servants,
             assist_slot=(plan.get("assist") or {}).get("slot"),
         )
         occupied_positions: list[int | None] = list(range(6))
+        servant_diff_state: dict[str, Any] = {"recorded": None, "has_diff": False}
         compiled_rounds = {
             round_plan["round"]: round_plan for round_plan in program["rounds"]
         }
@@ -1001,6 +1267,11 @@ def create_battle_execute_plan_handler(
                             special_keys=special_keys,
                             card_wait_seconds=card_wait_seconds,
                             checks=control["checks"],
+                            frontline_recognizer=effective_frontline_recognizer,
+                            servant_positions=servant_positions,
+                            occupied_positions=occupied_positions,
+                            party_servants=party_servants,
+                            attack_template=attack_template,
                         )
                         tap_count += condition_taps
                     matched = np_matched and card_matched
@@ -1040,6 +1311,10 @@ def create_battle_execute_plan_handler(
                         special_keys=special_keys,
                         card_wait_seconds=card_wait_seconds,
                         speedup_skills=speedup_skills,
+                        frontline_recognizer=effective_frontline_recognizer,
+                        servant_positions=servant_positions,
+                        occupied_positions=occupied_positions,
+                        party_servants=party_servants,
                     )
                     continue
                 battle_screenshot = _wait_for_battle_ready(
@@ -1115,6 +1390,10 @@ def create_battle_execute_plan_handler(
                 turn["command_phase"]["steps"], threshold, timeout_seconds,
                 poll_interval, tap_interval, special_keys=special_keys,
                 card_wait_seconds=card_wait_seconds,
+                frontline_recognizer=effective_frontline_recognizer,
+                servant_positions=servant_positions,
+                occupied_positions=occupied_positions,
+                party_servants=party_servants,
             )
             action_count += sum(
                 1 for action in turn["actions"] if action["source"].get("type") == "np"
@@ -1186,6 +1465,9 @@ def create_battle_execute_plan_handler(
                         occupied_positions=occupied_positions,
                         np_recognizer=effective_np_recognizer,
                         exchange_state=exchange_state,
+                        frontline_recognizer=effective_frontline_recognizer,
+                        party_servants=party_servants,
+                        servant_diff_state=servant_diff_state,
                     )
                     has_exchanged = exchange_state["has_exchanged"]
                     transition = _wait_for_battle_transition(
@@ -1244,6 +1526,9 @@ def create_battle_execute_plan_handler(
                     occupied_positions=occupied_positions,
                     np_recognizer=effective_np_recognizer,
                     exchange_state=exchange_state,
+                    frontline_recognizer=effective_frontline_recognizer,
+                    party_servants=party_servants,
+                    servant_diff_state=servant_diff_state,
                 )
                 has_exchanged = exchange_state["has_exchanged"]
                 transition = _wait_for_battle_transition(
@@ -1384,8 +1669,49 @@ def _execute_extra_turn(
     occupied_positions: list[int | None] | None = None,
     np_recognizer: NpChargeRecognizer | None = None,
     exchange_state: dict[str, bool] | None = None,
+    *,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+    servant_diff_state: dict[str, Any] | None = None,
 ) -> int:
     tap_count = 0
+    checked_frontline_names = False
+
+    def sync_extra_turn_frontline(battle_screenshot: bytes) -> None:
+        nonlocal checked_frontline_names
+        _sync_frontline_alive_positions(
+            context,
+            recognition,
+            battle_screenshot,
+            occupied_positions,
+            servant_positions,
+        )
+        if checked_frontline_names:
+            return
+        _update_servant_diff_state(
+            context,
+            servant_positions,
+            servant_diff_state,
+        )
+        name_sync = _sync_frontline_servant_names(
+            context,
+            device_service,
+            frontline_recognizer,
+            battle_screenshot,
+            server,
+            servant_positions,
+            occupied_positions,
+            party_servants,
+            retry_wait_seconds=poll_interval,
+        )
+        _update_servant_diff_state(
+            context,
+            servant_positions,
+            servant_diff_state,
+            names_changed=bool(name_sync and name_sync.get("changed")),
+        )
+        checked_frontline_names = True
+
     raw_skill_actions = [
         action
         for action in turn["actions"]
@@ -1427,13 +1753,7 @@ def _execute_extra_turn(
                     poll_interval,
                     reconnect_timing=tap_interval,
                 )
-                _sync_frontline_alive_positions(
-                    context,
-                    recognition,
-                    battle_screenshot,
-                    occupied_positions,
-                    servant_positions,
-                )
+                sync_extra_turn_frontline(battle_screenshot)
             np_matched = True
             if check_np:
                 if np_recognizer is None:
@@ -1465,6 +1785,11 @@ def _execute_extra_turn(
                     special_keys=special_keys,
                     card_wait_seconds=card_wait_seconds,
                     checks=control["checks"],
+                    frontline_recognizer=frontline_recognizer,
+                    servant_positions=servant_positions,
+                    occupied_positions=occupied_positions,
+                    party_servants=party_servants,
+                    attack_template=attack_template,
                 )
                 tap_count += condition_taps
             matched = np_matched and card_matched
@@ -1501,6 +1826,10 @@ def _execute_extra_turn(
                 special_keys=special_keys,
                 card_wait_seconds=card_wait_seconds,
                 speedup_skills=speedup_skills,
+                frontline_recognizer=frontline_recognizer,
+                servant_positions=servant_positions,
+                occupied_positions=occupied_positions,
+                party_servants=party_servants,
             )
             continue
         battle_screenshot = _wait_for_battle_ready(
@@ -1513,13 +1842,7 @@ def _execute_extra_turn(
             poll_interval,
             reconnect_timing=tap_interval,
         )
-        _sync_frontline_alive_positions(
-            context,
-            recognition,
-            battle_screenshot,
-            occupied_positions,
-            servant_positions,
-        )
+        sync_extra_turn_frontline(battle_screenshot)
         target_skill_number = _servant_skill_number(action)
         if target_skill_number is not None and _is_servant_skill_unavailable(
             recognition,
@@ -1570,6 +1893,13 @@ def _execute_extra_turn(
         _frontline_servants(servant_positions), turn["command_phase"]["steps"],
         threshold, timeout_seconds, poll_interval, tap_interval,
         special_keys=special_keys, card_wait_seconds=card_wait_seconds,
+        frontline_recognizer=frontline_recognizer,
+        servant_positions=servant_positions,
+        occupied_positions=occupied_positions,
+        party_servants=party_servants,
+        check_servant_names=not checked_frontline_names,
+        servant_diff_state=servant_diff_state,
+        is_extra_turn=True,
     )
     return tap_count
 
@@ -1581,15 +1911,54 @@ def _execute_command_phase(
     threshold: float, timeout_seconds: float, poll_interval: float,
     tap_interval: float | _TapTiming, *,
     special_keys: list[dict[str, Any]] | None = None, card_wait_seconds: float = 0.0,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+    check_servant_names: bool = False,
+    servant_diff_state: dict[str, Any] | None = None,
+    is_extra_turn: bool = False,
 ) -> int:
     unavailable_nps: set[int] = set()
     tap_count = 0
+    attack_template = f"battle/{server}/attack.png"
     card_templates = [f"battle/{server}/{color}.png" for color in ("Arts", "Buster", "Quick")]
     for attempt in range(4):
-        _wait_for_battle_ready(
-            context, device_service, recognition, f"battle/{server}/attack.png",
+        battle_screenshot = _wait_for_battle_ready(
+            context, device_service, recognition, attack_template,
             threshold, timeout_seconds, poll_interval, reconnect_timing=tap_interval,
         )
+        if attempt == 0 and check_servant_names and servant_positions is not None:
+            _sync_frontline_alive_positions(
+                context,
+                recognition,
+                battle_screenshot,
+                occupied_positions,
+                servant_positions,
+            )
+            _update_servant_diff_state(
+                context,
+                servant_positions,
+                servant_diff_state,
+            )
+            name_sync = _sync_frontline_servant_names(
+                context,
+                device_service,
+                frontline_recognizer,
+                battle_screenshot,
+                server,
+                servant_positions,
+                occupied_positions,
+                party_servants,
+                retry_wait_seconds=poll_interval,
+            )
+            _update_servant_diff_state(
+                context,
+                servant_positions,
+                servant_diff_state,
+                names_changed=bool(name_sync and name_sync.get("changed")),
+            )
+            servants[:] = _frontline_servants(servant_positions)
         tap_count += _execute_steps(context, device_service, command_steps[:1], tap_interval)
         screenshot = _wait_for_command_cards(
             context, device_service, recognition, card_templates,
@@ -1599,10 +1968,44 @@ def _execute_command_phase(
         tap_steps = []
         for step in command_steps[1:]:
             if step.get("type") == "strategy":
-                tap_steps.extend(_strategy_tap_steps(
-                    context, card_recognizer, screenshot, server, servants, step,
-                    threshold, special_keys=special_keys, unavailable_nps=sorted(unavailable_nps),
-                ))
+                effective_step = (
+                    {
+                        **step,
+                        "strategies": [
+                            {f"card{index}": {"type": 2} for index in (1, 2, 3)}
+                        ],
+                        "avoid_chain": False,
+                    }
+                    if is_extra_turn
+                    and servant_diff_state is not None
+                    and servant_diff_state.get("has_diff")
+                    else step
+                )
+                strategy_steps, recovery_taps, screenshot = _strategy_tap_steps_with_recovery(
+                    context,
+                    device_service,
+                    recognition,
+                    card_recognizer,
+                    screenshot,
+                    server,
+                    servants,
+                    effective_step,
+                    threshold,
+                    special_keys=special_keys,
+                    unavailable_nps=sorted(unavailable_nps),
+                    frontline_recognizer=frontline_recognizer if attempt == 0 else None,
+                    servant_positions=servant_positions,
+                    occupied_positions=occupied_positions,
+                    party_servants=party_servants,
+                    card_templates=card_templates,
+                    attack_template=attack_template,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval=poll_interval,
+                    tap_interval=tap_interval,
+                    card_wait_seconds=card_wait_seconds,
+                )
+                tap_count += recovery_taps
+                tap_steps.extend(strategy_steps)
             elif step.get("type") == "tap":
                 tap_steps.append(step)
         if unavailable_nps and not any(step.get("type") == "strategy" for step in command_steps):
@@ -1761,6 +2164,65 @@ def _execute_strategy_step(
     ), tap_interval)
 
 
+def _strategy_tap_steps_with_recovery(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None,
+    screenshot: bytes,
+    server: str,
+    servants: list[dict[str, Any]],
+    step: dict[str, Any],
+    threshold: float,
+    *,
+    special_keys: list[dict[str, Any]] | None = None,
+    unavailable_nps: list[int] | None = None,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+    card_templates: list[str] | None = None,
+    attack_template: str | None = None,
+    timeout_seconds: float = 15.0,
+    poll_interval: float = 0.25,
+    tap_interval: float | _TapTiming = 0.0,
+    card_wait_seconds: float = 0.0,
+) -> tuple[list[dict[str, Any]], int, bytes]:
+    if card_recognizer is None:
+        raise ValueError("Command card recognition is not configured.")
+    recognized, screenshot, recovery_taps = _recognize_command_cards_with_recovery(
+        context,
+        device_service,
+        recognition,
+        card_recognizer,
+        screenshot,
+        server,
+        servants,
+        threshold,
+        special_keys,
+        frontline_recognizer=frontline_recognizer,
+        servant_positions=servant_positions,
+        occupied_positions=occupied_positions,
+        party_servants=party_servants,
+        card_templates=card_templates,
+        attack_template=attack_template,
+        timeout_seconds=timeout_seconds,
+        poll_interval=poll_interval,
+        tap_interval=tap_interval,
+        card_wait_seconds=card_wait_seconds,
+    )
+    return (
+        _resolve_strategy_tap_steps_from_recognized(
+            context,
+            recognized,
+            step,
+            unavailable_nps=unavailable_nps,
+        ),
+        recovery_taps,
+        screenshot,
+    )
+
+
 def _strategy_tap_steps(
     context: RunContext, card_recognizer: CommandCardRecognizer | None,
     screenshot: bytes, server: str, servants: list[dict[str, Any]],
@@ -1778,6 +2240,21 @@ def _strategy_tap_steps(
         threshold,
         special_keys,
     )
+    return _resolve_strategy_tap_steps_from_recognized(
+        context,
+        recognized,
+        step,
+        unavailable_nps=unavailable_nps,
+    )
+
+
+def _resolve_strategy_tap_steps_from_recognized(
+    context: RunContext,
+    recognized: dict[str, Any],
+    step: dict[str, Any],
+    *,
+    unavailable_nps: list[int] | None = None,
+) -> list[dict[str, Any]]:
     context.emit(
         "card_recognition",
         "Command cards were classified.",
@@ -1846,6 +2323,12 @@ def _evaluate_card_condition(
     special_keys: list[dict[str, Any]] | None = None,
     card_wait_seconds: float = 0.0,
     checks: list[Any] | tuple[Any, ...] | None = None,
+    *,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+    attack_template: str | None = None,
 ) -> tuple[bool, int]:
     if card_recognizer is None:
         raise ValueError("Command card recognition is not configured.")
@@ -1867,14 +2350,28 @@ def _evaluate_card_condition(
         reconnect_timing=tap_interval,
         settle_seconds=card_wait_seconds,
     )
-    recognized = _recognize_command_cards(
+    recognized, screenshot, recovery_taps = _recognize_command_cards_with_recovery(
+        context,
+        device_service,
+        recognition,
         card_recognizer,
         screenshot,
         server,
         servants,
         threshold,
         special_keys,
+        frontline_recognizer=frontline_recognizer,
+        servant_positions=servant_positions,
+        occupied_positions=occupied_positions,
+        party_servants=party_servants,
+        card_templates=card_templates,
+        attack_template=attack_template,
+        timeout_seconds=timeout_seconds,
+        poll_interval=poll_interval,
+        tap_interval=tap_interval,
+        card_wait_seconds=card_wait_seconds,
     )
+    tap_count += recovery_taps
     if not recognized["complete"]:
         raise ValueError(
             f"Recognized {recognized['recognized_count']} of 5 command cards."
@@ -1960,6 +2457,7 @@ def _execute_skills_handler(
     device_service: DeviceService,
     recognition: RecognitionService,
     card_recognizer: CommandCardRecognizer | None,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
 ):
     def execute(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
         setting_name = _required_setting_name(payload)
@@ -1967,6 +2465,7 @@ def _execute_skills_handler(
             payload
         )
         plan = script_data.get_setting_plan(setting_name)
+        party_servants = plan["servants"]
         special_keys = plan.get("special_keys", [])
         card_wait_seconds = _configured_card_wait(
             plan["run"].get("interval_before_choose_card", 0.5)
@@ -1994,15 +2493,21 @@ def _execute_skills_handler(
         )
         if has_hakuno_reroll and card_recognizer is None:
             raise ValueError("Command card recognition is not configured.")
+        effective_frontline_recognizer = frontline_recognizer or (
+            FrontlineServantRecognizer(recognition._resources)
+            if isinstance(recognition, RecognitionService)
+            else None
+        )
         attack_template = f"battle/{program['server']}/attack.png"
         card_templates = [
             f"battle/{program['server']}/{card_type}.png"
             for card_type in ("Arts", "Buster", "Quick")
         ]
         servant_positions = _servant_positions(
-            plan["servants"],
+            party_servants,
             assist_slot=(plan.get("assist") or {}).get("slot"),
         )
+        occupied_positions: list[int | None] = list(range(6))
         tap_count = 0
         for action_number, action in enumerate(actions, start=1):
             context.checkpoint(
@@ -2028,6 +2533,10 @@ def _execute_skills_handler(
                     special_keys=special_keys,
                     card_wait_seconds=card_wait_seconds,
                     speedup_skills=speedup_skills,
+                    frontline_recognizer=effective_frontline_recognizer,
+                    servant_positions=servant_positions,
+                    occupied_positions=occupied_positions,
+                    party_servants=party_servants,
                 )
                 continue
             _wait_for_battle_ready(
