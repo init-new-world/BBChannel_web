@@ -6,6 +6,7 @@ import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { changeReplaceSource, inspectReplaceSource } from "./turn-replace-source.js";
+import { editUsedServantsSource, inspectTeamSource } from "./team-source.js";
 import { applyStrategySource, clearStrategySource, inspectStrategySource } from "./turn-strategies-source.js";
 import { parseJsonSource, readJsonField } from "./json-source.js";
 import { setLocale, t } from "./i18n.js";
@@ -115,6 +116,7 @@ const els = {
   presetTurnReplaceCount: document.querySelector("#preset-turn-replace-count"),
   presetTurnReplaceStatus: document.querySelector("#preset-turn-replace-status"),
   presetTurnReplaceInputs: [...document.querySelectorAll("[data-turn-replace-slot]")],
+  autoCalculateTurnReplace: document.querySelector("#auto-calculate-turn-replace"),
   clearTurnReplace: document.querySelector("#clear-turn-replace"),
   presetSkillInputs: [...document.querySelectorAll("[data-assist-skill-index]")],
   presetStrategyRules: document.querySelector("#preset-strategy-rules"),
@@ -504,6 +506,7 @@ function bindEvents() {
   els.presetTurnNpInputs.forEach((input) => input.addEventListener("change", updateTurnNps));
   els.clearTurnNps.addEventListener("click", () => updateTurnNps(null));
   els.presetTurnReplaceInputs.forEach((input) => input.addEventListener("change", updateTurnReplace));
+  els.autoCalculateTurnReplace?.addEventListener("click", autoCalculateTurnReplace);
   els.clearTurnReplace.addEventListener("click", () => updateTurnReplace(null));
   els.presetStrategyEntry.addEventListener("change", () => {
     if (state.presetEditor?.kind === "strategies") {
@@ -2374,6 +2377,7 @@ function renderPresetTurnReplace(config, target) {
   els.presetTurnReplaceStatus.hidden = true;
   els.presetTurnReplaceStatus.textContent = "";
   els.presetTurnReplaceCount.textContent = "";
+  if (els.autoCalculateTurnReplace) els.autoCalculateTurnReplace.disabled = true;
   els.clearTurnReplace.disabled = true;
   if (!field || !config) {
     els.presetTurnReplaceInputs.forEach((input) => { input.disabled = true; });
@@ -2384,6 +2388,7 @@ function renderPresetTurnReplace(config, target) {
     const info = inspectReplaceSource(els.presetJson.value, target);
     els.clearTurnReplace.disabled = !info.canClear;
     if (info.error) throw new Error(info.error);
+    if (els.autoCalculateTurnReplace) els.autoCalculateTurnReplace.disabled = false;
     const replacements = info.replacements;
     els.presetTurnReplaceCount.textContent = String(Object.keys(replacements).length);
     els.presetTurnReplaceInputs.forEach((input) => {
@@ -2404,6 +2409,56 @@ function renderPresetTurnReplace(config, target) {
     els.presetTurnReplaceInputs.forEach((input) => { input.disabled = true; input.value = ""; });
     els.presetTurnReplaceStatus.textContent = t(error.message);
     els.presetTurnReplaceStatus.hidden = false;
+  }
+}
+
+async function autoCalculateTurnReplace() {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "settings" || editor.saving || editor.strategyApplyBusy
+      || els.autoCalculateTurnReplace?.disabled || els.presetScriptStrategy.disabled) return;
+  try {
+    const { config, field: target } = readScriptStrategyTarget();
+    const match = /^round([0-9]+)_turn([0-9]+)_strategy$/.exec(target);
+    if (!match) return;
+    editableScriptWaves(config);
+    const info = inspectReplaceSource(els.presetJson.value, target);
+    if (info.error) throw new Error(info.error);
+    const sourceJson = els.presetJson.value;
+    editor.strategyApplyBusy = true;
+    renderPresetScriptStrategy();
+    const result = await api("/api/settings/calculate-turn-replace", {
+      method: "POST",
+      body: JSON.stringify({
+        source: sourceJson,
+        target_round: Number(match[1]),
+        target_turn: Number(match[2]),
+      }),
+    });
+    if (state.presetEditor !== editor) return;
+    if (els.presetJson.value !== sourceJson) throw new Error("Script changed while calculating replacements. Try again.");
+    if (editor.strategyTarget !== target) throw new Error("Script turn changed while calculating replacements. Try again.");
+    let nextSource = changeReplaceSource(sourceJson, target, {
+      type: "replace",
+      replacements: result.replacements || {},
+    });
+    if (Array.isArray(result.used_servants)) {
+      const teamInfo = inspectTeamSource(nextSource);
+      if (teamInfo.used.valid && !teamInfo.ambiguous.includes("usedServant")) {
+        for (const slot of result.used_servants) {
+          if (!teamInfo.used.slots.includes(slot)) {
+            nextSource = editUsedServantsSource(nextSource, slot, true);
+          }
+        }
+      }
+    }
+    els.presetJson.value = nextSource;
+    setPresetError("");
+  } catch (error) {
+    if (state.presetEditor === editor) setPresetError(t(error.message));
+  } finally {
+    editor.strategyApplyBusy = false;
+    if (state.presetEditor === editor) renderPresetScriptStrategy();
+    updatePresetSaveState();
   }
 }
 

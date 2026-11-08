@@ -574,6 +574,8 @@ const zh = {
   "Unchanged": "保持不变",
   "Empty": "置空",
   "From Slot {slot}": "来自第 {slot} 位",
+  "Auto-Calculate": "自动推算",
+  "Auto-calculate post-turn replacements from sacrifices and Order Change": "根据献祭宝具、退场技能与换人自动推算回合末从者替换",
   "Clear post-turn replacements": "清空回合末从者替换",
   "Clear post-turn replacements for this turn?": "确定清空当前回合的回合末从者替换吗？",
   "Invalid replacement mapping.": "从者替换配置无效。",

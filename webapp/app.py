@@ -156,6 +156,23 @@ class SaveSettingRequest(BaseModel):
         return self
 
 
+class CalculateTurnReplaceRequest(BaseModel):
+    config: dict | None = None
+    source: StrictStr | None = Field(default=None, min_length=1)
+    target_round: StrictInt | None = Field(default=None, ge=1)
+    target_turn: StrictInt | None = Field(default=None, ge=0)
+    death_slots: list[StrictInt] | dict[str, list[StrictInt]] | None = None
+    will_nums: list[StrictInt] | dict[str, StrictInt] | None = None
+
+    @model_validator(mode="after")
+    def require_one_payload(self) -> CalculateTurnReplaceRequest:
+        if (self.config is None) == (self.source is None):
+            raise ValueError("Supply exactly one of config or source.")
+        if (self.target_round is None) != (self.target_turn is None):
+            raise ValueError("Supply both target_round and target_turn together.")
+        return self
+
+
 class SaveStrategyRequest(BaseModel):
     entries: list[dict] | None = None
     source: StrictStr | None = Field(default=None, min_length=1)
@@ -928,6 +945,17 @@ def create_app(
     @app.get("/api/settings")
     def settings() -> dict[str, list[dict[str, str]]]:
         return {"settings": script_data.list_settings()}
+
+    @app.post("/api/settings/calculate-turn-replace")
+    def calculate_turn_replace(request: CalculateTurnReplaceRequest) -> dict:
+        return script_data.calculate_setting_turn_replacements(
+            config=request.config,
+            source=request.source,
+            target_round=request.target_round,
+            target_turn=request.target_turn,
+            death_slots=request.death_slots,
+            will_nums=request.will_nums,
+        )
 
     @app.get("/api/settings/{name}")
     def setting_detail(name: str) -> dict:

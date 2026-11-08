@@ -58,6 +58,24 @@ export function inspectReplaceSource(source, target) {
 export function changeReplaceSource(source, target, edit) {
   const entry = readJsonField(source, replaceField(target), "Ambiguous replacement field.");
   if (edit?.type === "clear") return entry.replace({});
+  if (edit?.type === "replace") {
+    replacements(source, entry);
+    const next = edit.replacements;
+    if (!next || typeof next !== "object" || Array.isArray(next)) {
+      throw new Error("Invalid replacement edit.");
+    }
+    for (const [slot, sourceSlot] of Object.entries(next)) {
+      if (!SLOTS.includes(slot)) throw new Error("Invalid replacement edit.");
+      if (sourceSlot !== null && (!Number.isInteger(sourceSlot) || sourceSlot < 1 || sourceSlot > 6)) {
+        throw new Error("Invalid replacement edit.");
+      }
+    }
+    const ordered = {};
+    for (const key of SLOTS) {
+      if (Object.hasOwn(next, key)) ordered[key] = next[key];
+    }
+    return entry.replace(ordered);
+  }
   if (edit?.type !== "set") throw new Error("Invalid replacement edit.");
   const map = replacements(source, entry);
   const slot = typeof edit.slot === "number" && Number.isInteger(edit.slot) ? String(edit.slot) : edit.slot;

@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
 
+from fastapi.testclient import TestClient
 import pytest
 
+from webapp.app import create_app
 from webapp.core.errors import AppError, ErrorCode
 from webapp.services.script_data import ScriptDataService
 
@@ -778,4 +780,171 @@ def test_setting_validation_rejects_invalid_turn_replace(tmp_path: Path, replace
     assert excinfo.value.code == ErrorCode.DATA_FILE_INVALID
     errors = excinfo.value.details["validation"]["errors"]
     assert any(issue["code"] == "invalid_turn_replace" for issue in errors)
+
+
+def test_calculate_turn_replacements_arash_chen_gong_and_miss_crane(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {
+            "阿拉什": {"SN": "16", "class": "Archer", "other_name": ["大英雄"]},
+            "陈宫": {"SN": "263", "class": "Caster", "other_name": []},
+            "鹤小姐": {"SN": "308", "class": "Caster", "other_name": []},
+            "阿尔托莉雅·卡斯特": {"SN": "284", "class": "Caster", "other_name": ["C呆"]},
+            "奥伯龙": {"SN": "316", "class": "Pretender", "other_name": []},
+            "诸葛孔明〔埃尔梅罗Ⅱ世〕": {"SN": "37", "class": "Caster", "other_name": ["孔明"]},
+        },
+    )
+    service = ScriptDataService(tmp_path)
+    config = {
+        "server": "CH",
+        "servant_0_name": "大英雄",
+        "servant_1_name": "陈宫",
+        "servant_2_name": "鹤小姐",
+        "servant_3_name": "C呆",
+        "servant_4_name": "奥伯龙",
+        "servant_5_name": "孔明",
+        "assistIdx": 3,
+        "round1_turns": 1,
+        "round1_turn0_skill": [],
+        "round1_turn0_np": [1],
+        "round2_turns": 1,
+        "round2_turn0_skill": [],
+        "round2_turn0_np": [3, 2],
+    }
+
+    r1 = service.calculate_turn_replacements(
+        {k: v for k, v in config.items() if not k.startswith("round2_")},
+        target_round=1,
+        target_turn=0,
+    )
+    assert r1["target_field"] == "round1_turn0_replace"
+    assert r1["replacements"] == {"1": 4, "4": 5, "5": 6, "6": None}
+    assert r1["used_servants"] == [0, 1, 2]
+
+    r2 = service.calculate_turn_replacements(config, target_round=2, target_turn=0)
+    assert r2["target_field"] == "round2_turn0_replace"
+    # On W2T0:
+    # Party entering W2T0 has slots [4(C呆), 2(陈宫), 3(鹤小姐), 5(奥伯龙), 6(孔明), None].
+    # NP [3, 2]:
+    # - 3 (鹤小姐) retreats to backline -> sacrifice_lst=[3], replace_lst=[4], resurrection_lst=[3]
+    # - 2 (陈宫) sacrifices slot 1 -> sacrifice_lst=[3, 1], replace_lst=[4, 5]
+    # Deal with death:
+    # - Slot 3 (resurrection) gets slot 4 (奥伯龙); slot 1 (permanent sacrifice) gets slot 5 (孔明);
+    # - Slot 3 (鹤小姐) moves to backline slot 4, slot 5 becomes None.
+    assert r2["replacements"] == {"1": 5, "3": 4, "4": 3, "5": None}
+    assert r2["used_servants"] == [0, 1, 2, 4, 5]
+
+
+def test_calculate_turn_replacements_tutankhamun_chloe_habetrot_guts_and_swap(tmp_path: Path):
+    _write_json(
+        tmp_path / "servant_info_CH.json",
+        {
+            "图坦卡蒙": {"SN": "425", "class": "Archer", "other_name": []},
+            "克洛伊·冯·爱因兹贝伦(Avenger)": {"SN": "388", "class": "Avenger", "other_name": ["水小黑"]},
+            "哈贝特洛特": {"SN": "317", "class": "Rider", "other_name": ["哈贝喵"]},
+            "奥伯龙": {"SN": "316", "class": "Pretender", "other_name": []},
+            "杀生院祈荒": {"SN": "167", "class": "Alterego", "other_name": []},
+        },
+    )
+    service = ScriptDataService(tmp_path)
+
+    # Tutankhamun using S3 (skill 3) before NP does NOT sacrifice at NP end of turn;
+    # Summer Chloe S2 (skill [5, 1]) retreats to backline;
+    # Habetrot S3 (skill [9, 1]) sacrifices herself.
+    config = {
+        "server": "CH",
+        "servant_0_name": "图坦卡蒙",
+        "servant_1_name": "水小黑",
+        "servant_2_name": "哈贝喵",
+        "servant_3_name": "奥伯龙",
+        "servant_4_name": "杀生院祈荒",
+        "servant_5_name": "",
+        "assistIdx": 3,
+        "round1_turns": 1,
+        "round1_turn0_skill": [3, [5, 1], [9, 1]],
+        "round1_turn0_np": [1],
+    }
+    res = service.calculate_turn_replacements(config, target_round=1, target_turn=0)
+    # Slot 1 (Tutankhamun) stays alive because S3 (skill 3) was used;
+    # Slot 2 (Summer Chloe) retreats and swaps with Slot 4 (Oberon);
+    # Slot 3 (Habetrot) sacrifices and is replaced by Slot 5 (Kiara);
+    # Summer Chloe moves to backline Slot 4, Slot 5 becomes None.
+    assert res["replacements"] == {"2": 4, "3": 5, "4": 2, "5": None}
+    assert res["used_servants"] == [0, 1, 2, 4]
+
+    # With Guts on Habetrot (slot 2 -> index 2), Habetrot survives S3, and if Tutankhamun does NOT use S3, he sacrifices.
+    config_no_s3 = {
+        **config,
+        "round1_turn0_skill": [[12, 1, 5], [9, 1]],
+        "round1_turn0_np": [1],
+    }
+    res_guts = service.calculate_turn_replacements(
+        config_no_s3,
+        target_round=1,
+        target_turn=0,
+        will_nums=[0, 0, 1, 0, 0, 0],
+        death_slots=[2],
+    )
+    # [12, 1, 5] swapped slot 1 (0) and slot 5 (4), so both 0 and 4 are in used_servants;
+    # Slot 2 had manual death_slots=[2], replaced by slot 4 (Oberon);
+    # Slot 3 (Habetrot) consumed 1 Guts and survived!
+    assert res_guts["replacements"] == {"2": 4, "4": 5, "5": None}
+    assert res_guts["used_servants"] == [0, 1, 2, 4]
+
+
+def test_calculate_turn_replacements_endpoint_and_chen_gong_error(tmp_path: Path):
+    assets_dir = tmp_path / "assets"
+    data_dir = tmp_path / "data"
+    assets_dir.mkdir()
+    _write_json(
+        data_dir / "servant_info_CH.json",
+        {
+            "陈宫": {"SN": "263", "class": "Caster", "other_name": []},
+            "奥伯龙": {"SN": "316", "class": "Pretender", "other_name": []},
+        },
+    )
+    client = TestClient(create_app(assets_dir=assets_dir, data_dir=data_dir))
+
+    # Chen Gong alone on frontline raises 400 data_file_invalid
+    bad_response = client.post(
+        "/api/settings/calculate-turn-replace",
+        json={
+            "config": {
+                "server": "CH",
+                "servant_0_name": "陈宫",
+                "round1_turns": 1,
+                "round1_turn0_np": [1],
+            },
+            "target_round": 1,
+            "target_turn": 0,
+        },
+    )
+    assert bad_response.status_code == 400
+    assert bad_response.json()["error"]["code"] == "data_file_invalid"
+
+    # Valid Chen Gong sacrifice with ally in slot 2 and backline in slot 4
+    ok_response = client.post(
+        "/api/settings/calculate-turn-replace",
+        json={
+            "source": json.dumps(
+                {
+                    "server": "CH",
+                    "servant_0_name": "陈宫",
+                    "servant_1_name": "奥伯龙",
+                    "servant_3_name": "奥伯龙",
+                    "assistIdx": 3,
+                    "round1_turns": 1,
+                    "round1_turn0_np": [1],
+                }
+            ),
+            "target_round": 1,
+            "target_turn": 0,
+        },
+    )
+    assert ok_response.status_code == 200
+    payload = ok_response.json()
+    assert payload["target_field"] == "round1_turn0_replace"
+    assert payload["replacements"] == {"2": 4, "4": None}
+    assert payload["used_servants"] == [0, 1]
+
 

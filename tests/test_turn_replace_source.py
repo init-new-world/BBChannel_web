@@ -39,6 +39,7 @@ def _run(action, source, field="round1_turn0_strategy", edit=None):
         ({"type": "set", "slot": "1", "sourceSlot": 5}, {"1": 5, "4": None}),
         ({"type": "set", "slot": "4", "sourceSlot": ""}, {"1": 4}),
         ({"type": "set", "slot": "5", "sourceSlot": None}, {"1": 4, "4": None, "5": None}),
+        ({"type": "replace", "replacements": {"4": 5, "1": 4, "5": None}}, {"1": 4, "4": 5, "5": None}),
         ({"type": "clear"}, {}),
     ],
 )

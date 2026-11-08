@@ -269,6 +269,272 @@ class ScriptDataService:
     def save_strategy_source(self, name: str, source: str, *, overwrite: bool = False) -> dict[str, Any]:
         return self.save_strategy(name, self._preset_source_value(source, list), overwrite=overwrite)
 
+    def calculate_setting_turn_replacements(
+        self,
+        *,
+        config: dict[str, Any] | None = None,
+        source: str | None = None,
+        target_round: int | None = None,
+        target_turn: int | None = None,
+        death_slots: list[int] | dict[str, list[int]] | None = None,
+        will_nums: list[int] | dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        if source is not None:
+            resolved_config = self._preset_source_value(source, dict)
+        elif isinstance(config, dict):
+            resolved_config = config
+        else:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Setting configuration must be a JSON object.",
+            )
+        return self.calculate_turn_replacements(
+            resolved_config,
+            target_round=target_round,
+            target_turn=target_turn,
+            death_slots=death_slots,
+            will_nums=will_nums,
+        )
+
+    def calculate_turn_replacements(
+        self,
+        config: dict[str, Any],
+        *,
+        target_round: int | None = None,
+        target_turn: int | None = None,
+        death_slots: list[int] | dict[str, list[int]] | None = None,
+        will_nums: list[int] | dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(config, dict):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Setting configuration must be a JSON object.",
+            )
+        if (target_round is None) != (target_turn is None):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Both target_round and target_turn must be supplied together.",
+            )
+        if target_round is not None and (
+            isinstance(target_round, bool)
+            or not isinstance(target_round, int)
+            or target_round < 1
+        ):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "target_round must be a positive integer.",
+            )
+        if target_turn is not None and (
+            isinstance(target_turn, bool)
+            or not isinstance(target_turn, int)
+            or target_turn < 0
+        ):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "target_turn must be a non-negative integer.",
+            )
+
+        catalog_by_name = self._servant_canonical_lookup(config)
+        raw_assist = config.get("assistIdx")
+        assist_idx = (
+            raw_assist
+            if isinstance(raw_assist, int)
+            and not isinstance(raw_assist, bool)
+            and 0 <= raw_assist < 6
+            else None
+        )
+        initial_will = self._normalize_will_nums(will_nums)
+        party: list[dict[str, Any]] = []
+        for slot in range(6):
+            raw_name = config.get(f"servant_{slot}_name")
+            name = raw_name if isinstance(raw_name, str) and raw_name else None
+            canonical_name = catalog_by_name.get(name, name) if name else None
+            exists = bool(name) or (slot == assist_idx)
+            party.append(
+                {
+                    "initial_slot": slot,
+                    "name": name,
+                    "canonical_name": canonical_name,
+                    "exists": exists,
+                    "will_num": initial_will[slot],
+                }
+            )
+
+        used_initial_slots: set[int] = {
+            slot
+            for slot in range(3)
+            if party[slot]["exists"] and slot != assist_idx
+        }
+
+        turn_pairs: list[tuple[int, int]] = []
+        for round_num in self._round_numbers(config):
+            count = self._turn_count(config, round_num)
+            for turn_num in range(count):
+                turn_pairs.append((round_num, turn_num))
+        if (
+            target_round is not None
+            and target_turn is not None
+            and (target_round, target_turn) not in turn_pairs
+        ):
+            turn_pairs.append((target_round, target_turn))
+            turn_pairs.sort()
+
+        turn_replacements: dict[str, dict[str, int | None]] = {}
+        target_party_after: list[dict[str, Any]] | None = None
+
+        for round_num, turn_num in turn_pairs:
+            turn_key = f"round{round_num}_turn{turn_num}"
+            replace_key = f"{turn_key}_replace"
+            for front_idx in range(3):
+                if (
+                    party[front_idx]["exists"]
+                    and party[front_idx]["initial_slot"] != assist_idx
+                ):
+                    used_initial_slots.add(party[front_idx]["initial_slot"])
+
+            skills = self._list_value(config.get(f"{turn_key}_skill"))
+            nps = self._list_value(config.get(f"{turn_key}_np"))
+
+            in_condition = False
+            for skill in skills:
+                if not isinstance(skill, list) or not skill:
+                    continue
+                if skill[0] == "Start":
+                    in_condition = True
+                    continue
+                if skill[0] == "End":
+                    in_condition = False
+                    continue
+                if (
+                    not in_condition
+                    and len(skill) == 3
+                    and skill[0] == 12
+                    and isinstance(skill[1], int)
+                    and not isinstance(skill[1], bool)
+                    and isinstance(skill[2], int)
+                    and not isinstance(skill[2], bool)
+                    and 1 <= skill[1] <= 6
+                    and 1 <= skill[2] <= 6
+                    and skill[1] != skill[2]
+                ):
+                    left_idx = skill[1] - 1
+                    right_idx = skill[2] - 1
+                    for swapped_idx in (left_idx, right_idx):
+                        if (
+                            party[swapped_idx]["exists"]
+                            and party[swapped_idx]["initial_slot"] != assist_idx
+                        ):
+                            used_initial_slots.add(party[swapped_idx]["initial_slot"])
+                    party[left_idx], party[right_idx] = party[right_idx], party[left_idx]
+
+            is_target = (
+                target_round is not None
+                and target_turn is not None
+                and (round_num, turn_num) == (target_round, target_turn)
+            )
+            is_before_target = (
+                target_round is not None
+                and target_turn is not None
+                and (round_num, turn_num) < (target_round, target_turn)
+            )
+            is_after_target = (
+                target_round is not None
+                and target_turn is not None
+                and (round_num, turn_num) > (target_round, target_turn)
+            )
+            turn_deaths = self._resolve_turn_death_slots(
+                death_slots,
+                turn_key=turn_key,
+                round_num=round_num,
+                turn_num=turn_num,
+                is_target=is_target,
+                has_explicit_target=target_round is not None,
+                is_last_turn=(
+                    bool(turn_pairs) and (round_num, turn_num) == turn_pairs[-1]
+                ),
+            )
+
+            existing_replace = config.get(replace_key)
+            has_existing_replace = (
+                isinstance(existing_replace, dict)
+                and bool(existing_replace)
+                and not self._validate_turn_replace(existing_replace, replace_key)
+            )
+
+            try:
+                death_info = self._check_turn_death(
+                    party=party,
+                    skills=skills,
+                    nps=nps,
+                    death_slots=turn_deaths,
+                )
+            except AppError:
+                if (is_before_target and has_existing_replace) or is_after_target:
+                    death_info = None
+                else:
+                    raise
+
+            calculated_record = (
+                self._deal_with_turn_death(party, *death_info)
+                if death_info is not None
+                else {}
+            )
+            effective_record = (
+                {
+                    str(dest): src
+                    for dest, src in existing_replace.items()
+                }
+                if is_before_target and has_existing_replace
+                else calculated_record
+            )
+            turn_replacements[replace_key] = (
+                calculated_record if is_target or target_round is None else effective_record
+            )
+            party = self._apply_turn_replace_record(party, effective_record)
+            for front_idx in range(3):
+                if (
+                    party[front_idx]["exists"]
+                    and party[front_idx]["initial_slot"] != assist_idx
+                ):
+                    used_initial_slots.add(party[front_idx]["initial_slot"])
+
+            if is_target:
+                target_party_after = [dict(slot_state) for slot_state in party]
+
+        target_field = (
+            f"round{target_round}_turn{target_turn}_replace"
+            if target_round is not None and target_turn is not None
+            else None
+        )
+        final_party = target_party_after if target_party_after is not None else party
+        return {
+            "target_field": target_field,
+            "replacements": (
+                turn_replacements.get(target_field, {})
+                if target_field is not None
+                else turn_replacements
+            ),
+            "turn_replacements": turn_replacements,
+            "used_servants": sorted(used_initial_slots),
+            "party_after": [
+                {
+                    "slot": idx + 1,
+                    "initial_slot": (
+                        slot_state["initial_slot"] + 1
+                        if slot_state["exists"]
+                        else None
+                    ),
+                    "name": slot_state["name"] if slot_state["exists"] else None,
+                    "canonical_name": (
+                        slot_state["canonical_name"] if slot_state["exists"] else None
+                    ),
+                    "exists": bool(slot_state["exists"]),
+                    "will_num": int(slot_state["will_num"]),
+                }
+                for idx, slot_state in enumerate(final_party)
+            ],
+        }
+
     def list_servants(self, server: str) -> dict[str, Any]:
         server = self._normalize_server(server)
         catalog = self._load_servant_catalog(server)
@@ -995,6 +1261,389 @@ class ScriptDataService:
                     )
                 )
         return errors
+
+    def _servant_canonical_lookup(self, config: dict[str, Any]) -> dict[str, str]:
+        server_raw = config.get("server")
+        server = (
+            server_raw.upper()
+            if isinstance(server_raw, str) and server_raw.upper() in VALID_SERVERS
+            else "CH"
+        )
+        try:
+            catalog = self._load_servant_catalog(server)
+        except AppError:
+            return {}
+        lookup: dict[str, str] = {}
+        for canonical_name, details in catalog.items():
+            lookup[canonical_name] = canonical_name
+            if isinstance(details, dict):
+                aliases = details.get("other_name")
+                if isinstance(aliases, list):
+                    for alias in aliases:
+                        if isinstance(alias, str) and alias:
+                            lookup[alias] = canonical_name
+        return lookup
+
+    @staticmethod
+    def _normalize_will_nums(
+        will_nums: list[int] | dict[str, int] | None,
+    ) -> list[int]:
+        result = [0] * 6
+        if will_nums is None:
+            return result
+        if isinstance(will_nums, list):
+            for idx, val in enumerate(will_nums[:6]):
+                if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+                    result[idx] = val
+            return result
+        if isinstance(will_nums, dict):
+            zero_based = "0" in will_nums or 0 in will_nums
+            for key, val in will_nums.items():
+                if isinstance(val, bool) or not isinstance(val, int) or val < 0:
+                    continue
+                try:
+                    slot = int(key)
+                except (TypeError, ValueError):
+                    continue
+                index = slot if zero_based else slot - 1
+                if 0 <= index < 6:
+                    result[index] = val
+        return result
+
+    @staticmethod
+    def _resolve_turn_death_slots(
+        death_slots: list[int] | dict[str, list[int]] | None,
+        *,
+        turn_key: str,
+        round_num: int,
+        turn_num: int,
+        is_target: bool,
+        has_explicit_target: bool,
+        is_last_turn: bool,
+    ) -> set[int]:
+        if death_slots is None:
+            return set()
+        raw_list: Any = None
+        if isinstance(death_slots, list):
+            if (has_explicit_target and is_target) or (
+                not has_explicit_target and is_last_turn
+            ):
+                raw_list = death_slots
+        elif isinstance(death_slots, dict):
+            for candidate_key in (
+                turn_key,
+                f"{turn_key}_replace",
+                f"{turn_key}_strategy",
+                f"{round_num}:{turn_num}",
+            ):
+                if candidate_key in death_slots:
+                    raw_list = death_slots[candidate_key]
+                    break
+        if not isinstance(raw_list, list):
+            return set()
+        return {
+            slot
+            for slot in raw_list
+            if isinstance(slot, int)
+            and not isinstance(slot, bool)
+            and 1 <= slot <= 3
+        }
+
+    @staticmethod
+    def _check_turn_death(
+        *,
+        party: list[dict[str, Any]],
+        skills: list[Any],
+        nps: list[Any],
+        death_slots: set[int],
+    ) -> tuple[list[int], list[int], list[int]] | None:
+        sacrifice_lst: list[int] = []
+        replace_lst: list[int] = []
+        resurrection_lst: list[int] = []
+
+        def append_replace() -> None:
+            for back in range(3, 6):
+                if party[back]["exists"] and (back + 1) not in replace_lst:
+                    replace_lst.append(back + 1)
+                    break
+
+        for raw_np in nps:
+            if (
+                isinstance(raw_np, bool)
+                or not isinstance(raw_np, int)
+                or raw_np not in (1, 2, 3)
+            ):
+                continue
+            if raw_np in sacrifice_lst:
+                continue
+            np_idx = raw_np - 1
+            if not party[np_idx]["exists"]:
+                continue
+            name = party[np_idx]["canonical_name"]
+            if name == "图坦卡蒙":
+                for skill in skills[::-1]:
+                    if isinstance(skill, list):
+                        if (
+                            len(skill) == 3
+                            and skill[0] == 12
+                            and all(
+                                isinstance(item, int) and not isinstance(item, bool)
+                                for item in skill
+                            )
+                            and min(skill) == raw_np
+                        ):
+                            if party[np_idx]["will_num"] > 0:
+                                party[np_idx]["will_num"] -= 1
+                            else:
+                                sacrifice_lst.append(raw_np)
+                                append_replace()
+                            break
+                    elif (
+                        isinstance(skill, int)
+                        and not isinstance(skill, bool)
+                        and abs(skill) == 3 * raw_np
+                    ):
+                        break
+                else:
+                    if party[np_idx]["will_num"] > 0:
+                        party[np_idx]["will_num"] -= 1
+                    else:
+                        sacrifice_lst.append(raw_np)
+                        append_replace()
+            elif name in ("阿拉什", "织田信胜", "静希草十郎"):
+                if party[np_idx]["will_num"] > 0:
+                    party[np_idx]["will_num"] -= 1
+                else:
+                    sacrifice_lst.append(raw_np)
+                    append_replace()
+            elif name == "陈宫":
+                for idx in range(3):
+                    if (
+                        idx + 1 != raw_np
+                        and party[idx]["exists"]
+                        and (idx + 1) not in sacrifice_lst
+                    ):
+                        if party[idx]["will_num"] > 0:
+                            party[idx]["will_num"] -= 1
+                        else:
+                            sacrifice_lst.append(idx + 1)
+                            append_replace()
+                        break
+                else:
+                    raise AppError(
+                        ErrorCode.DATA_FILE_INVALID,
+                        "Insufficient frontline sacrifice target for Chen Gong NP.",
+                        {"servant": "陈宫", "np_slot": raw_np},
+                    )
+            elif name == "鹤小姐":
+                for idx in range(3):
+                    if (
+                        idx + 1 != raw_np
+                        and party[idx]["exists"]
+                        and (idx + 1) not in sacrifice_lst
+                    ):
+                        sacrifice_lst.append(raw_np)
+                        append_replace()
+                        resurrection_lst.append(raw_np)
+                        break
+
+        black2: list[int] = []
+        for idx in range(3):
+            if (idx + 1) in sacrifice_lst or not party[idx]["exists"]:
+                continue
+            name = party[idx]["canonical_name"]
+            if name == "克洛伊·冯·爱因兹贝伦(Avenger)":
+                need_continue = False
+                in_condition = False
+                for skill in skills[::-1]:
+                    if not isinstance(skill, list) or not skill:
+                        continue
+                    if (
+                        len(skill) == 3
+                        and skill[0] == 12
+                        and all(
+                            isinstance(item, int) and not isinstance(item, bool)
+                            for item in skill
+                        )
+                        and min(skill) == idx + 1
+                    ):
+                        break
+                    if skill[0] == "End":
+                        in_condition = True
+                        continue
+                    if skill[0] == "Start":
+                        in_condition = False
+                        continue
+                    if (
+                        isinstance(skill[0], int)
+                        and not isinstance(skill[0], bool)
+                        and abs(skill[0]) == 3 * idx + 2
+                    ):
+                        if in_condition:
+                            need_continue = True
+                            break
+                        black2.append(idx)
+                        need_continue = True
+                        break
+                if need_continue:
+                    continue
+            if party[idx]["will_num"] > 0:
+                party[idx]["will_num"] -= 1
+                continue
+            if name == "哈贝特洛特":
+                in_condition = False
+                for skill in skills[::-1]:
+                    if not isinstance(skill, list) or not skill:
+                        continue
+                    if (
+                        len(skill) == 3
+                        and skill[0] == 12
+                        and all(
+                            isinstance(item, int) and not isinstance(item, bool)
+                            for item in skill
+                        )
+                        and min(skill) == idx + 1
+                    ):
+                        break
+                    if skill[0] == "End":
+                        in_condition = True
+                        continue
+                    if skill[0] == "Start":
+                        in_condition = False
+                        continue
+                    if (
+                        isinstance(skill[0], int)
+                        and not isinstance(skill[0], bool)
+                        and abs(skill[0]) == 3 * (idx + 1)
+                    ):
+                        if in_condition:
+                            break
+                        if (
+                            len(skill) > 1
+                            and isinstance(skill[1], int)
+                            and not isinstance(skill[1], bool)
+                            and skill[1] == idx + 1
+                        ):
+                            break
+                        sacrifice_lst.append(idx + 1)
+                        append_replace()
+                        break
+
+        for idx in black2:
+            for svt in range(3):
+                if (
+                    idx != svt
+                    and party[svt]["exists"]
+                    and (svt + 1) not in sacrifice_lst
+                ):
+                    sacrifice_lst.append(idx + 1)
+                    append_replace()
+                    resurrection_lst.append(idx + 1)
+                    break
+
+        for idx in range(3):
+            if (idx + 1) in sacrifice_lst or not party[idx]["exists"]:
+                continue
+            if (idx + 1) in death_slots:
+                sacrifice_lst.append(idx + 1)
+                append_replace()
+
+        if sacrifice_lst:
+            return sacrifice_lst, replace_lst, resurrection_lst
+        return None
+
+    @staticmethod
+    def _deal_with_turn_death(
+        party: list[dict[str, Any]],
+        sacrifice_lst: list[int],
+        replace_lst: list[int],
+        resurrection_lst: list[int],
+    ) -> dict[str, int | None]:
+        permanent_sacrifices = sorted(
+            [slot for slot in sacrifice_lst if slot not in resurrection_lst]
+        )
+        replace_queue = list(replace_lst) + list(resurrection_lst)
+        emulator_lst: list[int | None] = [
+            idx + 1 if party[idx]["exists"] else None for idx in range(6)
+        ]
+        emulator_tmp = list(emulator_lst)
+
+        for left in resurrection_lst:
+            right = replace_queue.pop(0)
+            if left != right:
+                emulator_lst[left - 1] = emulator_tmp[right - 1]
+                if right > 3:
+                    emulator_lst[right - 1] = None
+
+        for left in permanent_sacrifices:
+            try:
+                right = replace_queue.pop(0)
+            except IndexError:
+                right = None
+            if right is None:
+                emulator_lst[left - 1] = None
+            else:
+                emulator_lst[left - 1] = emulator_tmp[right - 1]
+                if right > 3:
+                    emulator_lst[right - 1] = None
+
+        for i in range(3, 6):
+            if emulator_lst[i] is None:
+                for j in range(i + 1, 6):
+                    if emulator_lst[j] is not None:
+                        emulator_lst[i], emulator_lst[j] = (
+                            emulator_lst[j],
+                            emulator_lst[i],
+                        )
+                        break
+                else:
+                    break
+
+        for resurrection in replace_queue:
+            for i in range(3, 6):
+                if emulator_lst[i] is None:
+                    emulator_lst[i] = resurrection
+                    break
+
+        record: dict[str, int | None] = {}
+        for i in range(6):
+            if emulator_lst[i] == emulator_tmp[i]:
+                continue
+            if emulator_tmp[i] is not None:
+                record[str(emulator_tmp[i])] = emulator_lst[i]
+        return record
+
+    @staticmethod
+    def _apply_turn_replace_record(
+        party: list[dict[str, Any]],
+        record: dict[str, int | None],
+    ) -> list[dict[str, Any]]:
+        if not record:
+            return party
+        previous = [dict(slot_state) for slot_state in party]
+        updated = [dict(slot_state) for slot_state in party]
+        for dest_str, src_slot in record.items():
+            try:
+                dest_idx = int(dest_str) - 1
+            except (TypeError, ValueError):
+                continue
+            if not 0 <= dest_idx < 6:
+                continue
+            if (
+                isinstance(src_slot, int)
+                and not isinstance(src_slot, bool)
+                and 1 <= src_slot <= 6
+            ):
+                updated[dest_idx] = dict(previous[src_slot - 1])
+            else:
+                updated[dest_idx] = {
+                    "initial_slot": -1,
+                    "name": None,
+                    "canonical_name": None,
+                    "exists": False,
+                    "will_num": 0,
+                }
+        return updated
 
     def _validate_strategy_file(self, entries: Any) -> dict[str, Any]:
         errors: list[dict[str, str]] = []
