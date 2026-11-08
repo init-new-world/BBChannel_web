@@ -18,7 +18,10 @@ from webapp.automation.program import (
     CRAWL_TOWER_MODES,
     FACE_CARD_POINTS,
     NP_POINTS,
+    build_autonomous_skill_commands,
+    build_complex_skill_commands,
     compile_battle_program,
+    compile_skill_command,
     resolve_skill_target_point,
 )
 from webapp.automation.strategy import (
@@ -412,6 +415,146 @@ def _sync_frontline_servant_names(
     return recognized
 
 
+def _party_slot_at_frontline(
+    frontline_index: int,
+    occupied_positions: list[int | None] | None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+) -> int | None:
+    if occupied_positions is not None and 0 <= frontline_index < len(occupied_positions):
+        slot = occupied_positions[frontline_index]
+        if isinstance(slot, int) and not isinstance(slot, bool) and slot >= 0:
+            return slot
+    if servant_positions is not None and 0 <= frontline_index < len(servant_positions):
+        entry = servant_positions[frontline_index]
+        if isinstance(entry, dict):
+            slot = entry.get("slot")
+            if isinstance(slot, int) and not isinstance(slot, bool) and slot >= 0:
+                return slot
+    return None
+
+
+def _ensure_party_slot_capacity(
+    slot: int | None,
+    buff_counts: list[int] | None,
+    unopened_skills: list[set[int]] | None,
+) -> None:
+    if slot is None or slot < 0:
+        return
+    if buff_counts is not None:
+        while len(buff_counts) <= slot:
+            buff_counts.append(0)
+    if unopened_skills is not None:
+        while len(unopened_skills) <= slot:
+            unopened_skills.append(set())
+
+
+def _record_skill_buff(
+    action: dict[str, Any],
+    buff_counts: list[int] | None,
+    occupied_positions: list[int | None] | None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+) -> None:
+    if buff_counts is None:
+        return
+    source = action.get("source")
+    if not isinstance(source, dict) or source.get("type") != "skill":
+        return
+    command = source.get("command")
+    target: int | None = None
+    if (
+        isinstance(command, list)
+        and len(command) == 2
+        and isinstance(command[0], int)
+        and not isinstance(command[0], bool)
+        and 1 <= command[0] <= 12
+        and isinstance(command[1], int)
+        and not isinstance(command[1], bool)
+        and 1 <= command[1] <= 3
+    ):
+        target = command[1]
+    elif (
+        isinstance(command, list)
+        and len(command) == 4
+        and command[0] == "Kukulkan"
+        and isinstance(command[3], int)
+        and not isinstance(command[3], bool)
+        and 1 <= command[3] <= 3
+    ):
+        target = command[3]
+    if target is None:
+        return
+    slot = _party_slot_at_frontline(
+        target - 1,
+        occupied_positions,
+        servant_positions,
+    )
+    if slot is None:
+        return
+    _ensure_party_slot_capacity(slot, buff_counts, None)
+    buff_counts[slot] += 1
+
+
+def _record_np_servants(
+    selected_nps: set[int],
+    np_servants: set[int] | None,
+    occupied_positions: list[int | None] | None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+) -> None:
+    if np_servants is None:
+        return
+    for servant in selected_nps:
+        if not (1 <= servant <= 3):
+            continue
+        slot = _party_slot_at_frontline(
+            servant - 1,
+            occupied_positions,
+            servant_positions,
+        )
+        if slot is not None:
+            np_servants.add(slot)
+
+
+def _record_unopened_skill(
+    skill_number: int | None,
+    unopened_skills: list[set[int]] | None,
+    occupied_positions: list[int | None] | None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+) -> None:
+    if (
+        skill_number is None
+        or unopened_skills is None
+        or not (1 <= skill_number <= 9)
+    ):
+        return
+    slot = _party_slot_at_frontline(
+        (skill_number - 1) // 3,
+        occupied_positions,
+        servant_positions,
+    )
+    if slot is None:
+        return
+    _ensure_party_slot_capacity(slot, None, unopened_skills)
+    unopened_skills[slot].add((skill_number - 1) % 3)
+
+
+def _has_skill_availability_assets(
+    recognition: RecognitionService,
+    server: str,
+) -> bool:
+    if not isinstance(recognition, RecognitionService):
+        return False
+    normalized_server = server.upper()
+    cooldown_template = (
+        f"battle/{normalized_server}/incd.png"
+        if normalized_server == "JP"
+        else f"battle/{normalized_server}/incd1.png"
+    )
+    try:
+        return recognition._resources.resolve_template(cooldown_template).is_file()
+    except (AppError, AttributeError):
+        return False
+
+
 def _update_servant_diff_state(
     context: RunContext,
     servant_positions: list[dict[str, Any] | None],
@@ -459,6 +602,9 @@ def _is_servant_skill_unavailable(
     server: str,
     skill_number: int,
     occupied_positions: list[int | None] | None = None,
+    *,
+    unopened_skills: list[set[int]] | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
 ) -> bool:
     if not (1 <= skill_number <= 9):
         return False
@@ -469,6 +615,18 @@ def _is_servant_skill_unavailable(
         and occupied_positions[slot_index] is None
     ):
         return True
+    if unopened_skills is not None:
+        slot = _party_slot_at_frontline(
+            slot_index,
+            occupied_positions,
+            servant_positions,
+        )
+        if (
+            slot is not None
+            and 0 <= slot < len(unopened_skills)
+            and ((skill_number - 1) % 3) in unopened_skills[slot]
+        ):
+            return True
     server = server.upper()
     cooldown_template = (
         f"battle/{server}/incd.png"
@@ -1161,6 +1319,10 @@ def create_battle_execute_plan_handler(
         )
         occupied_positions: list[int | None] = list(range(6))
         servant_diff_state: dict[str, Any] = {"recorded": None, "has_diff": False}
+        buff_counts: list[int] = [0] * 6
+        np_servants: set[int] = set()
+        unopened_skills: list[set[int]] = [set() for _ in range(6)]
+        last_skill_number: int | None = None
         compiled_rounds = {
             round_plan["round"]: round_plan for round_plan in program["rounds"]
         }
@@ -1230,7 +1392,12 @@ def create_battle_execute_plan_handler(
                             timeout_seconds,
                             poll_interval,
                             reconnect_timing=tap_interval,
+                            unopened_skills=unopened_skills,
+                            occupied_positions=occupied_positions,
+                            servant_positions=servant_positions,
+                            last_skill_number=last_skill_number,
                         )
+                        last_skill_number = None
                         _sync_frontline_alive_positions(
                             context,
                             recognition,
@@ -1317,6 +1484,7 @@ def create_battle_execute_plan_handler(
                         occupied_positions=occupied_positions,
                         party_servants=party_servants,
                     )
+                    last_skill_number = None
                     continue
                 battle_screenshot = _wait_for_battle_ready(
                     context,
@@ -1327,7 +1495,12 @@ def create_battle_execute_plan_handler(
                     timeout_seconds,
                     poll_interval,
                     reconnect_timing=tap_interval,
+                    unopened_skills=unopened_skills,
+                    occupied_positions=occupied_positions,
+                    servant_positions=servant_positions,
+                    last_skill_number=last_skill_number,
                 )
+                last_skill_number = None
                 _sync_frontline_alive_positions(
                     context,
                     recognition,
@@ -1342,6 +1515,8 @@ def create_battle_execute_plan_handler(
                     program["server"],
                     target_skill_number,
                     occupied_positions,
+                    unopened_skills=unopened_skills,
+                    servant_positions=servant_positions,
                 ):
                     context.emit(
                         "skill_skipped",
@@ -1360,6 +1535,13 @@ def create_battle_execute_plan_handler(
                     tap_interval,
                     speedup_skills=speedup_skills,
                     occupied_positions=occupied_positions,
+                )
+                last_skill_number = target_skill_number
+                _record_skill_buff(
+                    action,
+                    buff_counts,
+                    occupied_positions,
+                    servant_positions,
                 )
                 state_change = action.get("state_change")
                 if state_change and state_change["type"] == "servant_exchange":
@@ -1395,7 +1577,12 @@ def create_battle_execute_plan_handler(
                 servant_positions=servant_positions,
                 occupied_positions=occupied_positions,
                 party_servants=party_servants,
+                buff_counts=buff_counts,
+                np_servants=np_servants,
+                unopened_skills=unopened_skills,
+                last_skill_number=last_skill_number,
             )
+            last_skill_number = None
             action_count += sum(
                 1 for action in turn["actions"] if action["source"].get("type") == "np"
             )
@@ -1469,6 +1656,9 @@ def create_battle_execute_plan_handler(
                         frontline_recognizer=effective_frontline_recognizer,
                         party_servants=party_servants,
                         servant_diff_state=servant_diff_state,
+                        buff_counts=buff_counts,
+                        np_servants=np_servants,
+                        unopened_skills=unopened_skills,
                     )
                     has_exchanged = exchange_state["has_exchanged"]
                     transition = _wait_for_battle_transition(
@@ -1530,6 +1720,9 @@ def create_battle_execute_plan_handler(
                     frontline_recognizer=effective_frontline_recognizer,
                     party_servants=party_servants,
                     servant_diff_state=servant_diff_state,
+                    buff_counts=buff_counts,
+                    np_servants=np_servants,
+                    unopened_skills=unopened_skills,
                 )
                 has_exchanged = exchange_state["has_exchanged"]
                 transition = _wait_for_battle_transition(
@@ -1650,6 +1843,128 @@ def _resolve_fallback_extra_turn(
     return program["rounds"][-1]["extra_turn"]
 
 
+def _party_servant_names(
+    party_servants: list[dict[str, Any]] | None,
+    servant_positions: list[dict[str, Any] | None],
+) -> list[str]:
+    names = [""] * 6
+    for source in (party_servants or [], servant_positions):
+        for entry in source:
+            if not isinstance(entry, dict):
+                continue
+            slot = entry.get("slot")
+            name = entry.get("canonical_name") or entry.get("name")
+            if (
+                isinstance(slot, int)
+                and not isinstance(slot, bool)
+                and slot >= 0
+                and isinstance(name, str)
+                and name
+            ):
+                while len(names) <= slot:
+                    names.append("")
+                names[slot] = name
+    return names
+
+
+def _resolve_free_skill_target(
+    context: RunContext,
+    device_service: DeviceService,
+    recognition: RecognitionService,
+    card_recognizer: CommandCardRecognizer | None,
+    server: str,
+    servant_positions: list[dict[str, Any] | None],
+    occupied_positions: list[int | None] | None,
+    buff_counts: list[int] | None,
+    np_servants: set[int] | None,
+    card_templates: list[str],
+    attack_template: str,
+    threshold: float,
+    timeout_seconds: float,
+    poll_interval: float,
+    tap_interval: float | _TapTiming,
+    *,
+    special_keys: list[dict[str, Any]] | None = None,
+    card_wait_seconds: float = 0.0,
+    frontline_recognizer: FrontlineServantRecognizer | None = None,
+    party_servants: list[dict[str, Any]] | None = None,
+) -> tuple[int, int]:
+    max_idx = 0
+    max_score = 0
+    for frontline_idx in range(3):
+        slot = _party_slot_at_frontline(
+            frontline_idx,
+            occupied_positions,
+            servant_positions,
+        )
+        if slot is not None and buff_counts is not None and 0 <= slot < len(buff_counts):
+            score = min(9, max(0, buff_counts[slot])) + (
+                2 if np_servants is not None and slot in np_servants else 0
+            )
+            if score > max_score:
+                max_idx = frontline_idx + 1
+                max_score = score
+    tap_count = 0
+    if max_score == 0 and card_recognizer is not None:
+        attack_x, attack_y = ATTACK_POINT
+        tap_count += _execute_steps(
+            context,
+            device_service,
+            [{"type": "tap", "role": "free_skill_probe_attack", "x": attack_x, "y": attack_y}],
+            tap_interval,
+        )
+        screenshot = _wait_for_command_cards(
+            context,
+            device_service,
+            recognition,
+            card_templates,
+            threshold,
+            timeout_seconds,
+            poll_interval,
+            reconnect_timing=tap_interval,
+            settle_seconds=card_wait_seconds,
+        )
+        recognized, screenshot, recovery_taps = _recognize_command_cards_with_recovery(
+            context,
+            device_service,
+            recognition,
+            card_recognizer,
+            screenshot,
+            server,
+            _frontline_servants(servant_positions),
+            threshold,
+            special_keys,
+            frontline_recognizer=frontline_recognizer,
+            servant_positions=servant_positions,
+            occupied_positions=occupied_positions,
+            party_servants=party_servants,
+            card_templates=card_templates,
+            attack_template=attack_template,
+            timeout_seconds=timeout_seconds,
+            poll_interval=poll_interval,
+            tap_interval=tap_interval,
+            card_wait_seconds=card_wait_seconds,
+        )
+        tap_count += recovery_taps
+        weak_servants = [
+            int(card["servant"])
+            for card in recognized.get("cards", [])
+            if card.get("affinity_score") == 1 and card.get("servant") in (1, 2, 3)
+        ]
+        if weak_servants:
+            max_idx = min(weak_servants)
+        back_x, back_y = COMMAND_CARD_BACK_POINT
+        tap_count += _execute_steps(
+            context,
+            device_service,
+            [{"type": "tap", "role": "free_skill_probe_back", "x": back_x, "y": back_y}],
+            tap_interval,
+        )
+    if max_idx == 0:
+        max_idx = 1
+    return max_idx, tap_count
+
+
 def _execute_extra_turn(
     context: RunContext,
     device_service: DeviceService,
@@ -1674,9 +1989,14 @@ def _execute_extra_turn(
     frontline_recognizer: FrontlineServantRecognizer | None = None,
     party_servants: list[dict[str, Any]] | None = None,
     servant_diff_state: dict[str, Any] | None = None,
+    buff_counts: list[int] | None = None,
+    np_servants: set[int] | None = None,
+    unopened_skills: list[set[int]] | None = None,
 ) -> int:
     tap_count = 0
     checked_frontline_names = False
+    cached_battle_screenshot: bytes | None = None
+    last_skill_number: int | None = None
 
     def sync_extra_turn_frontline(battle_screenshot: bytes) -> None:
         nonlocal checked_frontline_names
@@ -1705,6 +2025,13 @@ def _execute_extra_turn(
             party_servants,
             retry_wait_seconds=poll_interval,
         )
+        for index in range(3):
+            slot = _party_slot_at_frontline(
+                index,
+                occupied_positions,
+                servant_positions,
+            )
+            _ensure_party_slot_capacity(slot, buff_counts, unopened_skills)
         _update_servant_diff_state(
             context,
             servant_positions,
@@ -1713,11 +2040,139 @@ def _execute_extra_turn(
         )
         checked_frontline_names = True
 
+    def get_or_wait_battle_ready() -> bytes:
+        nonlocal cached_battle_screenshot, last_skill_number
+        if cached_battle_screenshot is not None:
+            shot = cached_battle_screenshot
+            cached_battle_screenshot = None
+            return shot
+        shot = _wait_for_battle_ready(
+            context,
+            device_service,
+            recognition,
+            attack_template,
+            threshold,
+            timeout_seconds,
+            poll_interval,
+            reconnect_timing=tap_interval,
+            unopened_skills=unopened_skills,
+            occupied_positions=occupied_positions,
+            servant_positions=servant_positions,
+            last_skill_number=last_skill_number,
+        )
+        last_skill_number = None
+        return shot
+
     raw_skill_actions = [
         action
         for action in turn["actions"]
         if action["source"].get("type") == "skill"
     ]
+    can_synthesize_diff_skills = (
+        servant_diff_state is not None
+        and (
+            _has_skill_availability_assets(recognition, server)
+            or bool(servant_diff_state.get("enable_free_skills"))
+        )
+        and (
+            (frontline_recognizer is not None and frontline_recognizer.has_assets())
+            or bool(servant_diff_state.get("has_diff"))
+        )
+    )
+    if can_synthesize_diff_skills:
+        cached_battle_screenshot = get_or_wait_battle_ready()
+        sync_extra_turn_frontline(cached_battle_screenshot)
+        if servant_diff_state is not None and servant_diff_state.get("has_diff"):
+            available_skills = [
+                not _is_servant_skill_unavailable(
+                    recognition,
+                    cached_battle_screenshot,
+                    server,
+                    skill_num,
+                    occupied_positions,
+                    unopened_skills=unopened_skills,
+                    servant_positions=servant_positions,
+                )
+                for skill_num in range(1, 10)
+            ]
+            party_names = _party_servant_names(party_servants, servant_positions)
+            frontline_names = [
+                (servant.get("canonical_name") or servant.get("name"))
+                if isinstance(servant, dict)
+                else None
+                for servant in servant_positions[:3]
+            ]
+            preview_free = build_autonomous_skill_commands(
+                party_names,
+                occupied_positions,
+                default_target=1,
+                available_skills=available_skills,
+                unopened_skills=unopened_skills,
+                frontline_servant_names=frontline_names,
+            )
+            if preview_free:
+                max_idx, probe_taps = _resolve_free_skill_target(
+                    context,
+                    device_service,
+                    recognition,
+                    card_recognizer,
+                    server,
+                    servant_positions,
+                    occupied_positions,
+                    buff_counts,
+                    np_servants,
+                    card_templates,
+                    attack_template,
+                    threshold,
+                    timeout_seconds,
+                    poll_interval,
+                    tap_interval,
+                    special_keys=special_keys,
+                    card_wait_seconds=card_wait_seconds,
+                    frontline_recognizer=frontline_recognizer,
+                    party_servants=party_servants,
+                )
+                tap_count += probe_taps
+                if probe_taps > 0:
+                    cached_battle_screenshot = None
+                free_commands = build_autonomous_skill_commands(
+                    party_names,
+                    occupied_positions,
+                    default_target=max_idx,
+                    available_skills=available_skills,
+                    unopened_skills=unopened_skills,
+                    frontline_servant_names=frontline_names,
+                )
+                extra_commands = [
+                    action["source"]["command"]
+                    for action in raw_skill_actions
+                    if "command" in action.get("source", {})
+                ]
+                if extra_commands:
+                    commands = build_complex_skill_commands(
+                        extra_commands,
+                        free_commands,
+                        default_target=max_idx,
+                    )
+                    mode = "complex"
+                else:
+                    commands = free_commands
+                    mode = "free"
+                raw_skill_actions = [
+                    compiled
+                    for command in commands
+                    if (compiled := compile_skill_command(command))["supported"]
+                ]
+                context.emit(
+                    "servant_diff_skills",
+                    "Synthesized extra-turn skills after frontline servant diff.",
+                    data={
+                        "mode": mode,
+                        "target": max_idx,
+                        "commands": commands,
+                    },
+                )
+
     has_exchanged = bool(exchange_state and exchange_state.get("has_exchanged"))
     skill_actions, skipped_exchange_actions = _filter_post_exchange_skill_actions(
         raw_skill_actions,
@@ -1744,16 +2199,7 @@ def _execute_extra_turn(
                     raise ValueError("Conditional skill block has no card condition.")
             battle_screenshot: bytes | None = None
             if check_np or check_cards:
-                battle_screenshot = _wait_for_battle_ready(
-                    context,
-                    device_service,
-                    recognition,
-                    attack_template,
-                    threshold,
-                    timeout_seconds,
-                    poll_interval,
-                    reconnect_timing=tap_interval,
-                )
+                battle_screenshot = get_or_wait_battle_ready()
                 sync_extra_turn_frontline(battle_screenshot)
             np_matched = True
             if check_np:
@@ -1832,17 +2278,10 @@ def _execute_extra_turn(
                 occupied_positions=occupied_positions,
                 party_servants=party_servants,
             )
+            cached_battle_screenshot = None
+            last_skill_number = None
             continue
-        battle_screenshot = _wait_for_battle_ready(
-            context,
-            device_service,
-            recognition,
-            attack_template,
-            threshold,
-            timeout_seconds,
-            poll_interval,
-            reconnect_timing=tap_interval,
-        )
+        battle_screenshot = get_or_wait_battle_ready()
         sync_extra_turn_frontline(battle_screenshot)
         target_skill_number = _servant_skill_number(action)
         if target_skill_number is not None and _is_servant_skill_unavailable(
@@ -1851,6 +2290,8 @@ def _execute_extra_turn(
             server,
             target_skill_number,
             occupied_positions,
+            unopened_skills=unopened_skills,
+            servant_positions=servant_positions,
         ):
             context.emit(
                 "skill_skipped",
@@ -1869,6 +2310,13 @@ def _execute_extra_turn(
             tap_interval,
             speedup_skills=speedup_skills,
             occupied_positions=occupied_positions,
+        )
+        last_skill_number = target_skill_number
+        _record_skill_buff(
+            action,
+            buff_counts,
+            occupied_positions,
+            servant_positions,
         )
         state_change = action.get("state_change")
         if state_change and state_change["type"] == "servant_exchange":
@@ -1901,6 +2349,11 @@ def _execute_extra_turn(
         check_servant_names=not checked_frontline_names,
         servant_diff_state=servant_diff_state,
         is_extra_turn=True,
+        buff_counts=buff_counts,
+        np_servants=np_servants,
+        unopened_skills=unopened_skills,
+        last_skill_number=last_skill_number,
+        initial_battle_screenshot=cached_battle_screenshot,
     )
     return tap_count
 
@@ -1919,17 +2372,31 @@ def _execute_command_phase(
     check_servant_names: bool = False,
     servant_diff_state: dict[str, Any] | None = None,
     is_extra_turn: bool = False,
+    buff_counts: list[int] | None = None,
+    np_servants: set[int] | None = None,
+    unopened_skills: list[set[int]] | None = None,
+    last_skill_number: int | None = None,
+    initial_battle_screenshot: bytes | None = None,
 ) -> int:
     unavailable_nps: set[int] = set()
     tap_count = 0
     attack_template = f"battle/{server}/attack.png"
     card_templates = [f"battle/{server}/{color}.png" for color in ("Arts", "Buster", "Quick")]
+    pending_skill_number = last_skill_number
     for attempt in range(4):
-        battle_screenshot = _wait_for_battle_ready(
-            context, device_service, recognition, attack_template,
-            threshold, timeout_seconds, poll_interval, reconnect_timing=tap_interval,
-            dismiss_command_cards=attempt == 0,
-        )
+        if attempt == 0 and initial_battle_screenshot is not None:
+            battle_screenshot = initial_battle_screenshot
+        else:
+            battle_screenshot = _wait_for_battle_ready(
+                context, device_service, recognition, attack_template,
+                threshold, timeout_seconds, poll_interval, reconnect_timing=tap_interval,
+                dismiss_command_cards=attempt == 0,
+                unopened_skills=unopened_skills,
+                occupied_positions=occupied_positions,
+                servant_positions=servant_positions,
+                last_skill_number=pending_skill_number,
+            )
+            pending_skill_number = None
         if attempt == 0 and check_servant_names and servant_positions is not None:
             _sync_frontline_alive_positions(
                 context,
@@ -1954,6 +2421,13 @@ def _execute_command_phase(
                 party_servants,
                 retry_wait_seconds=poll_interval,
             )
+            for index in range(3):
+                slot = _party_slot_at_frontline(
+                    index,
+                    occupied_positions,
+                    servant_positions,
+                )
+                _ensure_party_slot_capacity(slot, buff_counts, unopened_skills)
             _update_servant_diff_state(
                 context,
                 servant_positions,
@@ -1982,8 +2456,13 @@ def _execute_command_phase(
                     if is_extra_turn
                     and servant_diff_state is not None
                     and servant_diff_state.get("has_diff")
-                    else step
+                    else dict(step)
                 )
+                if effective_step.get("use_default_scoring"):
+                    if "buff_counts" not in effective_step and buff_counts is not None:
+                        effective_step["buff_counts"] = buff_counts
+                    if "np_servants" not in effective_step and np_servants is not None:
+                        effective_step["np_servants"] = np_servants
                 strategy_steps, recovery_taps, screenshot = _strategy_tap_steps_with_recovery(
                     context,
                     device_service,
@@ -2025,6 +2504,13 @@ def _execute_command_phase(
         )
         newly_blocked = blocked - unavailable_nps
         if not newly_blocked:
+            if not is_extra_turn:
+                _record_np_servants(
+                    selected_nps - unavailable_nps,
+                    np_servants,
+                    occupied_positions,
+                    servant_positions,
+                )
             return tap_count
         unavailable_nps.update(newly_blocked)
         context.emit(
@@ -2739,6 +3225,10 @@ def _wait_for_battle_ready(
     reconnect_timing: float | _TapTiming | None = None,
     *,
     dismiss_command_cards: bool = True,
+    unopened_skills: list[set[int]] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    last_skill_number: int | None = None,
 ) -> bytes:
     started = monotonic()
     attempts = 0
@@ -2783,6 +3273,10 @@ def _wait_for_battle_ready(
                 server,
                 reconnect_timing,
                 dismiss_command_cards=dismiss_command_cards,
+                unopened_skills=unopened_skills,
+                occupied_positions=occupied_positions,
+                servant_positions=servant_positions,
+                last_skill_number=last_skill_number,
             )
             and monotonic() - started < timeout_seconds
         ):
@@ -2803,6 +3297,10 @@ def _battle_popup_dismiss_if_present(
     timing: float | _TapTiming | None,
     *,
     dismiss_command_cards: bool = True,
+    unopened_skills: list[set[int]] | None = None,
+    occupied_positions: list[int | None] | None = None,
+    servant_positions: list[dict[str, Any] | None] | None = None,
+    last_skill_number: int | None = None,
 ) -> bool:
     normalized = (
         timing
@@ -2817,6 +3315,12 @@ def _battle_popup_dismiss_if_present(
         threshold=0.8,
     )
     if not_available is not None and not_available.matched:
+        _record_unopened_skill(
+            last_skill_number,
+            unopened_skills,
+            occupied_positions,
+            servant_positions,
+        )
         touch_point = randomized_touch_point(
             SKILL_NOT_AVAILABLE_CLOSE_POINT,
             size=SKILL_NOT_AVAILABLE_CLOSE_SIZE,
@@ -2828,6 +3332,7 @@ def _battle_popup_dismiss_if_present(
             "Dismissed skill-not-available prompt.",
             data={
                 "popup": "skill_not_available",
+                "skill_number": last_skill_number,
                 "operation": operation.to_dict(),
             },
         )

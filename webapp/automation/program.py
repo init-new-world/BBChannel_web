@@ -85,6 +85,9 @@ def build_autonomous_skill_commands(
     servant_positions: Sequence[int | None] | None = None,
     *,
     default_target: int = 1,
+    available_skills: Sequence[bool] | None = None,
+    unopened_skills: Sequence[set[int] | Sequence[int]] | None = None,
+    frontline_servant_names: Sequence[str | None] | None = None,
 ) -> list[Any]:
     if (
         isinstance(default_target, bool)
@@ -94,6 +97,12 @@ def build_autonomous_skill_commands(
         raise ValueError("default_target must be between 1 and 3.")
     commands: list[Any] = []
     for index in range(9):
+        if (
+            available_skills is not None
+            and index < len(available_skills)
+            and not available_skills[index]
+        ):
+            continue
         skill = index + 1
         slot_index = index // 3
         remainder = index % 3
@@ -102,15 +111,28 @@ def build_autonomous_skill_commands(
             if servant_positions is not None and slot_index < len(servant_positions)
             else slot_index
         )
-        servant_name = (
-            servant_names[servant_slot]
-            if (
-                servant_slot not in (None, -1)
-                and servant_names is not None
-                and 0 <= servant_slot < len(servant_names)
-            )
-            else ""
-        )
+        if (
+            unopened_skills is not None
+            and isinstance(servant_slot, int)
+            and not isinstance(servant_slot, bool)
+            and 0 <= servant_slot < len(unopened_skills)
+            and remainder in unopened_skills[servant_slot]
+        ):
+            continue
+        servant_name = ""
+        if (
+            frontline_servant_names is not None
+            and slot_index < len(frontline_servant_names)
+            and isinstance(frontline_servant_names[slot_index], str)
+            and frontline_servant_names[slot_index]
+        ):
+            servant_name = str(frontline_servant_names[slot_index])
+        elif (
+            servant_slot not in (None, -1)
+            and servant_names is not None
+            and 0 <= servant_slot < len(servant_names)
+        ):
+            servant_name = servant_names[servant_slot]
         if servant_name == "库库尔坎":
             if remainder == 1:
                 commands.append(["Kukulkan", skill, 1, default_target])
@@ -143,6 +165,32 @@ def build_autonomous_skill_commands(
         else:
             commands.append([skill, default_target])
     return commands
+
+
+def build_complex_skill_commands(
+    extra_skills: Sequence[Any],
+    free_skills: Sequence[Any],
+    *,
+    default_target: int = 1,
+) -> list[Any]:
+    if (
+        isinstance(default_target, bool)
+        or not isinstance(default_target, int)
+        or not 1 <= default_target <= 3
+    ):
+        raise ValueError("default_target must be between 1 and 3.")
+    commands: list[Any] = []
+    for item in extra_skills:
+        if isinstance(item, int) and not isinstance(item, bool) and 1 <= item <= 9:
+            commands.append([item, default_target])
+        else:
+            commands.append(deepcopy(item))
+    commands.extend(deepcopy(item) for item in free_skills)
+    return commands
+
+
+def compile_skill_command(command: Any) -> dict[str, Any]:
+    return _compile_skill({"type": "skill", "command": deepcopy(command)})
 
 
 def _plan_servant_names(plan: dict[str, Any]) -> list[str]:

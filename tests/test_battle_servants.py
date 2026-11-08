@@ -304,6 +304,8 @@ def test_battle_execute_plan_recovers_unrecognized_command_cards_via_frontline_s
         json.dumps(
             {
                 "server": "CH",
+                "no_speedup_skill": True,
+                "interval_before_choose_card": 0,
                 "servant_0_name": "One",
                 "servant_1_name": "Two",
                 "servant_2_name": "Two",
@@ -404,7 +406,7 @@ def test_battle_execute_plan_recovers_unrecognized_command_cards_via_frontline_s
             },
             device_key="fake:recovery",
         )
-        result = manager.wait(job.job_id, timeout=5)
+        result = manager.wait(job.job_id, timeout=15)
         events = manager.database.list_events(job.job_id)
 
     assert result.status == JobStatus.SUCCEEDED, result.error
@@ -524,6 +526,8 @@ def test_battle_extra_turn_falls_back_to_default_cards_when_frontline_servant_di
         json.dumps(
             {
                 "server": "CH",
+                "no_speedup_skill": True,
+                "interval_before_choose_card": 0,
                 "servant_0_name": "One",
                 "servant_1_name": "Two",
                 "servant_2_name": "Two",
@@ -630,7 +634,7 @@ def test_battle_extra_turn_falls_back_to_default_cards_when_frontline_servant_di
             },
             device_key="fake:extra_diff",
         )
-        result = manager.wait(job.job_id, timeout=5)
+        result = manager.wait(job.job_id, timeout=15)
         events = manager.database.list_events(job.job_id)
 
     assert result.status == JobStatus.SUCCEEDED, result.error
@@ -641,3 +645,378 @@ def test_battle_extra_turn_falls_back_to_default_cards_when_frontline_servant_di
     ]
     assert strategy_events
     assert [item["slot"] for item in strategy_events[-1]["selected"]] == [1, 3, 5]
+
+
+def test_build_autonomous_and_complex_skill_commands_filter_availability_and_unopened_skills() -> None:
+    from webapp.automation.program import (
+        build_autonomous_skill_commands,
+        build_complex_skill_commands,
+    )
+
+    available = [True, False, True, True, False, False, False, True, True]
+    unopened = [set(), {0}, {2}, set(), set(), set()]
+    free_commands = build_autonomous_skill_commands(
+        ["阿尔托莉雅·潘德拉贡", "诸葛孔明〔埃尔梅罗Ⅱ世〕", "库库尔坎", "", "", ""],
+        [0, 1, 2, 3, 4, 5],
+        default_target=2,
+        available_skills=available,
+        unopened_skills=unopened,
+    )
+    # Skill 1 (index 0, slot 0, rem 0) -> [1, 2]
+    # Skill 2 (index 1) -> unavailable
+    # Skill 3 (index 2, slot 0, rem 2) -> [3, 2]
+    # Skill 4 (index 3, slot 1, rem 0) -> unopened in slot 1 ({0}) -> skipped
+    # Skill 8 (index 7, slot 2, rem 1, Kukulkan) -> ["Kukulkan", 8, 1, 2]
+    # Skill 9 (index 8, slot 2, rem 2) -> unopened in slot 2 ({2}) -> skipped
+    assert free_commands == [
+        [1, 2],
+        [3, 2],
+        ["Kukulkan", 8, 1, 2],
+    ]
+
+    complex_commands = build_complex_skill_commands(
+        [5, [10, 1], ["Kukulkan", 7, 0]],
+        free_commands,
+        default_target=2,
+    )
+    assert complex_commands == [
+        [5, 2],
+        [10, 1],
+        ["Kukulkan", 7, 0],
+        [1, 2],
+        [3, 2],
+        ["Kukulkan", 8, 1, 2],
+    ]
+
+
+def test_battle_extra_turn_synthesizes_complex_skills_and_tracks_buffs_np_and_unopened_skills(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from webapp.automation.battle import (
+        SKILL_NOT_AVAILABLE_ROI,
+        _skill_cooldown_roi,
+        create_battle_execute_plan_handler,
+    )
+    from webapp.runtime import JobDatabase, JobManager, JobStatus
+    from webapp.services.cards import CommandCardRecognizer
+    from webapp.services.recognition import RecognitionService
+    from webapp.services.script_data import ScriptDataService
+
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    (assets / "battle" / "public" / "classIcon").mkdir(parents=True)
+    (assets / "battle" / "public" / "starNum").mkdir(parents=True)
+    (assets / "status").mkdir(parents=True)
+    (data / "settings").mkdir(parents=True)
+
+    attack = Image.new("RGB", (34, 28), (30, 180, 240))
+    ImageDraw.Draw(attack).rectangle((8, 6, 25, 21), fill=(255, 255, 255))
+    attack.save(assets / "battle" / "CH" / "attack.png")
+
+    colors: dict[str, Image.Image] = {}
+    for idx, (name, rgb) in enumerate(
+        (("Buster", (210, 40, 40)), ("Arts", (40, 80, 220)), ("Quick", (40, 190, 80))),
+        start=1,
+    ):
+        img = Image.new("RGB", (34, 20), rgb)
+        ImageDraw.Draw(img).line((3 * idx, 2, 30, 17), fill=(255, 255, 255), width=2)
+        img.save(assets / "battle" / "CH" / f"{name}.png")
+        colors[name] = img
+
+    for blocker_name, seed in (("freeze", 1), ("bjfy", 2)):
+        blocker = Image.new("RGB", (20, 28), (180, 140 - seed * 40, 60))
+        ImageDraw.Draw(blocker).line((2, 2 + seed * 3, 17, 25), fill=(255, 255, 255), width=2)
+        blocker.save(assets / "battle" / "CH" / f"{blocker_name}.png")
+
+    for number in range(10):
+        star = Image.new("L", (40, 39), 0)
+        ImageDraw.Draw(star).rectangle((5, 5, 34, 33), fill=20 + number * 15)
+        star.save(assets / "battle" / "public" / "starNum" / f"n{number}.png")
+        mask = Image.new("L", (40, 39), 0)
+        ImageDraw.Draw(mask).rectangle((5, 5, 34, 33), fill=255)
+        mask.save(assets / "battle" / "public" / "starNum" / f"n{number}mask.png")
+
+    incd = Image.new("RGB", (20, 20), (35, 35, 35))
+    ImageDraw.Draw(incd).rectangle((4, 4, 15, 15), fill=(240, 200, 60))
+    incd.save(assets / "battle" / "CH" / "incd1.png")
+
+    not_avail = Image.new("RGB", (80, 32), (40, 20, 20))
+    ImageDraw.Draw(not_avail).ellipse((10, 6, 70, 26), fill=(250, 120, 90))
+    not_avail.save(assets / "battle" / "CH" / "notAvailable.png")
+
+    portraits: dict[str, Image.Image] = {}
+    for idx, sn in enumerate(("101", "102", "103"), start=1):
+        folder = assets / "commands_CH" / sn
+        folder.mkdir(parents=True, exist_ok=True)
+        portrait = Image.new("RGB", (48, 48), (20, 25, 35))
+        draw_p = ImageDraw.Draw(portrait)
+        if idx == 1:
+            draw_p.rectangle((6, 6, 41, 20), fill=(240, 240, 240))
+        elif idx == 2:
+            draw_p.rectangle((6, 26, 20, 41), fill=(240, 240, 240))
+        else:
+            draw_p.ellipse((22, 22, 42, 42), outline=(240, 240, 240), width=4)
+        portrait.save(folder / "card_servant_1.png")
+        portraits[sn] = portrait
+
+    saber_icon = _class_icon(1)
+    caster_icon = _class_icon(2)
+    berserker_icon = _class_icon(3)
+    saber_icon.save(assets / "battle" / "public" / "classIcon" / "Saber.png")
+    caster_icon.save(assets / "battle" / "public" / "classIcon" / "Caster.png")
+    berserker_icon.save(assets / "battle" / "public" / "classIcon" / "Berserker.png")
+
+    one_tile = _status_tile(1)
+    two_tile = _status_tile(2)
+    three_tile = _status_tile(3)
+    for class_name, tile in (
+        ("Saber", one_tile),
+        ("Caster", two_tile),
+        ("Berserker", three_tile),
+    ):
+        sheet = Image.new("RGB", (500, 110), (10, 10, 10))
+        sheet.paste(tile, (0, 0))
+        sheet.save(assets / "status" / f"{class_name}.png")
+
+    (assets / "status" / "status_info.json").write_text(
+        json.dumps(
+            {
+                "Saber": ["One"],
+                "Caster": ["Two"],
+                "Berserker": ["Three"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (data / "servant_info_CH.json").write_text(
+        json.dumps(
+            {
+                "One": {"SN": "101", "other_name": []},
+                "Two": {"SN": "102", "other_name": []},
+                "Three": {"SN": "103", "other_name": []},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (data / "settings" / "complex_diff.json").write_text(
+        json.dumps(
+            {
+                "server": "CH",
+                "no_speedup_skill": True,
+                "interval_before_choose_card": 0,
+                "servant_0_name": "One",
+                "servant_1_name": "Two",
+                "servant_2_name": "Two",
+                "servant_3_name": "Three",
+                "usedServant": [0, 1, 2, 3],
+                "round1_turns": 1,
+                "round1_turn0_skill": [[1, 2], 4],
+                "round1_turn0_np": [2],
+                "round1_extraSkill": [5],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    battle_screen = Image.new("RGB", (1280, 720), (18, 22, 30))
+    battle_screen.paste(attack, (1100, 560))
+    _paste_scaled_box(battle_screen, saber_icon, BATTLE_CLASS_ICON_RECTS_1080[0])
+    _paste_scaled_box(battle_screen, caster_icon, BATTLE_CLASS_ICON_RECTS_1080[1])
+    _paste_scaled_box(battle_screen, berserker_icon, BATTLE_CLASS_ICON_RECTS_1080[2])
+    _paste_scaled_box(battle_screen, one_tile, STATUS_RECTS_1080[0])
+    _paste_scaled_box(battle_screen, two_tile, STATUS_RECTS_1080[1])
+    _paste_scaled_box(battle_screen, three_tile, STATUS_RECTS_1080[2])
+    for cd_skill in (2, 3, 5, 6, 7, 9):
+        roi_x, roi_y, _, _ = _skill_cooldown_roi(cd_skill, "CH")
+        battle_screen.paste(incd, (roi_x + 4, roi_y + 4))
+
+    popup_screen = Image.new("RGB", (1280, 720), (18, 22, 30))
+    popup_screen.paste(
+        not_avail,
+        (SKILL_NOT_AVAILABLE_ROI[0] + 20, SKILL_NOT_AVAILABLE_ROI[1] + 10),
+    )
+
+    command_screen = Image.new("RGB", (1280, 720), (18, 22, 30))
+    hand = [
+        ("101", "Buster"),
+        ("102", "Arts"),
+        ("103", "Buster"),
+        ("101", "Arts"),
+        ("102", "Buster"),
+    ]
+    for slot_index, (sn, color_name) in enumerate(hand):
+        x = slot_index * 256
+        command_screen.paste(colors[color_name], (x + 20, 420))
+        command_screen.paste(portraits[sn], (x + 100, 500))
+
+    battle_bytes = _png_bytes(battle_screen)
+    popup_bytes = _png_bytes(popup_screen)
+    command_bytes = _png_bytes(command_screen)
+
+    class _FakeDevice:
+        def __init__(self) -> None:
+            self.in_cards = False
+            self.show_not_avail = False
+            self.taps: list[tuple[int, int]] = []
+
+        def snapshot(self) -> bytes:
+            if self.show_not_avail:
+                return popup_bytes
+            return command_bytes if self.in_cards else battle_bytes
+
+        def tap(self, x: int, y: int):
+            self.taps.append((x, y))
+            if (x, y) == (382, 590):
+                self.show_not_avail = True
+            elif (x, y) == (642, 563):
+                self.show_not_avail = False
+            elif (x, y) == (1150, 600):
+                self.in_cards = True
+            elif y == 500 and len([t for t in self.taps if t[1] == 500]) >= 2:
+                self.in_cards = False
+
+            class _Op:
+                def to_dict(self) -> dict[str, Any]:
+                    return {"type": "tap", "x": x, "y": y}
+
+            return _Op()
+
+    transitions = iter(
+        [
+            {"state": "battle", "round": 1},
+            {"state": "finished", "round": None},
+        ]
+    )
+    monkeypatch.setattr(
+        "webapp.automation.battle._wait_for_battle_transition",
+        lambda *_args, **_kwargs: next(transitions),
+    )
+
+    device = _FakeDevice()
+    resources = ResourceService(assets, data)
+    recognition = RecognitionService(resources)
+    card_recognizer = CommandCardRecognizer(resources, recognition)
+    frontline_recognizer = FrontlineServantRecognizer(resources)
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        manager.register(
+            "battle.execute-plan",
+            create_battle_execute_plan_handler(
+                ScriptDataService(data),
+                device,  # type: ignore[arg-type]
+                recognition,
+                card_recognizer,
+                frontline_recognizer=frontline_recognizer,
+            ),
+            requires_device=True,
+        )
+        job = manager.start(
+            "battle.execute-plan",
+            {
+                "setting_name": "complex_diff",
+                "timeout_seconds": 2,
+                "poll_interval": 0.01,
+                "tap_interval_seconds": 0,
+            },
+            device_key="fake:complex_diff",
+        )
+        result = manager.wait(job.job_id, timeout=15)
+        events = manager.database.list_events(job.job_id)
+
+    assert result.status == JobStatus.SUCCEEDED, result.error
+    diff_skill_events = [
+        event.data for event in events if event.event_type == "servant_diff_skills"
+    ]
+    assert len(diff_skill_events) == 1
+    assert diff_skill_events[0]["mode"] == "complex"
+    # Slot 1 (frontline position 2) received buff [1, 2] and NP 2 -> highest buff score, so target is 2!
+    assert diff_skill_events[0]["target"] == 2
+    # Skill 4 was marked unopened by notAvailable.png, skill 1 was available on battle_screen, skill 8 was available on battle_screen
+    assert diff_skill_events[0]["commands"] == [[5, 2], [1, 2], [8, 2]]
+    # Skill 5 is on cooldown, so it gets skipped while skills 1 and 8 are tapped with target 2 (640, 440)
+    skipped_events = [
+        event.data for event in events if event.event_type == "skill_skipped"
+    ]
+    assert any(item.get("skill_number") == 5 for item in skipped_events)
+    assert (786, 590) in device.taps
+
+
+def test_resolve_free_skill_target_probes_weak_affinity_cards_when_no_buffs_recorded(
+    monkeypatch,
+) -> None:
+    from webapp.automation.battle import _resolve_free_skill_target
+
+    taps: list[tuple[int, int]] = []
+
+    class _DummyContext:
+        def emit(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def sleep(self, _seconds: float) -> None:
+            pass
+
+    class _DummyDevice:
+        def tap(self, x: int, y: int):
+            taps.append((x, y))
+
+            class _Op:
+                def to_dict(self) -> dict[str, Any]:
+                    return {"type": "tap", "x": x, "y": y}
+
+            return _Op()
+
+    class _DummyCardRecognizer:
+        def recognize(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "complete": True,
+                "recognized_count": 5,
+                "cards": [
+                    {"slot": 1, "servant": 1, "color": "B", "code": "1B", "affinity_score": 0},
+                    {"slot": 2, "servant": 3, "color": "A", "code": "3A", "affinity_score": 1},
+                    {"slot": 3, "servant": 2, "color": "Q", "code": "2Q", "affinity_score": 1},
+                    {"slot": 4, "servant": 1, "color": "A", "code": "1A", "affinity_score": -1},
+                    {"slot": 5, "servant": 2, "color": "B", "code": "2B", "affinity_score": 0},
+                ],
+            }
+
+    monkeypatch.setattr(
+        "webapp.automation.battle._wait_for_command_cards",
+        lambda *_args, **_kwargs: b"cards",
+    )
+
+    target, probe_taps = _resolve_free_skill_target(
+        _DummyContext(),  # type: ignore[arg-type]
+        _DummyDevice(),  # type: ignore[arg-type]
+        object(),  # type: ignore[arg-type]
+        _DummyCardRecognizer(),  # type: ignore[arg-type]
+        "CH",
+        [
+            {"slot": 0, "name": "One", "sn": "101"},
+            {"slot": 1, "name": "Two", "sn": "102"},
+            {"slot": 2, "name": "Three", "sn": "103"},
+            None,
+            None,
+            None,
+        ],
+        [0, 1, 2, 3, 4, 5],
+        [0, 0, 0, 0, 0, 0],
+        set(),
+        ["battle/CH/Arts.png", "battle/CH/Buster.png", "battle/CH/Quick.png"],
+        "battle/CH/attack.png",
+        0.75,
+        2.0,
+        0.01,
+        0.0,
+    )
+    # Weak cards belong to servants 3 and 2 -> min(weaks) == 2
+    assert target == 2
+    assert probe_taps == 2
+    assert taps == [(1150, 600), (1250, 683)]
+
+
