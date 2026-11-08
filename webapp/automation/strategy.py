@@ -20,6 +20,10 @@ class StrategySelectionError(ValueError):
     pass
 
 
+class _NoMatchingCombinationError(StrategySelectionError):
+    pass
+
+
 def select_command_cards_default(
     recognized_cards: list[dict[str, Any]],
     *,
@@ -305,6 +309,12 @@ def select_command_cards(
     *,
     preselected_nps: list[int] | None = None,
     unavailable_nps: list[int] | None = None,
+    allow_star_relaxation: bool = False,
+    fallback_to_default: bool = False,
+    frontline_servants: Sequence[dict[str, Any] | None] | None = None,
+    buff_counts: Mapping[Any, int] | Sequence[int] | None = None,
+    np_servants: set[Any] | Sequence[Any] | None = None,
+    server: str = "CH",
 ) -> list[dict[str, Any]]:
     if not strategies:
         raise StrategySelectionError("No command card strategies are configured.")
@@ -315,6 +325,7 @@ def select_command_cards(
         raise StrategySelectionError("Unavailable Noble Phantasm positions must be between 1 and 3.")
     unavailable = set(unavailable_nps or [])
     errors = []
+    relaxed_backups: list[list[dict[str, Any]]] = []
     for index, strategy in enumerate(strategies, start=1):
         try:
             return _select_strategy(
@@ -322,10 +333,74 @@ def select_command_cards(
                 recognized_cards,
                 preselected_nps or [],
                 unavailable,
+                relax_stars=False,
             )
-        except StrategySelectionError as exc:
+        except _NoMatchingCombinationError as exc:
             errors.append(f"strategy {index}: {exc}")
+            if allow_star_relaxation:
+                try:
+                    relaxed_backups.append(
+                        _select_strategy(
+                            strategy,
+                            recognized_cards,
+                            preselected_nps or [],
+                            unavailable,
+                            relax_stars=True,
+                        )
+                    )
+                except StrategySelectionError:
+                    pass
+        except StrategySelectionError as exc:
+            if not allow_star_relaxation and not fallback_to_default:
+                errors.append(f"strategy {index}: {exc}")
+            else:
+                raise
+    if allow_star_relaxation and relaxed_backups:
+        return relaxed_backups[0]
+    if fallback_to_default:
+        fallback_nps = _extract_strategy_fallback_nps(
+            strategies[-1],
+            preselected_nps or [],
+            unavailable,
+        )
+        return select_command_cards_default(
+            recognized_cards,
+            preselected_nps=fallback_nps,
+            unavailable_nps=unavailable_nps,
+            frontline_servants=frontline_servants,
+            buff_counts=buff_counts,
+            np_servants=np_servants,
+            server=server,
+        )
     raise StrategySelectionError("; ".join(errors))
+
+
+def _extract_strategy_fallback_nps(
+    strategy: dict[str, Any],
+    preselected_nps: list[int],
+    unavailable_nps: set[int],
+) -> list[int]:
+    selected: list[int] = []
+    seen: set[int] = set()
+    for servant in preselected_nps:
+        if (
+            isinstance(servant, int)
+            and not isinstance(servant, bool)
+            and 1 <= servant <= 3
+            and servant not in unavailable_nps
+            and servant not in seen
+        ):
+            selected.append(servant)
+            seen.add(servant)
+    for index in range(1, 4):
+        spec = strategy.get(f"card{index}")
+        if not isinstance(spec, dict) or spec.get("type") != 0:
+            continue
+        servant = _select_np(spec, seen, unavailable_nps)
+        if servant is not None and servant not in seen:
+            selected.append(servant)
+            seen.add(servant)
+    return selected[:3]
 
 
 def _select_strategy(
@@ -333,6 +408,8 @@ def _select_strategy(
     recognized_cards: list[dict[str, Any]],
     preselected_nps: list[int],
     unavailable_nps: set[int],
+    *,
+    relax_stars: bool = False,
 ) -> list[dict[str, Any]]:
     cards = [card for card in recognized_cards if card.get("code") and card.get("available") is not False]
     breakpoints = strategy.get("breakpoint", [False, False])
@@ -375,9 +452,21 @@ def _select_strategy(
                 slots, nps | {servant}, servants | {servant},
             )
         if card_type == 1:
-            candidates = _preferred_faces(spec, cards, slots, color_first=color_first)
+            candidates = _preferred_faces(
+                spec,
+                cards,
+                slots,
+                color_first=color_first,
+                relax_stars=relax_stars,
+            )
         elif card_type == 2:
-            candidates = _fallback_faces(spec, cards, slots, servants)
+            candidates = _fallback_faces(
+                spec,
+                cards,
+                slots,
+                servants,
+                relax_stars=relax_stars,
+            )
         else:
             raise StrategySelectionError(f"{card_name} has unsupported type {card_type}.")
         for card in candidates:
@@ -404,7 +493,8 @@ def _select_strategy(
         )
         if constrained_stars and any(card.get("stars") is None for card in cards):
             message += " Some critical star values are unknown."
-        raise StrategySelectionError(message)
+            raise StrategySelectionError(message)
+        raise _NoMatchingCombinationError(message)
     return result
 
 
@@ -444,11 +534,37 @@ def _preferred_faces(
     selected_slots: set[int],
     *,
     color_first: bool,
+    relax_stars: bool = False,
 ) -> list[dict[str, Any]]:
     preferences = spec.get("cards")
     if not isinstance(preferences, list):
         raise StrategySelectionError("Face card preferences must be a list.")
-    eligible = _eligible_cards(spec, cards, selected_slots)
+    eligible, star_backups = _partition_eligible_cards(spec, cards, selected_slots)
+    reverse_stars = bool(spec.get("more_or_less", True))
+    primary = _rank_preferred_cards(
+        preferences,
+        eligible,
+        color_first=color_first,
+        reverse_stars=reverse_stars,
+    )
+    if not relax_stars or not star_backups:
+        return primary
+    backup = _rank_preferred_cards(
+        preferences,
+        star_backups,
+        color_first=color_first,
+        reverse_stars=reverse_stars,
+    )
+    return [*primary, *backup]
+
+
+def _rank_preferred_cards(
+    preferences: list[Any],
+    eligible: list[dict[str, Any]],
+    *,
+    color_first: bool,
+    reverse_stars: bool,
+) -> list[dict[str, Any]]:
     ranked = []
     ranked_slots: set[int] = set()
     for preference_index, preference in enumerate(preferences):
@@ -461,7 +577,6 @@ def _preferred_faces(
     if color_first:
         ranked.sort(key=lambda item: (item[0], int(item[1]["slot"])))
         return [card for _preference_index, card in ranked]
-    reverse_stars = bool(spec.get("more_or_less", True))
     ranked.sort(
         key=lambda item: (
             -(item[1].get("stars") or 0) if reverse_stars else (item[1].get("stars") or 0),
@@ -477,15 +592,18 @@ def _fallback_faces(
     cards: list[dict[str, Any]],
     selected_slots: set[int],
     selected_servants: set[int],
+    *,
+    relax_stars: bool = False,
 ) -> list[dict[str, Any]]:
-    eligible = _eligible_cards(spec, cards, selected_slots)
-    return sorted(
-        eligible,
-        key=lambda card: (
-            int(card["servant_position"]) in selected_servants,
-            int(card["slot"]),
-        ),
+    eligible, star_backups = _partition_eligible_cards(spec, cards, selected_slots)
+    sort_key = lambda card: (
+        int(card["servant_position"]) in selected_servants,
+        int(card["slot"]),
     )
+    primary = sorted(eligible, key=sort_key)
+    if not relax_stars or not star_backups:
+        return primary
+    return [*primary, *sorted(star_backups, key=sort_key)]
 
 
 def _eligible_cards(
@@ -493,11 +611,21 @@ def _eligible_cards(
     cards: list[dict[str, Any]],
     selected_slots: set[int],
 ) -> list[dict[str, Any]]:
+    eligible, _star_backups = _partition_eligible_cards(spec, cards, selected_slots)
+    return eligible
+
+
+def _partition_eligible_cards(
+    spec: dict[str, Any],
+    cards: list[dict[str, Any]],
+    selected_slots: set[int],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     threshold = spec.get("criticalStar", 0)
     more_or_less = spec.get("more_or_less", True)
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
         raise StrategySelectionError("critical star threshold must be numeric.")
     eligible = []
+    star_backups = []
     for card in cards:
         slot = card.get("slot")
         if not isinstance(slot, int) or slot in selected_slots:
@@ -510,11 +638,13 @@ def _eligible_cards(
         if not isinstance(stars, (int, float)) or isinstance(stars, bool):
             continue
         if more_or_less and stars < threshold:
+            star_backups.append(card)
             continue
         if not more_or_less and stars > threshold:
+            star_backups.append(card)
             continue
         eligible.append(card)
-    return eligible
+    return eligible, star_backups
 
 
 def _face_selection(card: dict[str, Any]) -> dict[str, Any]:

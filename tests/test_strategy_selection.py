@@ -324,3 +324,159 @@ def test_default_card_selection_weights_affinity_brave_chain_buffs_and_np_color(
         {"type": "face", "slot": 4, "code": "1B", "stars": 0},
     ]
 
+
+def test_strategy_star_relaxation_prefers_later_strict_match_before_posbak():
+    cards = [
+        _card(1, "1B", 2),
+        _card(2, "2A", 6),
+        _card(3, "3Q", 0),
+        _card(4, "1A", 0),
+        _card(5, "2Q", 0),
+    ]
+    first_strategy = {
+        "card1": _spec(1, ["1B"], stars=5, more=True),
+        "card2": _spec(1, ["3Q"]),
+        "card3": _spec(1, ["1A"]),
+    }
+    second_strategy_strict = {
+        "card1": _spec(1, ["2A"], stars=5, more=True),
+        "card2": _spec(1, ["3Q"]),
+        "card3": _spec(1, ["2Q"]),
+    }
+    second_strategy_failing = {
+        "card1": _spec(1, ["2B"], stars=0, more=True),
+        "card2": _spec(1, ["3Q"]),
+        "card3": _spec(1, ["2Q"]),
+    }
+
+    # When a later strategy matches strictly, it wins over an earlier strategy's star-relaxed backup.
+    strict_win = select_command_cards(
+        [first_strategy, second_strategy_strict],
+        cards,
+        allow_star_relaxation=True,
+    )
+    assert [entry["slot"] for entry in strict_win] == [2, 3, 5]
+
+    # When all strategies fail strict matching, the first strategy's star-relaxed backup (posBak[0]) is returned.
+    relaxed_win = select_command_cards(
+        [first_strategy, second_strategy_failing],
+        cards,
+        allow_star_relaxation=True,
+    )
+    assert [entry["slot"] for entry in relaxed_win] == [1, 3, 4]
+
+
+def test_strategy_fallback_to_default_preserves_available_nps_and_scores_faces():
+    cards = [
+        {**_card(1, "1Q", 0), "affinity": "resist", "affinity_score": -1},
+        {**_card(2, "2B", 5), "affinity": "weak", "affinity_score": 1},
+        {**_card(3, "3A", 0), "affinity": "normal", "affinity_score": 0},
+        {**_card(4, "2B", 10), "affinity": "weak", "affinity_score": 1},
+        {**_card(5, "1A", 0), "affinity": "resist", "affinity_score": -1},
+    ]
+    unmatched_strategy = {
+        "card1": _spec(0, [2]),
+        "card2": _spec(1, ["3B"]),
+        "card3": _spec(1, ["3B"]),
+    }
+
+    selected = select_command_cards(
+        [unmatched_strategy],
+        cards,
+        allow_star_relaxation=True,
+        fallback_to_default=True,
+        frontline_servants=[
+            {"slot": 0, "battle_position": 1, "sn": "101", "np_color": "Q"},
+            {"slot": 1, "battle_position": 2, "sn": "102", "np_color": "B"},
+            {"slot": 2, "battle_position": 3, "sn": "103", "np_color": "A"},
+        ],
+        buff_counts={1: 2},
+        np_servants={1},
+        server="CH",
+    )
+
+    assert selected == [
+        {"type": "np", "servant": 2},
+        {"type": "face", "slot": 2, "code": "2B", "stars": 5},
+        {"type": "face", "slot": 4, "code": "2B", "stars": 10},
+    ]
+
+
+def test_battle_strategy_resolution_uses_star_relaxation_and_default_fallback():
+    from webapp.automation.battle import _resolve_strategy_tap_steps_from_recognized
+
+    class _DummyContext:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, dict]] = []
+
+        def emit(self, event_type: str, _message: str, *, data: dict | None = None) -> None:
+            self.events.append((event_type, data or {}))
+
+    recognized = {
+        "complete": True,
+        "recognized_count": 5,
+        "cards": [
+            {**_card(1, "1Q", 0), "affinity": "resist", "affinity_score": -1},
+            {**_card(2, "2B", 2), "affinity": "weak", "affinity_score": 1},
+            {**_card(3, "3A", 0), "affinity": "normal", "affinity_score": 0},
+            {**_card(4, "2B", 9), "affinity": "weak", "affinity_score": 1},
+            {**_card(5, "1A", 0), "affinity": "resist", "affinity_score": -1},
+        ],
+    }
+    servants = [
+        {"slot": 0, "battle_position": 1, "sn": "101", "np_color": "Q"},
+        {"slot": 1, "battle_position": 2, "sn": "102", "np_color": "B"},
+        {"slot": 2, "battle_position": 3, "sn": "103", "np_color": "A"},
+    ]
+
+    # 1) Strategy needs 3A with >= 5 stars (only 0 stars in hand): relaxes star threshold via posBak.
+    ctx_relax = _DummyContext()
+    steps_relax = _resolve_strategy_tap_steps_from_recognized(
+        ctx_relax,  # type: ignore[arg-type]
+        recognized,
+        {
+            "strategies": [
+                {
+                    "card1": _spec(1, ["3A"], stars=5, more=True),
+                    "card2": _spec(1, ["1A"]),
+                    "card3": _spec(1, ["1Q"]),
+                }
+            ],
+        },
+        servants=servants,
+        server="CH",
+    )
+    assert [step["role"] for step in steps_relax] == [
+        "face_card_3",
+        "face_card_5",
+        "face_card_1",
+    ]
+
+    # 2) Strategy needs 3B x2 (absent from hand) + NP 2: falls back to select_command_cards_default
+    # while keeping NP 2 and scoring the two weak 2B cards (slots 2 and 4) for a Buster Brave Chain.
+    ctx_fallback = _DummyContext()
+    steps_fallback = _resolve_strategy_tap_steps_from_recognized(
+        ctx_fallback,  # type: ignore[arg-type]
+        recognized,
+        {
+            "strategies": [
+                {
+                    "card1": _spec(0, [2]),
+                    "card2": _spec(1, ["3B"]),
+                    "card3": _spec(1, ["3B"]),
+                }
+            ],
+            "buff_counts": {1: 2},
+            "np_servants": {1},
+        },
+        servants=servants,
+        server="CH",
+    )
+    assert [step["role"] for step in steps_fallback] == [
+        "np_2",
+        "face_card_2",
+        "face_card_4",
+    ]
+
+
+

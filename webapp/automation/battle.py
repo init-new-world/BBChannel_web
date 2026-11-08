@@ -2458,11 +2458,10 @@ def _execute_command_phase(
                     and servant_diff_state.get("has_diff")
                     else dict(step)
                 )
-                if effective_step.get("use_default_scoring"):
-                    if "buff_counts" not in effective_step and buff_counts is not None:
-                        effective_step["buff_counts"] = buff_counts
-                    if "np_servants" not in effective_step and np_servants is not None:
-                        effective_step["np_servants"] = np_servants
+                if "buff_counts" not in effective_step and buff_counts is not None:
+                    effective_step["buff_counts"] = buff_counts
+                if "np_servants" not in effective_step and np_servants is not None:
+                    effective_step["np_servants"] = np_servants
                 strategy_steps, recovery_taps, screenshot = _strategy_tap_steps_with_recovery(
                     context,
                     device_service,
@@ -2789,6 +2788,12 @@ def _resolve_strategy_tap_steps_from_recognized(
             recognized["cards"],
             preselected_nps=step.get("preselected_nps", []),
             unavailable_nps=unavailable_nps,
+            allow_star_relaxation=bool(step.get("allow_star_relaxation", True)),
+            fallback_to_default=bool(step.get("fallback_to_default", True)),
+            frontline_servants=servants,
+            buff_counts=step.get("buff_counts"),
+            np_servants=step.get("np_servants"),
+            server=server,
         )
     context.emit(
         "strategy_selection",
