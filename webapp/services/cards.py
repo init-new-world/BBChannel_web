@@ -8,6 +8,10 @@ from webapp.services.resources import ResourceService
 
 CARD_SLOT_ROIS = tuple((slot * 256, 340, 256, 330) for slot in range(5))
 CARD_ORIGIN_X = (60, 444, 826, 1212, 1601)
+CARD_ASSIST_ROIS = tuple(
+    (round((left + 130) / 1.5), 390, 107, 57)
+    for left in CARD_ORIGIN_X
+)
 CARD_STATUS_ROIS = tuple(
     (round((left + 210) / 1.5), 473, 53, 60)
     for left in CARD_ORIGIN_X
@@ -84,12 +88,23 @@ class CommandCardRecognizer:
         if not 0 <= threshold <= 1:
             raise ValueError("threshold must be between 0 and 1.")
 
-        active_servants = [servant for servant in servants if servant.get("active") and servant.get("sn")]
+        active_servants = [
+            servant
+            for servant in servants
+            if servant.get("active")
+            and (servant.get("sn") or servant.get("is_assist") or servant.get("assist"))
+        ]
         if not active_servants:
-            active_servants = [servant for servant in servants if servant.get("sn")][:3]
+            active_servants = [
+                servant
+                for servant in servants
+                if servant.get("sn") or servant.get("is_assist") or servant.get("assist")
+            ][:3]
         active_servants = active_servants[:3]
 
+        assist_entry: dict[str, Any] | None = None
         servant_templates: list[tuple[int, dict[str, Any], str]] = []
+        resolved_frontline: list[tuple[int, dict[str, Any]]] = []
         for default_position, servant in enumerate(active_servants, start=1):
             position = servant.get("battle_position", default_position)
             if (
@@ -98,6 +113,15 @@ class CommandCardRecognizer:
                 or not 1 <= position <= 3
             ):
                 position = default_position
+            resolved_frontline.append((position, servant))
+            if assist_entry is None and bool(servant.get("is_assist") or servant.get("assist")):
+                assist_entry = {
+                    "position": position,
+                    "name": servant.get("name"),
+                    "sn": str(servant["sn"]) if servant.get("sn") is not None else None,
+                }
+            if not servant.get("sn"):
+                continue
             prefix = f"commands_{normalized_server}/{servant['sn']}"
             page = self._resources.template_index(prefix=prefix, limit=1000)
             for entry in page["entries"]:
@@ -105,6 +129,27 @@ class CommandCardRecognizer:
                 filename = template_path.rsplit("/", 1)[-1]
                 if filename.startswith("card_servant_") and filename != "card_servant_np.png":
                     servant_templates.append((position, servant, template_path))
+
+        duplicate_assist_servant = False
+        if assist_entry is not None:
+            for position, servant in resolved_frontline:
+                if position == assist_entry["position"]:
+                    continue
+                other_sn = str(servant["sn"]) if servant.get("sn") is not None else None
+                if (assist_entry["sn"] is not None and other_sn == assist_entry["sn"]) or (
+                    assist_entry["name"] is not None and servant.get("name") == assist_entry["name"]
+                ):
+                    duplicate_assist_servant = True
+                    break
+
+        assist_template_path = f"battle/{normalized_server}/assist.png"
+        has_assist_template = False
+        if assist_entry is not None:
+            try:
+                self._resources.resolve_template(assist_template_path)
+                has_assist_template = True
+            except Exception:
+                has_assist_template = False
 
         candidates: list[dict[str, object]] = []
         candidate_meta: list[tuple[str, int, Any]] = []
@@ -118,6 +163,17 @@ class CommandCardRecognizer:
                     "centered_mask": True,
                 })
                 candidate_meta.append(("blocked", slot_index, reason))
+            if has_assist_template and assist_entry is not None:
+                candidates.append(
+                    {
+                        "template_path": assist_template_path,
+                        "threshold": min(threshold, 0.7),
+                        "roi": CARD_ASSIST_ROIS[slot_index],
+                        "scales": CARD_TEMPLATE_SCALES,
+                        "centered_mask": True,
+                    }
+                )
+                candidate_meta.append(("assist", slot_index, assist_entry))
             for color, filename in COLOR_TEMPLATES.items():
                 candidates.append(
                     {
@@ -189,7 +245,7 @@ class CommandCardRecognizer:
 
         matches = self._recognition.match_templates(screenshot, candidates)
         grouped: list[dict[str, list[tuple[Any, Any]]]] = [
-            {"color": [], "servant": [], "star": [], "special": [], "blocked": []}
+            {"color": [], "servant": [], "assist": [], "star": [], "special": [], "blocked": []}
             for _ in CARD_SLOT_ROIS
         ]
         for meta, match in zip(candidate_meta, matches, strict=True):
@@ -199,7 +255,20 @@ class CommandCardRecognizer:
         cards = []
         for slot_index, groups in enumerate(grouped):
             color_value, color_match = _best_match(groups["color"])
-            servant_value, servant_match = _best_match(groups["servant"])
+            assist_value, assist_match = _best_match(groups["assist"])
+            if assist_match is not None:
+                servant_value, servant_match = assist_value, assist_match
+            else:
+                servant_candidates = (
+                    [
+                        item
+                        for item in groups["servant"]
+                        if item[0]["position"] != assist_entry["position"]
+                    ]
+                    if assist_entry is not None and has_assist_template and duplicate_assist_servant
+                    else groups["servant"]
+                )
+                servant_value, servant_match = _best_match(servant_candidates)
             star_value, star_match = _best_match(groups["star"])
             blocked_reason, blocked_match = _best_match(groups["blocked"])
             special_matches = [
@@ -212,6 +281,7 @@ class CommandCardRecognizer:
                 {
                     "slot": slot_index + 1,
                     "available": recognized,
+                    "is_assist": bool(assist_match is not None and blocked_match is None),
                     "blocked_reason": blocked_reason if blocked_match is not None else None,
                     "blocked_confidence": blocked_match.confidence if blocked_match is not None else None,
                     "code": (

@@ -117,6 +117,8 @@ Execution plans now expose `interval_before_operation` and `interval_after_opera
 
 ### Card Recovery
 
+Command-card recognition checks the per-card support badge (`battle/<server>/assist.png`) when the support Servant slot (`assistIdx`) is on the frontline (positions 1–3, tracked across Plugsuit order changes and post-turn replacements). Cards bearing the support badge resolve directly to the support Servant's current frontline position—including when the support slot has no configured Servant name (e.g., CE-only or any-support modes)—and when the support Servant shares an identity with another frontline Servant (such as double-support compositions), cards without the support badge exclude the support position so they resolve to the player's own copy.
+
 Command-card strategies exclude face cards with recognized action-blocking status text. If a selection containing Noble Phantasms leaves the command-card back button visible, the runner checks the selected NP cards for sealing or immobilization. Confirmed unavailable NPs are excluded when the runner returns to battle and reopens card selection. This applies to direct selection, strategies, no-chain selection, and extra turns; unavailable positions are tracked only for that turn and allow at most three recovery cycles.
 
 The runner does not infer NP availability from an unrecognized gauge. It also does not retry when the back button has disappeared or when no selected NP has a recognized blocking status. Returning to battle must be confirmed before another attack tap is sent.

@@ -889,7 +889,10 @@ def create_battle_execute_plan_handler(
         ]
         action_count = 0
         tap_count = 0
-        servant_positions = _servant_positions(plan["servants"])
+        servant_positions = _servant_positions(
+            plan["servants"],
+            assist_slot=(plan.get("assist") or {}).get("slot"),
+        )
         occupied_positions: list[int | None] = list(range(6))
         compiled_rounds = {
             round_plan["round"]: round_plan for round_plan in program["rounds"]
@@ -1667,17 +1670,36 @@ def _failed_np_selection(
         context.sleep(max(poll_interval, 0.01))
 
 
-def _servant_positions(servants: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
+def _servant_positions(
+    servants: list[dict[str, Any]],
+    *,
+    assist_slot: int | None = None,
+) -> list[dict[str, Any] | None]:
     positions: list[dict[str, Any] | None] = [None] * 6
+    valid_assist_slot = (
+        assist_slot
+        if isinstance(assist_slot, int)
+        and not isinstance(assist_slot, bool)
+        and 0 <= assist_slot < len(positions)
+        else None
+    )
     for servant in servants:
         slot = servant.get("slot")
         if (
             isinstance(slot, int)
             and not isinstance(slot, bool)
             and 0 <= slot < len(positions)
-            and servant.get("name")
         ):
-            positions[slot] = dict(servant)
+            is_assist = bool(
+                servant.get("is_assist")
+                or servant.get("assist")
+                or (valid_assist_slot is not None and slot == valid_assist_slot)
+            )
+            if servant.get("name") or is_assist:
+                entry = dict(servant)
+                if is_assist:
+                    entry["is_assist"] = True
+                positions[slot] = entry
     return positions
 
 
@@ -1977,7 +1999,10 @@ def _execute_skills_handler(
             f"battle/{program['server']}/{card_type}.png"
             for card_type in ("Arts", "Buster", "Quick")
         ]
-        servant_positions = _servant_positions(plan["servants"])
+        servant_positions = _servant_positions(
+            plan["servants"],
+            assist_slot=(plan.get("assist") or {}).get("slot"),
+        )
         tap_count = 0
         for action_number, action in enumerate(actions, start=1):
             context.checkpoint(

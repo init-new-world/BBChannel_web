@@ -4,7 +4,13 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from webapp.services.cards import CommandCardRecognizer
+from webapp.automation.battle import (
+    _apply_servant_exchange,
+    _apply_servant_replacements,
+    _frontline_servants,
+    _servant_positions,
+)
+from webapp.services.cards import CARD_ASSIST_ROIS, CommandCardRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
@@ -136,3 +142,121 @@ def test_command_card_recognizer_classifies_five_slots(tmp_path: Path, blocked, 
     )
     assert all(card["color_confidence"] >= 0.99 for card in result["cards"] if card["code"])
     assert all(card["servant_confidence"] >= 0.99 for card in result["cards"] if card["code"])
+
+
+def test_command_card_recognizer_disambiguates_duplicate_frontline_support_and_unnamed_assist(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    data.mkdir()
+
+    colors = {
+        "Buster": _pattern((34, 20), (210, 40, 40), 4),
+        "Arts": _pattern((34, 20), (40, 80, 220), 8),
+        "Quick": _pattern((34, 20), (40, 190, 80), 12),
+    }
+    for name, template in colors.items():
+        template.save(assets / "battle" / "CH" / f"{name}.png")
+    for name, color, marker in (("freeze", (220, 200, 30), 4), ("bjfy", (150, 40, 210), 11)):
+        _pattern((20, 30), color, marker).save(assets / "battle" / "CH" / f"{name}.png")
+    assist_badge = _pattern((33, 25), (245, 190, 45), 6)
+    assist_badge.save(assets / "battle" / "CH" / "assist.png")
+
+    star_directory = assets / "battle" / "public" / "starNum"
+    star_directory.mkdir(parents=True)
+    for number in range(10):
+        template = Image.new("L", (40, 39), 0)
+        draw = ImageDraw.Draw(template)
+        draw.rectangle((5, 5, 34, 33), fill=20 + number * 15)
+        draw.line((6 + number * 2, 6, 8 + number * 2, 32), fill=240, width=2)
+        template.save(star_directory / f"n{number}.png")
+        mask = Image.new("L", template.size, 0)
+        ImageDraw.Draw(mask).rectangle((5, 5, 34, 33), fill=255)
+        mask.save(star_directory / f"n{number}mask.png")
+
+    servant_templates = {}
+    for sn, color, marker in (("100", (60, 40, 160), 5), ("101", (140, 50, 120), 10)):
+        directory = assets / "commands_CH" / sn
+        directory.mkdir(parents=True)
+        template = _pattern((48, 48), color, marker)
+        template.save(directory / "card_servant_1.png")
+        servant_templates[sn] = template
+
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    # Slots 1 and 4 are own servant "100" (position 1); slots 3 and 5 are support copy of "100" (position 3).
+    slots = [
+        ("100", "Buster", False),
+        ("101", "Arts", False),
+        ("100", "Quick", True),
+        ("100", "Arts", False),
+        ("100", "Buster", True),
+    ]
+    for slot_index, (sn, color_name, is_support) in enumerate(slots):
+        x = slot_index * 256
+        screenshot.paste(colors[color_name], (x + 20, 420), colors[color_name])
+        portrait = servant_templates[sn]
+        screenshot.paste(portrait, (x + 100, 500), portrait)
+        if is_support:
+            assist_x, assist_y, _, _ = CARD_ASSIST_ROIS[slot_index]
+            screenshot.paste(assist_badge, (assist_x + 10, assist_y + 8), assist_badge)
+
+    resources = ResourceService(assets, data)
+    recognizer = CommandCardRecognizer(resources, RecognitionService(resources))
+
+    positions = _servant_positions(
+        [
+            {"slot": 0, "name": "Castoria", "active": True, "sn": "100"},
+            {"slot": 1, "name": "Attacker", "active": True, "sn": "101"},
+            {"slot": 2, "name": "Castoria", "active": True, "sn": "100"},
+            {"slot": 3, "name": "Backline", "active": False, "sn": "101"},
+        ],
+        assist_slot=2,
+    )
+    result = recognizer.recognize(
+        _png_bytes(screenshot),
+        "CH",
+        _frontline_servants(positions),
+        threshold=0.85,
+    )
+
+    assert result["complete"] is True
+    assert [card["code"] for card in result["cards"]] == ["1B", "2A", "3Q", "1A", "3B"]
+    assert [card["is_assist"] for card in result["cards"]] == [False, False, True, False, True]
+
+    # Swap support servant from position 3 to backline position 4, then bring it to position 2 via replacement.
+    _apply_servant_exchange(positions, [3, 4])
+    assert [servant.get("is_assist", False) for servant in _frontline_servants(positions)] == [
+        False,
+        False,
+        False,
+    ]
+    _apply_servant_replacements(positions, {"2": 4, "4": None})
+    assert [servant.get("is_assist", False) for servant in _frontline_servants(positions)] == [
+        False,
+        True,
+        False,
+    ]
+
+    # Even if the support slot has no configured servant name/SN (e.g. CE-only or any-support mode),
+    # cards bearing the assist badge still resolve to the support slot's frontline position.
+    unnamed_support_positions = _servant_positions(
+        [
+            {"slot": 0, "name": "Castoria", "active": True, "sn": "100"},
+            {"slot": 1, "name": "Attacker", "active": True, "sn": "101"},
+            {"slot": 2, "name": None, "active": False, "sn": None},
+        ],
+        assist_slot=2,
+    )
+    unnamed_result = recognizer.recognize(
+        _png_bytes(screenshot),
+        "CH",
+        _frontline_servants(unnamed_support_positions),
+        threshold=0.85,
+    )
+    assert unnamed_result["complete"] is True
+    assert [card["code"] for card in unnamed_result["cards"]] == ["1B", "2A", "3Q", "1A", "3B"]
+    assert [card["is_assist"] for card in unnamed_result["cards"]] == [False, False, True, False, True]
+
