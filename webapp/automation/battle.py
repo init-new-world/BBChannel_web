@@ -25,6 +25,7 @@ from webapp.automation.strategy import (
     StrategySelectionError,
     matches_card_preference,
     select_command_cards,
+    select_command_cards_default,
     select_command_cards_without_chain,
 )
 from webapp.core.errors import AppError, ErrorCode
@@ -1927,6 +1928,7 @@ def _execute_command_phase(
         battle_screenshot = _wait_for_battle_ready(
             context, device_service, recognition, attack_template,
             threshold, timeout_seconds, poll_interval, reconnect_timing=tap_interval,
+            dismiss_command_cards=attempt == 0,
         )
         if attempt == 0 and check_servant_names and servant_positions is not None:
             _sync_frontline_alive_positions(
@@ -1975,6 +1977,7 @@ def _execute_command_phase(
                             {f"card{index}": {"type": 2} for index in (1, 2, 3)}
                         ],
                         "avoid_chain": False,
+                        "use_default_scoring": True,
                     }
                     if is_extra_turn
                     and servant_diff_state is not None
@@ -2217,6 +2220,8 @@ def _strategy_tap_steps_with_recovery(
             recognized,
             step,
             unavailable_nps=unavailable_nps,
+            servants=servants,
+            server=server,
         ),
         recovery_taps,
         screenshot,
@@ -2245,6 +2250,8 @@ def _strategy_tap_steps(
         recognized,
         step,
         unavailable_nps=unavailable_nps,
+        servants=servants,
+        server=server,
     )
 
 
@@ -2254,6 +2261,8 @@ def _resolve_strategy_tap_steps_from_recognized(
     step: dict[str, Any],
     *,
     unavailable_nps: list[int] | None = None,
+    servants: list[dict[str, Any]] | None = None,
+    server: str = "CH",
 ) -> list[dict[str, Any]]:
     context.emit(
         "card_recognition",
@@ -2264,7 +2273,17 @@ def _resolve_strategy_tap_steps_from_recognized(
         raise ValueError(
             f"Recognized {recognized['recognized_count']} of 5 command cards."
         )
-    if step.get("avoid_chain"):
+    if step.get("use_default_scoring"):
+        selected = select_command_cards_default(
+            recognized["cards"],
+            preselected_nps=step.get("preselected_nps", []),
+            unavailable_nps=unavailable_nps,
+            frontline_servants=servants,
+            buff_counts=step.get("buff_counts"),
+            np_servants=step.get("np_servants"),
+            server=server,
+        )
+    elif step.get("avoid_chain"):
         preselected_nps = step.get("preselected_nps")
         if not isinstance(preselected_nps, list) or len(preselected_nps) != 1:
             raise StrategySelectionError(
@@ -2718,6 +2737,8 @@ def _wait_for_battle_ready(
     timeout_seconds: float,
     poll_interval: float,
     reconnect_timing: float | _TapTiming | None = None,
+    *,
+    dismiss_command_cards: bool = True,
 ) -> bytes:
     started = monotonic()
     attempts = 0
@@ -2761,6 +2782,7 @@ def _wait_for_battle_ready(
                 screenshot,
                 server,
                 reconnect_timing,
+                dismiss_command_cards=dismiss_command_cards,
             )
             and monotonic() - started < timeout_seconds
         ):
@@ -2779,6 +2801,8 @@ def _battle_popup_dismiss_if_present(
     screenshot: bytes,
     server: str,
     timing: float | _TapTiming | None,
+    *,
+    dismiss_command_cards: bool = True,
 ) -> bool:
     normalized = (
         timing
@@ -2842,6 +2866,8 @@ def _battle_popup_dismiss_if_present(
         if wait_after:
             context.sleep(wait_after)
         return True
+    if not dismiss_command_cards:
+        return False
     command_card_back = _match_optional_battle_template(
         recognition,
         screenshot,

@@ -5,6 +5,7 @@ import pytest
 from webapp.automation.strategy import (
     StrategySelectionError,
     select_command_cards,
+    select_command_cards_default,
     select_command_cards_without_chain,
 )
 
@@ -282,3 +283,44 @@ def test_strategy_does_not_treat_unknown_stars_as_known_zero_for_maximum_constra
     cards = [_card(1, "1B", None), _card(2, "2A", 0), _card(3, "3Q", 1)]
     strategy = {"card1": _spec(1, ["1B", "2A"], stars=0, more=False), "card2": _spec(2, []), "card3": _spec(2, [])}
     assert select_command_cards([strategy], cards)[0]["slot"] == 2
+
+
+def test_default_card_selection_weights_affinity_brave_chain_buffs_and_np_color():
+    # Case 1: Weak affinity and Buster Brave Chain outweigh resist cards.
+    cards = [
+        {**_card(1, "1Q", 0), "affinity": "resist", "affinity_score": -1},
+        {**_card(2, "2B", 8), "affinity": "weak", "affinity_score": 1},
+        {**_card(3, "1A", 0), "affinity": "resist", "affinity_score": -1},
+        {**_card(4, "2B", 5), "affinity": "weak", "affinity_score": 1},
+        {**_card(5, "2B", 10), "affinity": "weak", "affinity_score": 1},
+    ]
+    selected = select_command_cards_default(cards)
+    assert [entry["slot"] for entry in selected] == [4, 2, 5]
+
+    # Case 2: With 1 NP preselected on servant 1 (Buster NP), picking servant 1's two remaining
+    # Buster face cards triggers the same-color Buster Brave Chain bonus (1.5 * 3.5 = 5.25).
+    np_cards = [
+        _card(1, "2A", 0),
+        _card(2, "1B", 0),
+        _card(3, "3Q", 0),
+        _card(4, "1B", 0),
+        _card(5, "2Q", 0),
+    ]
+    selected_with_np = select_command_cards_default(
+        np_cards,
+        preselected_nps=[1],
+        frontline_servants=[
+            {"slot": 0, "battle_position": 1, "sn": "101", "np_color": "B"},
+            {"slot": 1, "battle_position": 2, "sn": "102", "np_color": "A"},
+            {"slot": 2, "battle_position": 3, "sn": "103", "np_color": "Q"},
+        ],
+        buff_counts={0: 3},
+        np_servants={0},
+        server="CH",
+    )
+    assert selected_with_np == [
+        {"type": "np", "servant": 1},
+        {"type": "face", "slot": 2, "code": "1B", "stars": 0},
+        {"type": "face", "slot": 4, "code": "1B", "stars": 0},
+    ]
+

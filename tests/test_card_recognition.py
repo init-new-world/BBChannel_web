@@ -10,7 +10,7 @@ from webapp.automation.battle import (
     _frontline_servants,
     _servant_positions,
 )
-from webapp.services.cards import CARD_ASSIST_ROIS, CommandCardRecognizer
+from webapp.services.cards import CARD_ASSIST_ROIS, WEAK_RESIST_ROIS, CommandCardRecognizer
 from webapp.services.recognition import RecognitionService
 from webapp.services.resources import ResourceService
 
@@ -259,4 +259,94 @@ def test_command_card_recognizer_disambiguates_duplicate_frontline_support_and_u
     assert unnamed_result["complete"] is True
     assert [card["code"] for card in unnamed_result["cards"]] == ["1B", "2A", "3Q", "1A", "3B"]
     assert [card["is_assist"] for card in unnamed_result["cards"]] == [False, False, True, False, True]
+
+
+def test_command_card_recognizer_classifies_weak_and_resist_affinities(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    data.mkdir()
+
+    colors = {
+        "Buster": _pattern((34, 20), (210, 40, 40), 4),
+        "Arts": _pattern((34, 20), (40, 80, 220), 8),
+        "Quick": _pattern((34, 20), (40, 190, 80), 12),
+    }
+    for name, template in colors.items():
+        template.save(assets / "battle" / "CH" / f"{name}.png")
+    for name, color, marker in (("freeze", (220, 200, 30), 4), ("bjfy", (150, 40, 210), 11)):
+        _pattern((20, 30), color, marker).save(assets / "battle" / "CH" / f"{name}.png")
+    weak_badge = _pattern((36, 22), (250, 75, 55), 5)
+    resist_badge = _pattern((36, 22), (70, 145, 245), 11)
+    weak_badge.save(assets / "battle" / "CH" / "weak.png")
+    resist_badge.save(assets / "battle" / "CH" / "resist.png")
+
+    star_directory = assets / "battle" / "public" / "starNum"
+    star_directory.mkdir(parents=True)
+    for number in range(10):
+        template = Image.new("L", (40, 39), 0)
+        ImageDraw.Draw(template).rectangle((5, 5, 34, 33), fill=20 + number * 15)
+        template.save(star_directory / f"n{number}.png")
+        mask = Image.new("L", template.size, 0)
+        ImageDraw.Draw(mask).rectangle((5, 5, 34, 33), fill=255)
+        mask.save(star_directory / f"n{number}mask.png")
+
+    servant_templates = {}
+    for sn, color, marker in (
+        ("100", (60, 40, 160), 5),
+        ("101", (140, 50, 120), 10),
+        ("102", (50, 160, 110), 14),
+    ):
+        directory = assets / "commands_CH" / sn
+        directory.mkdir(parents=True)
+        template = _pattern((48, 48), color, marker)
+        template.save(directory / "card_servant_1.png")
+        servant_templates[sn] = template
+
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    slots = [
+        ("100", "Buster", "weak"),
+        ("101", "Arts", "neutral"),
+        ("102", "Quick", "resist"),
+        ("100", "Arts", "weak"),
+        ("102", "Buster", "resist"),
+    ]
+    for slot_index, (sn, color_name, affinity) in enumerate(slots):
+        x = slot_index * 256
+        screenshot.paste(colors[color_name], (x + 20, 420), colors[color_name])
+        portrait = servant_templates[sn]
+        screenshot.paste(portrait, (x + 100, 500), portrait)
+        roi_x, roi_y, _, _ = WEAK_RESIST_ROIS[slot_index]
+        if affinity == "weak":
+            screenshot.paste(weak_badge, (roi_x + 12, roi_y + 20), weak_badge)
+        elif affinity == "resist":
+            screenshot.paste(resist_badge, (roi_x + 12, roi_y + 20), resist_badge)
+
+    resources = ResourceService(assets, data)
+    recognizer = CommandCardRecognizer(resources, RecognitionService(resources))
+    result = recognizer.recognize(
+        _png_bytes(screenshot),
+        "CH",
+        [
+            {"slot": 0, "name": "One", "active": True, "sn": "100"},
+            {"slot": 1, "name": "Two", "active": True, "sn": "101"},
+            {"slot": 2, "name": "Three", "active": True, "sn": "102"},
+        ],
+        threshold=0.85,
+    )
+
+    assert result["complete"] is True
+    assert [card["affinity"] for card in result["cards"]] == [
+        "weak",
+        "neutral",
+        "resist",
+        "weak",
+        "resist",
+    ]
+    assert [card["affinity_score"] for card in result["cards"]] == [1, 0, -1, 1, -1]
+    assert result["cards"][0]["affinity_confidence"] >= 0.99
+    assert result["cards"][1]["affinity_confidence"] is None
+    assert result["cards"][2]["affinity_confidence"] >= 0.99
+
 

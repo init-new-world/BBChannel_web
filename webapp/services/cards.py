@@ -12,6 +12,19 @@ CARD_ASSIST_ROIS = tuple(
     (round((left + 130) / 1.5), 390, 107, 57)
     for left in CARD_ORIGIN_X
 )
+WEAK_RESIST_ROIS = tuple(
+    (round((250 + slot * 384) / 1.5), 313, 73, 107)
+    for slot in range(5)
+)
+AFFINITY_TEMPLATES = {
+    "weak": "weak.png",
+    "resist": "resist.png",
+}
+AFFINITY_SCORES = {
+    "weak": 1,
+    "resist": -1,
+    "neutral": 0,
+}
 CARD_STATUS_ROIS = tuple(
     (round((left + 210) / 1.5), 473, 53, 60)
     for left in CARD_ORIGIN_X
@@ -151,6 +164,15 @@ class CommandCardRecognizer:
             except Exception:
                 has_assist_template = False
 
+        available_affinity_templates: dict[str, str] = {}
+        for affinity, filename in AFFINITY_TEMPLATES.items():
+            template_path = f"battle/{normalized_server}/{filename}"
+            try:
+                self._resources.resolve_template(template_path)
+                available_affinity_templates[affinity] = template_path
+            except Exception:
+                continue
+
         candidates: list[dict[str, object]] = []
         candidate_meta: list[tuple[str, int, Any]] = []
         for slot_index, roi in enumerate(CARD_SLOT_ROIS):
@@ -163,6 +185,17 @@ class CommandCardRecognizer:
                     "centered_mask": True,
                 })
                 candidate_meta.append(("blocked", slot_index, reason))
+            for affinity, template_path in available_affinity_templates.items():
+                candidates.append(
+                    {
+                        "template_path": template_path,
+                        "threshold": max(0.85, threshold),
+                        "roi": WEAK_RESIST_ROIS[slot_index],
+                        "scales": CARD_TEMPLATE_SCALES,
+                        "centered_mask": True,
+                    }
+                )
+                candidate_meta.append(("affinity", slot_index, affinity))
             if has_assist_template and assist_entry is not None:
                 candidates.append(
                     {
@@ -245,7 +278,15 @@ class CommandCardRecognizer:
 
         matches = self._recognition.match_templates(screenshot, candidates)
         grouped: list[dict[str, list[tuple[Any, Any]]]] = [
-            {"color": [], "servant": [], "assist": [], "star": [], "special": [], "blocked": []}
+            {
+                "color": [],
+                "servant": [],
+                "assist": [],
+                "star": [],
+                "special": [],
+                "blocked": [],
+                "affinity": [],
+            }
             for _ in CARD_SLOT_ROIS
         ]
         for meta, match in zip(candidate_meta, matches, strict=True):
@@ -271,6 +312,8 @@ class CommandCardRecognizer:
                 servant_value, servant_match = _best_match(servant_candidates)
             star_value, star_match = _best_match(groups["star"])
             blocked_reason, blocked_match = _best_match(groups["blocked"])
+            affinity_value, affinity_match = _best_match(groups["affinity"])
+            affinity = affinity_value if affinity_match is not None else "neutral"
             special_matches = [
                 (value, match)
                 for value, match in groups["special"]
@@ -282,6 +325,11 @@ class CommandCardRecognizer:
                     "slot": slot_index + 1,
                     "available": recognized,
                     "is_assist": bool(assist_match is not None and blocked_match is None),
+                    "affinity": affinity,
+                    "affinity_score": AFFINITY_SCORES[affinity],
+                    "affinity_confidence": (
+                        affinity_match.confidence if affinity_match is not None else None
+                    ),
                     "blocked_reason": blocked_reason if blocked_match is not None else None,
                     "blocked_confidence": blocked_match.confidence if blocked_match is not None else None,
                     "code": (

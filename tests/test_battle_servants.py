@@ -636,3 +636,8 @@ def test_battle_extra_turn_falls_back_to_default_cards_when_frontline_servant_di
     assert result.status == JobStatus.SUCCEEDED, result.error
     event_types = [event.event_type for event in events]
     assert "servant_diff" in event_types
+    strategy_events = [
+        event.data for event in events if event.event_type == "strategy_selection"
+    ]
+    assert strategy_events
+    assert [item["slot"] for item in strategy_events[-1]["selected"]] == [1, 3, 5]

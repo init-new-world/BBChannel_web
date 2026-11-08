@@ -1,10 +1,259 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from itertools import permutations
 from typing import Any
+
+
+COLOR_FACTOR = {"B": 1.5, "A": 1.0, "Q": 0.8}
+WEAK_FACTOR = {0: 1.0, 1: 2.0, -1: 0.5}
+PLACE_FACTOR: dict[str, tuple[float, float, float]] = {
+    "B": (1.5, 1.8, 2.1),
+    "A": (1.0, 1.2, 1.4),
+    "Q": (0.8, 0.96, 1.12),
+    "N": (0.0, 0.0, 0.0),
+}
+EX_FACTOR = {False: 2.0, True: 3.5}
 
 
 class StrategySelectionError(ValueError):
     pass
+
+
+def select_command_cards_default(
+    recognized_cards: list[dict[str, Any]],
+    *,
+    preselected_nps: list[int] | None = None,
+    unavailable_nps: list[int] | None = None,
+    frontline_servants: Sequence[dict[str, Any] | None] | None = None,
+    buff_counts: Mapping[Any, int] | Sequence[int] | None = None,
+    np_servants: set[Any] | Sequence[Any] | None = None,
+    server: str = "CH",
+) -> list[dict[str, Any]]:
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3
+        for value in unavailable_nps or []
+    ):
+        raise StrategySelectionError(
+            "Unavailable Noble Phantasm positions must be between 1 and 3."
+        )
+    unavailable = set(unavailable_nps or [])
+    selected_np_positions = [
+        servant
+        for servant in preselected_nps or []
+        if isinstance(servant, int) and not isinstance(servant, bool) and 1 <= servant <= 3
+    ]
+    if len(set(selected_np_positions)) != len(selected_np_positions):
+        raise StrategySelectionError(
+            "Preselected Noble Phantasms must not contain duplicates."
+        )
+    selected_np_positions = [
+        servant for servant in selected_np_positions if servant not in unavailable
+    ][:3]
+    selected_np_entries = [
+        {"type": "np", "servant": servant} for servant in selected_np_positions
+    ]
+    needed_face_count = 3 - len(selected_np_entries)
+    if needed_face_count <= 0:
+        return selected_np_entries
+
+    available_cards = sorted(
+        (
+            card
+            for card in recognized_cards
+            if isinstance(card.get("slot"), int)
+            and not isinstance(card.get("slot"), bool)
+            and card.get("available") is not False
+        ),
+        key=lambda card: int(card["slot"]),
+    )
+    if len(available_cards) < needed_face_count:
+        raise StrategySelectionError(
+            f"Default card selection requires at least {needed_face_count} available face cards."
+        )
+
+    frontline_by_position = _index_frontline_servants(frontline_servants)
+    normalized_server = server.upper() if isinstance(server, str) else "CH"
+    supports_color_chain = normalized_server in {"CH", "CNTW", "JP"}
+    np_servant_set = set(np_servants or ())
+
+    np_chain_prefix: list[tuple[int | str, str]] = []
+    for np_position in selected_np_positions:
+        servant = frontline_by_position.get(np_position)
+        np_color = (
+            (servant.get("np_color") or servant.get("NPcolor"))
+            if isinstance(servant, dict)
+            else None
+        )
+        np_chain_prefix.append(
+            (np_position, np_color if np_color in {"B", "A", "Q"} else "N")
+        )
+
+    best_score: float | None = None
+    best_combination: tuple[dict[str, Any], ...] | None = None
+    for candidate_cards in permutations(available_cards, needed_face_count):
+        parsed_faces = [_parse_default_face_card(card) for card in candidate_cards]
+        chain = [*np_chain_prefix, *[(pos, color) for pos, color, _, _ in parsed_faces]]
+        S1, C1 = chain[0]
+        S2, C2 = chain[1]
+        S3, C3 = chain[2]
+        three_color = supports_color_chain and {C1, C2, C3} == {"B", "A", "Q"}
+        exstar = (
+            2
+            if (C1 == "Q" and supports_color_chain) or three_color
+            else 0
+        )
+
+        face_total = 0.0
+        for offset, (servant_pos, color, affinity_score, stars) in enumerate(parsed_faces):
+            chain_index = (3 - needed_face_count) + offset
+            buff_num = _default_card_buff_num(
+                servant_pos,
+                candidate_cards[offset],
+                frontline_by_position,
+                buff_counts,
+                np_servant_set,
+            )
+            card_score = PLACE_FACTOR.get(color, PLACE_FACTOR["N"])[chain_index] * (
+                1.0 + 0.5 * buff_num
+            )
+            if C1 == "B" or three_color:
+                card_score += 0.5 if color != "N" else 0.0
+            card_score *= WEAK_FACTOR.get(affinity_score, 1.0)
+            crit_prob = min(10, stars + exstar) / 10.0
+            card_score *= (1.0 - crit_prob) * 1.0 + 2.0 * crit_prob
+            face_total += card_score
+
+        score_ex = 0.0
+        if needed_face_count in (2, 3) and S1 == S2 == S3 and S1 != "N":
+            same_color = C1 == C2 == C3
+            lead_bonus = 1.5 if (C1 == "B" or three_color) else 1.0
+            score_ex = lead_bonus * EX_FACTOR[same_color]
+
+        total_score = face_total + score_ex
+        if best_score is None or total_score > best_score:
+            best_score = total_score
+            best_combination = candidate_cards
+
+    assert best_combination is not None
+    return [
+        *selected_np_entries,
+        *(_face_selection(card) for card in best_combination),
+    ]
+
+
+def _index_frontline_servants(
+    frontline_servants: Sequence[dict[str, Any] | None] | None,
+) -> dict[int, dict[str, Any]]:
+    by_position: dict[int, dict[str, Any]] = {}
+    if not frontline_servants:
+        return by_position
+    for default_pos, servant in enumerate(frontline_servants[:3], start=1):
+        if not isinstance(servant, dict):
+            continue
+        pos = servant.get("battle_position", default_pos)
+        if isinstance(pos, bool) or not isinstance(pos, int) or not 1 <= pos <= 3:
+            pos = default_pos
+        by_position[pos] = servant
+    return by_position
+
+
+def _parse_default_face_card(
+    card: dict[str, Any],
+) -> tuple[int | str, str, int, int]:
+    servant_pos = card.get("servant_position")
+    code = card.get("code")
+    if (
+        (isinstance(servant_pos, bool) or not isinstance(servant_pos, int) or not 1 <= servant_pos <= 3)
+        and isinstance(code, str)
+        and len(code) == 2
+        and code[0] in {"1", "2", "3"}
+    ):
+        servant_pos = int(code[0])
+    parsed_pos: int | str = (
+        servant_pos
+        if isinstance(servant_pos, int)
+        and not isinstance(servant_pos, bool)
+        and 1 <= servant_pos <= 3
+        else "N"
+    )
+    color = card.get("color")
+    if color not in {"B", "A", "Q"} and isinstance(code, str) and code[-1:] in {"B", "A", "Q"}:
+        color = code[-1]
+    parsed_color = color if color in {"B", "A", "Q"} else "N"
+
+    raw_affinity = card.get("affinity_score")
+    if (
+        isinstance(raw_affinity, int)
+        and not isinstance(raw_affinity, bool)
+        and raw_affinity in (-1, 0, 1)
+    ):
+        affinity_score = raw_affinity
+    elif card.get("affinity") == "weak":
+        affinity_score = 1
+    elif card.get("affinity") == "resist":
+        affinity_score = -1
+    else:
+        affinity_score = 0
+
+    raw_stars = card.get("stars")
+    stars = (
+        int(raw_stars)
+        if isinstance(raw_stars, (int, float)) and not isinstance(raw_stars, bool)
+        else 0
+    )
+    return parsed_pos, parsed_color, affinity_score, max(stars, 0)
+
+
+def _default_card_buff_num(
+    servant_pos: int | str,
+    card: dict[str, Any],
+    frontline_by_position: dict[int, dict[str, Any]],
+    buff_counts: Mapping[Any, int] | Sequence[int] | None,
+    np_servant_set: set[Any],
+) -> int:
+    if not isinstance(servant_pos, int) or isinstance(servant_pos, bool):
+        return 0
+    servant = frontline_by_position.get(servant_pos)
+    keys: list[Any] = []
+    if isinstance(servant, dict):
+        slot = servant.get("slot")
+        if isinstance(slot, int) and not isinstance(slot, bool) and slot >= 0:
+            keys.append(slot)
+        for field in ("sn", "canonical_name", "name"):
+            value = servant.get(field)
+            if value is not None and value != "":
+                keys.append(value)
+    card_sn = card.get("servant_sn")
+    if card_sn is not None and card_sn != "":
+        keys.append(card_sn)
+    keys.append(f"pos:{servant_pos}")
+    if not isinstance(servant, dict) and buff_counts is not None:
+        keys.append(servant_pos - 1)
+
+    buff_value = 0
+    if isinstance(buff_counts, Mapping):
+        for key in keys:
+            candidate = buff_counts.get(key)
+            if isinstance(candidate, int) and not isinstance(candidate, bool):
+                buff_value = candidate
+                break
+    elif isinstance(buff_counts, Sequence) and not isinstance(buff_counts, (str, bytes)):
+        slot_index = (
+            servant.get("slot")
+            if isinstance(servant, dict)
+            and isinstance(servant.get("slot"), int)
+            and not isinstance(servant.get("slot"), bool)
+            else servant_pos - 1
+        )
+        if isinstance(slot_index, int) and 0 <= slot_index < len(buff_counts):
+            candidate = buff_counts[slot_index]
+            if isinstance(candidate, int) and not isinstance(candidate, bool):
+                buff_value = candidate
+
+    is_np_servant = any(key in np_servant_set for key in keys)
+    return min(9, max(0, buff_value)) + (2 if is_np_servant else 0)
+
 
 
 def select_command_cards_without_chain(
