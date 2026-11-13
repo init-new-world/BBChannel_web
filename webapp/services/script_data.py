@@ -20,6 +20,7 @@ from webapp.services.resources import ResourceService
 VALID_SERVERS = {"CH", "CNTW", "JP"}
 TURN_FIELD_RE = re.compile(r"^round(?P<round>\d+)_turn(?P<turn>\d+)_(skill|np|strategy|condition|replace)$")
 SETTING_STRATEGY_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_strategy|extraStrategy)$")
+SETTING_CONDITION_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_condition|extraCondition)$")
 SETTING_SKILL_FIELD_RE = re.compile(r"^round\d+_(?:turn\d+_skill|extraSkill)$")
 SETTING_REPLACE_FIELD_RE = re.compile(r"^round\d+_turn\d+_replace$")
 ROUND_NUMBER_RE = re.compile(r"^round(?P<round>\d+)_")
@@ -970,6 +971,8 @@ class ScriptDataService:
         for field, value in config.items():
             if SETTING_STRATEGY_FIELD_RE.match(field) and value is not None:
                 errors.extend(self._validate_strategy_entries(value, field, tagged=False))
+            elif SETTING_CONDITION_FIELD_RE.match(field) and value is not None:
+                warnings.extend(self._validate_strategy_entries(value, field, tagged=False))
             elif SETTING_REPLACE_FIELD_RE.match(field) and value is not None:
                 errors.extend(self._validate_turn_replace(value, field))
 
@@ -1435,6 +1438,7 @@ class ScriptDataService:
                     "round": round_number,
                     "extra_skill": config.get(f"round{round_number}_extraSkill", []),
                     "extra_strategy": config.get(f"round{round_number}_extraStrategy"),
+                    "extra_condition": config.get(f"round{round_number}_extraCondition"),
                     "turns": turns,
                 }
             )

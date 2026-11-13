@@ -1630,6 +1630,37 @@ def test_setting_program_compiles_extra_turn_template(tmp_path: Path):
     assert payload["summary"]["extra_action_count"] == 4
 
 
+def test_setting_program_uses_explicit_extra_condition_when_present(tmp_path: Path):
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    _write_json(data / "servant_info_CH.json", {"Servant A": {"other_name": []}})
+    turn_cond = [_strategy_payload()]
+    extra_cond = [{**_strategy_payload(), "colorFirst": True}]
+    _write_json(
+        data / "settings" / "extra-cond.json",
+        {
+            "server": "CH",
+            "servant_0_name": "Servant A",
+            "round1_turns": 1,
+            "round1_turn0_skill": [1],
+            "round1_turn0_condition": turn_cond,
+            "round1_extraSkill": [["Start", 1, [1]], 7, ["End"]],
+            "round1_extraCondition": extra_cond,
+        },
+    )
+
+    payload = client.get("/api/settings/extra-cond/program").json()
+    extra_turn = payload["rounds"][0]["extra_turn"]
+    assert extra_turn["condition"] == extra_cond
+    assert extra_turn["actions"][0]["control"] == {
+        "type": "condition_start",
+        "execute_when_matched": True,
+        "check_cards": True,
+        "checks": [1],
+    }
+    assert extra_turn["actions"][2]["control"] == {"type": "condition_end"}
+
+
 def test_setting_program_compiles_master_skill_menu_and_target(tmp_path: Path):
     client = _client(tmp_path)
     data = Path(client.app.state.resources.data_dir)

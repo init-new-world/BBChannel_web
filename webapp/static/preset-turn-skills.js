@@ -1,6 +1,8 @@
 import { t } from "./i18n.js";
 import { COMMAND_SPELLS, decodeBasicSkill, isCommandSpell, MAX_SKILL_COMMANDS } from "./turn-skills-model.js";
-import { changeSkillSource, inspectSkillSource } from "./turn-skills-source.js";
+import { decodeConditionCommand } from "./turn-conditions-model.js";
+import { changeMixedSkillSource, inspectConditionSource, inspectMixedSkillSource } from "./turn-conditions-source.js";
+import { describeConditionEntry } from "./preset-turn-conditions.js";
 import { specialSkillChoice, specialSkillColors } from "./special-skills-model.js";
 import { KUKULKAN_SKILL, kukulkanNeedsTarget } from "./kukulkan-model.js";
 import { THIRD_SKILL_NAMES, thirdSkillOptions } from "./third-skill-model.js";
@@ -41,6 +43,8 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
   const status = document.querySelector("#preset-turn-skill-status");
   const count = document.querySelector("#preset-turn-skill-count");
   const add = document.querySelector("#add-turn-skill");
+  const addConditionStart = document.querySelector("#add-turn-condition-start");
+  const addConditionEnd = document.querySelector("#add-turn-condition-end");
   const clear = document.querySelector("#clear-turn-skills");
   const hakunoControls = createHakunoNeedsControls();
   let rendered = null;
@@ -63,7 +67,143 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     return select;
   }
 
-  function row(command, index, length, { server, config, field, editor }) {
+  function buildSkillTools(index, length) {
+    const tools = document.createElement("div");
+    tools.className = "turn-skill-tools";
+    for (const [action, icon, label, disabled] of [
+      ["up", "arrow-up", "Move skill up", index === 0],
+      ["down", "arrow-down", "Move skill down", index === length - 1],
+      ["remove", "trash-2", "Remove skill", false],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "icon-button";
+      button.dataset.turnSkillAction = action;
+      button.title = t(label);
+      button.setAttribute("aria-label", t(label));
+      button.disabled = disabled;
+      const image = document.createElement("img");
+      image.src = `/icons/${icon}.svg`;
+      image.width = image.height = 16;
+      image.alt = "";
+      button.append(image);
+      tools.append(button);
+    }
+    return tools;
+  }
+
+  function conditionStartRow(decoded, index, length, { conditionEntries }) {
+    const item = document.createElement("div");
+    item.className = "turn-skill-row turn-skill-condition-start";
+    item.dataset.turnSkillIndex = String(index);
+    item.setAttribute("role", "group");
+    item.setAttribute("aria-label", t("Condition Start"));
+
+    const body = document.createElement("div");
+    body.className = "condition-start-body";
+
+    const header = document.createElement("div");
+    header.className = "condition-start-header";
+    const title = document.createElement("span");
+    title.className = "condition-start-title";
+    title.textContent = t("Condition Start");
+    const mode = document.createElement("select");
+    mode.className = "field";
+    mode.dataset.turnSkillPart = "condition-mode";
+    mode.setAttribute("aria-label", t("Condition mode"));
+    mode.append(option("1", t("Run when matched")), option("0", t("Skip when matched")));
+    mode.value = String(decoded.mode);
+    header.append(title, mode);
+    body.append(header);
+
+    const checkCount = Math.max(conditionEntries.length, decoded.checks.length);
+    if (checkCount > 0) {
+      const checks = document.createElement("div");
+      checks.className = "condition-start-checks";
+      for (let checkIdx = 0; checkIdx < checkCount; checkIdx += 1) {
+        const label = document.createElement("label");
+        label.className = "checkline";
+        if (conditionEntries[checkIdx]) {
+          label.title = describeConditionEntry(conditionEntries[checkIdx], checkIdx);
+        }
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.dataset.turnSkillPart = "condition-check";
+        checkbox.dataset.conditionCheckIndex = String(checkIdx);
+        checkbox.checked = Boolean(decoded.checks[checkIdx]);
+        const text = document.createElement("span");
+        text.textContent = t("Cond #{index}", { index: checkIdx + 1 });
+        label.append(checkbox, text);
+        checks.append(label);
+      }
+      body.append(checks);
+    }
+
+    const npContainer = document.createElement("div");
+    npContainer.className = "condition-start-np";
+    decoded.npChecks.forEach((entry, slotIdx) => {
+      const slot = document.createElement("div");
+      slot.className = "condition-np-slot";
+      slot.dataset.conditionNpSlot = String(slotIdx);
+
+      const label = document.createElement("label");
+      label.className = "checkline";
+      const enabled = document.createElement("input");
+      enabled.type = "checkbox";
+      enabled.dataset.turnSkillPart = "condition-np-enabled";
+      enabled.checked = entry.enabled;
+      const text = document.createElement("span");
+      text.textContent = t("NP {slot}", { slot: slotIdx + 1 });
+      label.append(enabled, text);
+
+      const op = document.createElement("select");
+      op.className = "field";
+      op.dataset.turnSkillPart = "condition-np-op";
+      op.setAttribute("aria-label", t("NP comparison for servant {slot}", { slot: slotIdx + 1 }));
+      op.append(option("≥", "≥"), option("≤", "≤"));
+      op.value = entry.op;
+
+      const valueInput = document.createElement("input");
+      valueInput.type = "number";
+      valueInput.className = "field";
+      valueInput.min = "0";
+      valueInput.max = "300";
+      valueInput.step = "1";
+      valueInput.dataset.turnSkillPart = "condition-np-value";
+      valueInput.setAttribute("aria-label", t("NP percentage for servant {slot}", { slot: slotIdx + 1 }));
+      valueInput.value = String(entry.value);
+
+      slot.append(label, op, valueInput);
+      npContainer.append(slot);
+    });
+    body.append(npContainer);
+
+    item.append(body, buildSkillTools(index, length));
+    return item;
+  }
+
+  function conditionEndRow(index, length) {
+    const item = document.createElement("div");
+    item.className = "turn-skill-row turn-skill-condition-end";
+    item.dataset.turnSkillIndex = String(index);
+    item.setAttribute("role", "group");
+    item.setAttribute("aria-label", t("Condition End"));
+    const title = document.createElement("span");
+    title.className = "condition-start-title";
+    title.textContent = t("Condition End");
+    item.append(title, buildSkillTools(index, length));
+    return item;
+  }
+
+  function row(command, index, length, context) {
+    const conditionCommand = decodeConditionCommand(command);
+    if (conditionCommand?.kind === "condition-start") {
+      return conditionStartRow(conditionCommand, index, length, context);
+    }
+    if (conditionCommand?.kind === "condition-end") {
+      return conditionEndRow(index, length);
+    }
+    const { server, config, field, editor } = context;
     const value = decodeBasicSkill(command);
     const item = document.createElement("div");
     item.className = "turn-skill-row";
@@ -228,28 +368,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       target.value = value.target === null ? "" : String(value.target);
       target.title = target.selectedOptions[0].textContent;
     }
-    const tools = document.createElement("div");
-    tools.className = "turn-skill-tools";
-    for (const [action, icon, label, disabled] of [
-      ["up", "arrow-up", "Move skill up", index === 0],
-      ["down", "arrow-down", "Move skill down", index === length - 1],
-      ["remove", "trash-2", "Remove skill", false],
-    ]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "icon-button";
-      button.dataset.turnSkillAction = action;
-      button.title = t(label);
-      button.setAttribute("aria-label", t(label));
-      button.disabled = disabled;
-      const image = document.createElement("img");
-      image.src = `/icons/${icon}.svg`;
-      image.width = image.height = 16;
-      image.alt = "";
-      button.append(image);
-      tools.append(button);
-    }
-    item.append(skill, target, tools);
+    item.append(skill, target, buildSkillTools(index, length));
     return item;
   }
 
@@ -265,14 +384,21 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       if (rendered?.editor !== editor || rendered.source !== source.value || rendered.target !== target) {
         const config = JSON.parse(source.value);
         validateConfig(config);
-        const info = inspectSkillSource(source.value, target);
+        const info = inspectMixedSkillSource(source.value, target);
         const server = variantServer(source.value);
-        const context = { server, config, field: target, editor };
+        let conditionEntries = [];
+        try {
+          conditionEntries = inspectConditionSource(source.value, target).entries || [];
+        } catch {
+          conditionEntries = [];
+        }
+        const context = { server, config, field: target, editor, conditionEntries };
         list.replaceChildren(...(info.commands || []).map((command, index) => row(command, index, info.commands.length, context)));
         rendered = { editor, source: source.value, target, info };
       }
       controls.disabled = Boolean(editor.saving || editor.strategyApplyBusy);
-      add.disabled = rendered.info.commands === null || rendered.info.commands.length >= MAX_SKILL_COMMANDS;
+      const atLimit = rendered.info.commands === null || rendered.info.commands.length >= MAX_SKILL_COMMANDS;
+      add.disabled = addConditionStart.disabled = addConditionEnd.disabled = atLimit;
       clear.disabled = !rendered.info.canClear;
       count.textContent = rendered.info.commands === null ? "" : String(rendered.info.commands.length);
       status.textContent = rendered.info.error ? t(rendered.info.error) : "";
@@ -280,7 +406,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     } catch (error) {
       rendered = null;
       controls.disabled = true;
-      add.disabled = clear.disabled = true;
+      add.disabled = addConditionStart.disabled = addConditionEnd.disabled = clear.disabled = true;
       list.replaceChildren();
       count.textContent = "";
       status.textContent = t(error.message);
@@ -308,13 +434,13 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         } else {
           const result = hakunoControls.change(context, change);
           part = result.part;
-          source.value = changeSkillSource(source.value, field, { type: "update", index: change.index, named: HAKUNO_SKILL, skill: value.skill, needs: result.needs });
+          source.value = changeMixedSkillSource(source.value, field, { type: "update", index: change.index, named: HAKUNO_SKILL, skill: value.skill, needs: result.needs });
           onChange();
         }
       } else {
         if (["move", "remove", "clear"].includes(change.type)) hakunoControls.forget(field);
         if (change.needs !== undefined) hakunoControls.activate(field, change.index, editor);
-        source.value = changeSkillSource(source.value, field, change);
+        source.value = changeMixedSkillSource(source.value, field, change);
         onChange();
       }
       if (getEditor() !== editor) return;
@@ -331,6 +457,23 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
   add.addEventListener("click", () => {
     if (!add.disabled) edit({ type: "add" }, rendered?.info.commands?.length || 0);
   });
+  addConditionStart.addEventListener("click", () => {
+    if (addConditionStart.disabled) return;
+    let conditionEntries = [];
+    try {
+      conditionEntries = inspectConditionSource(source.value, readTarget().field).entries || [];
+    } catch {
+      conditionEntries = [];
+    }
+    edit(
+      { type: "add-condition-start", mode: 1, checks: conditionEntries.map(() => 0) },
+      rendered?.info.commands?.length || 0,
+      "condition-mode",
+    );
+  });
+  addConditionEnd.addEventListener("click", () => {
+    if (!addConditionEnd.disabled) edit({ type: "add-condition-end" }, rendered?.info.commands?.length || 0);
+  });
   clear.addEventListener("click", () => {
     if (!clear.disabled && !controls.disabled && window.confirm(t("Clear the selected skill sequence?"))) edit({ type: "clear" });
   });
@@ -339,6 +482,23 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     const item = control?.closest("[data-turn-skill-index]");
     if (!item || control.selectedOptions?.[0]?.disabled) return;
     const index = Number(item.dataset.turnSkillIndex);
+    if (item.classList.contains("turn-skill-condition-start")) {
+      const part = control.dataset.turnSkillPart;
+      const mode = Number(item.querySelector('[data-turn-skill-part="condition-mode"]').value);
+      const checks = [...item.querySelectorAll('input[data-turn-skill-part="condition-check"]')]
+        .sort((a, b) => Number(a.dataset.conditionCheckIndex) - Number(b.dataset.conditionCheckIndex))
+        .map((entry) => (entry.checked ? 1 : 0));
+      const npChecks = [...item.querySelectorAll(".condition-np-slot")].map((slot) => ({
+        enabled: slot.querySelector('[data-turn-skill-part="condition-np-enabled"]').checked,
+        op: slot.querySelector('[data-turn-skill-part="condition-np-op"]').value,
+        value: slot.querySelector('[data-turn-skill-part="condition-np-value"]').valueAsNumber,
+      }));
+      const includeNp = npChecks.some((entry) => entry.enabled)
+        || part === "condition-np-op"
+        || part === "condition-np-value";
+      edit({ type: "update-condition-start", index, mode, checks, npChecks, includeNp }, index, part);
+      return;
+    }
     const selection = item.querySelector('[data-turn-skill-part="skill"]').value;
     const needsMode = selection.startsWith(HAKUNO_NEEDS_PREFIX);
     const named = [KUKULKAN_SKILL, ...THIRD_SKILL_NAMES, ...SKILL_VARIANT_NAMES].find((name) => selection.startsWith(`${name}:`));

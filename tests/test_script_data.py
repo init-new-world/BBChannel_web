@@ -1074,5 +1074,33 @@ def test_setting_plan_validates_and_exposes_screen_rotation(tmp_path: Path):
     assert any(item["code"] == "invalid_screen_rotation" for item in invalid_bool["errors"])
 
 
+def test_setting_plan_validates_and_exposes_turn_and_extra_conditions(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    _write_json(data_dir / "servant_info_CH.json", {})
+    condition_entry = {
+        "card1": {"type": 0, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 1, "cards": ["Red"], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 2, "cards": [1], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [0, 0, 0],
+        "colorFirst": False,
+    }
+    _write_json(
+        data_dir / "settings" / "conditional.json",
+        {
+            "server": "CH",
+            "round1_turns": 1,
+            "round1_turn0_condition": [condition_entry],
+            "round1_extraCondition": [condition_entry],
+        },
+    )
+    service = ScriptDataService(data_dir)
+    plan = service.get_setting_plan("conditional")
+    assert plan["rounds"][0]["turns"][0]["condition"] == [condition_entry]
+    assert plan["rounds"][0]["extra_condition"] == [condition_entry]
+
+    invalid_cond = service._validate_setting({"server": "CH", "round1_extraCondition": "bad"})
+    assert any(item["field"] == "round1_extraCondition" for item in invalid_cond["warnings"])
+
+
 
 

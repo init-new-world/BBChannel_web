@@ -781,6 +781,8 @@
               <fieldset id="preset-turn-skill-controls">
                 <div class="turn-skill-toolbar">
                   <button id="add-turn-skill" class="ghost-button" type="button"><img src="/icons/plus.svg" width="16" height="16" alt=""> Add Skill</button>
+                  <button id="add-turn-condition-start" class="ghost-button" type="button" title="Insert conditional skill block start">Start Condition</button>
+                  <button id="add-turn-condition-end" class="ghost-button" type="button" title="Insert conditional skill block end">End Condition</button>
                   <button id="clear-turn-skills" class="icon-button" type="button" title="Clear skill sequence" aria-label="Clear skill sequence"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
                 </div>
                 <div id="preset-turn-skill-list" class="turn-skill-list"></div>
@@ -808,6 +810,17 @@
                 <button id="clear-turn-replace" class="icon-button" type="button" title="Clear post-turn replacements" aria-label="Clear post-turn replacements"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
                 <span id="preset-turn-replace-status" class="preset-error" role="status" hidden></span>
               </div>
+            </details>
+            <details id="preset-turn-conditions" class="preset-turn-skills" hidden>
+              <summary>Condition Strategies <span id="preset-turn-condition-count"></span></summary>
+              <fieldset id="preset-turn-condition-controls">
+                <div class="turn-skill-toolbar">
+                  <button id="add-turn-condition-preset" class="ghost-button" type="button"><img src="/icons/plus.svg" width="16" height="16" alt=""> Add Selected Preset</button>
+                  <button id="clear-turn-conditions" class="icon-button" type="button" title="Clear condition strategies" aria-label="Clear condition strategies"><img src="/icons/trash-2.svg" width="16" height="16" alt=""></button>
+                </div>
+                <div id="preset-turn-condition-list" class="turn-skill-list"></div>
+                <p id="preset-turn-condition-status" class="turn-skill-status" hidden></p>
+              </fieldset>
             </details>
             <div class="turn-strategy-actions">
               <span id="preset-turn-strategy-status" role="status">No turn selected</span>

@@ -3,6 +3,7 @@ import { createPresetAssistEditor } from "./preset-assist.js";
 import { createPresetEquipEditor } from "./preset-equips.js";
 import { createPresetSettlementEditor } from "./preset-settlement.js";
 import { createPresetDropEditor } from "./preset-drops.js";
+import { createPresetTurnConditionsEditor } from "./preset-turn-conditions.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { changeReplaceSource, inspectReplaceSource } from "./turn-replace-source.js";
@@ -420,6 +421,20 @@ const presetTurnSkills = createPresetTurnSkillsEditor({
   getEditor: () => state.presetEditor,
   source: els.presetJson,
   readTarget: readScriptStrategyTarget,
+  validateConfig: editableScriptWaves,
+  onChange: () => {
+    renderPresetScriptStrategy();
+    setPresetError("");
+  },
+  onError: setPresetError,
+});
+
+const presetTurnConditions = createPresetTurnConditionsEditor({
+  getEditor: () => state.presetEditor,
+  source: els.presetJson,
+  readTarget: readScriptStrategyTarget,
+  getSelectedPreset: () => els.presetStrategySource.value,
+  loadPreset: (name) => api(`/api/strategies/${encodeURIComponent(name)}`),
   validateConfig: editableScriptWaves,
   onChange: () => {
     renderPresetScriptStrategy();
@@ -2238,6 +2253,7 @@ function renderPresetScriptStrategy() {
     renderPresetTurnNps(null, "");
     renderPresetTurnReplace(null, "");
     presetTurnSkills.render("");
+    presetTurnConditions.render("");
     return;
   }
   let config;
@@ -2251,6 +2267,7 @@ function renderPresetScriptStrategy() {
     renderPresetTurnNps(null, "");
     renderPresetTurnReplace(null, "");
     presetTurnSkills.render("");
+    presetTurnConditions.render("");
     els.presetTurnStrategyStatus.textContent = error instanceof SyntaxError ? t("Invalid script JSON.") : error.message;
     return;
   }
@@ -2298,6 +2315,7 @@ function renderPresetScriptStrategy() {
     }
   }
   presetTurnSkills.render(target);
+  presetTurnConditions.render(target);
 }
 
 function readScriptStrategyTarget() {

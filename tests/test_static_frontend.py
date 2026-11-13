@@ -358,4 +358,10 @@ def test_operator_console_references_api_controls():
     assert "playAudioAlert" in script
     assert "trackJobTransitions" in script
     assert "SCREEN_ROTATION_OPTIONS" in script
+    assert 'id="add-turn-condition-start"' in index
+    assert 'id="add-turn-condition-end"' in index
+    assert 'id="preset-turn-conditions"' in index
+    assert 'id="add-turn-condition-preset"' in index
+    assert 'id="clear-turn-conditions"' in index
+    assert "createPresetTurnConditionsEditor" in script
 

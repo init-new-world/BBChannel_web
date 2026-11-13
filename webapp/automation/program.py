@@ -365,7 +365,11 @@ def compile_battle_program(
                 "extra_turn": {
                     "actions": extra_actions,
                     "command_phase": extra_command_phase,
-                    "condition": turns[-1]["condition"] if turns else None,
+                    "condition": (
+                        round_plan["extra_condition"]
+                        if round_plan.get("extra_condition") is not None
+                        else (turns[-1]["condition"] if turns else None)
+                    ),
                 },
             }
         )
