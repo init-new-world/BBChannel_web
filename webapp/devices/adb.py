@@ -134,19 +134,53 @@ def _non_negative_float(value: str | None, default: float) -> float:
         return default
 
 
-def default_adb_candidates() -> list[Path]:
-    project_root = Path(__file__).resolve().parents[2]
-    package_root = project_root.parent
-    candidates = [
-        package_root / "adb" / "33.0.2" / "adb.exe",
-        package_root / "adb" / "airtest_adb" / "adb.exe",
-        package_root / "adb" / "leidian_adb" / "adb.exe",
-        package_root / "adb" / "nox_adb" / "adb.exe",
+EMBEDDED_ADB_SUBDIRS = ("33.0.2", "airtest_adb", "leidian_adb", "nox_adb")
+
+
+def embedded_adb_dir(project_root: Path | None = None) -> Path:
+    root = (project_root or Path(__file__).resolve().parents[2]).resolve()
+    return root / "bin" / "adb"
+
+
+def default_adb_candidates(
+    project_root: Path | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    os_name: str | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+) -> list[Path]:
+    root = (project_root or Path(__file__).resolve().parents[2]).resolve()
+    package_root = root.parent
+    values = os.environ if env is None else env
+    active_os = os.name if os_name is None else os_name
+
+    candidates: list[Path] = []
+    configured = (values.get("BBCHANNEL_ADB_PATH") or "").strip()
+    if configured:
+        candidates.append(Path(configured))
+
+    embedded_root = embedded_adb_dir(root)
+    windows_bundles = [
+        *(embedded_root / subdir / "adb.exe" for subdir in EMBEDDED_ADB_SUBDIRS),
+        *(package_root / "adb" / subdir / "adb.exe" for subdir in EMBEDDED_ADB_SUBDIRS),
     ]
-    path_adb = shutil.which("adb")
-    if path_adb:
-        candidates.append(Path(path_adb))
-    return candidates
+    path_adb = which("adb")
+
+    if active_os == "nt":
+        candidates.extend(windows_bundles)
+        if path_adb:
+            candidates.append(Path(path_adb))
+    else:
+        candidates.append(embedded_root / "adb")
+        if path_adb:
+            candidates.append(Path(path_adb))
+        candidates.extend(windows_bundles)
+
+    deduped: list[Path] = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
 
 
 def is_wsl(env: Mapping[str, str] | None = None, version_path: Path | str = "/proc/version") -> bool:
@@ -328,11 +362,21 @@ class AdbBackend:
             )
         return Capability(name=self.name, available=True, reason=None)
 
+    def _is_embedded_adb(self) -> bool:
+        if self.adb_path is None:
+            return False
+        try:
+            self.adb_path.resolve().relative_to(embedded_adb_dir())
+            return True
+        except ValueError:
+            return False
+
     def diagnostics(self) -> dict[str, object]:
         details: dict[str, object] = {
             "backend": self.name,
             "available": self.adb_path is not None,
             "path": str(self.adb_path) if self.adb_path is not None else None,
+            "embedded": self._is_embedded_adb(),
             "retry": {
                 "snapshot_attempts": self.retry_config.snapshot_attempts,
                 "control_attempts": self.retry_config.control_attempts,
@@ -664,11 +708,17 @@ class AdbBackend:
                 stderr or "ADB command failed.",
                 {"args": args, "returncode": exc.returncode},
             ) from exc
+        except OSError as exc:
+            raise AppError(
+                _command_error_code(args),
+                str(exc) or "ADB executable could not be started.",
+                {"args": args},
+            ) from exc
 
     @staticmethod
     def _find_adb(candidates: list[Path]) -> Path | None:
         for candidate in candidates:
-            if candidate.exists():
+            if candidate.is_file():
                 return candidate
         return None
 

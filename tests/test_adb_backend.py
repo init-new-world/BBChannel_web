@@ -9,7 +9,9 @@ from webapp.devices.adb import (
     AdbDiscoveryConfig,
     AdbRetryConfig,
     candidate_adb_endpoints,
+    default_adb_candidates,
     detect_wsl_host_ip,
+    embedded_adb_dir,
     normalize_adb_endpoint,
     parse_adb_devices,
     parse_adb_display_size,
@@ -451,3 +453,41 @@ def test_adb_diagnostics_reports_version_and_device_statuses(tmp_path: Path):
     assert diagnostics["version"] == "Android Debug Bridge version 1.0.41"
     assert diagnostics["device_count"] == 2
     assert diagnostics["device_statuses"] == {"device": 1, "offline": 1}
+
+
+def test_default_adb_candidates_prioritizes_env_and_embedded_bin_adb(tmp_path: Path):
+    web_root = tmp_path / "pkg" / "web"
+    embedded_exe = web_root / "bin" / "adb" / "33.0.2" / "adb.exe"
+    embedded_exe.parent.mkdir(parents=True)
+    embedded_exe.write_bytes(b"MZ")
+
+    nt_candidates = default_adb_candidates(
+        web_root,
+        env={"BBCHANNEL_ADB_PATH": "/custom/adb"},
+        os_name="nt",
+        which=lambda _name: "C:/platform-tools/adb.exe",
+    )
+    assert nt_candidates[0] == Path("/custom/adb")
+    assert nt_candidates[1] == embedded_exe
+    assert nt_candidates[-1] == Path("C:/platform-tools/adb.exe")
+
+    posix_candidates = default_adb_candidates(
+        web_root,
+        env={},
+        os_name="posix",
+        which=lambda _name: "/usr/bin/adb",
+    )
+    assert posix_candidates[0] == web_root / "bin" / "adb" / "adb"
+    assert posix_candidates[1] == Path("/usr/bin/adb")
+    assert embedded_exe in posix_candidates
+
+
+def test_repo_embeds_bundled_adb_binaries():
+    bundled = embedded_adb_dir()
+    assert (bundled / "33.0.2" / "adb.exe").is_file()
+    assert (bundled / "33.0.2" / "AdbWinApi.dll").is_file()
+    assert (bundled / "airtest_adb" / "adb.exe").is_file()
+    assert (bundled / "leidian_adb" / "adb.exe").is_file()
+    assert (bundled / "nox_adb" / "adb.exe").is_file()
+    embedded_backend = AdbBackend(adb_candidates=[bundled / "33.0.2" / "adb.exe"])
+    assert embedded_backend._is_embedded_adb() is True
