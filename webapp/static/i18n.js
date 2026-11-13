@@ -647,6 +647,19 @@ const zh = {
   "Live": "实时刷新",
   "Continuously refresh the screenshot for connection calibration": "持续刷新截图以测试连接与校准方向",
   "Rotation {angle}°": "旋转 {angle}°",
+  "Screen rotation": "脚本画面旋转",
+  "Lock screen orientation for this script when running": "运行该脚本时自动应用固定画面旋转角度",
+  "Completion alert": "完成提示音",
+  "Play sound notification when a job finishes or stops": "任务结束或停止时播放提示音",
+  "Play completion sound preview": "试听完成提示音",
+  "Test": "试听",
+  "Chime": "清脆和弦",
+  "Bell": "清亮铃声",
+  "Soft beep": "柔和蜂鸣",
+  "Custom audio": "自定义音频",
+  "Audio file": "选择音频",
+  "Select custom audio file": "选择本地音频文件作为提示音",
+  "Custom audio: {name}": "自定义音频：{name}",
 };
 
 let locale = preferredLocale();

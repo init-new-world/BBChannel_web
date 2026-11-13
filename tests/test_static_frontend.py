@@ -349,4 +349,13 @@ def test_operator_console_references_api_controls():
     assert "/api/screen/rotation" in script
     assert "rotateScreen" in script
     assert "syncAutoRefreshScreen" in script
+    assert 'data-run-option="screenRotation"' in index
+    assert 'id="audio-alert-enabled"' in index
+    assert 'id="test-audio-alert"' in index
+    assert 'id="audio-alert-tone"' in index
+    assert 'id="choose-audio-alert"' in index
+    assert 'id="audio-alert-file"' in index
+    assert "playAudioAlert" in script
+    assert "trackJobTransitions" in script
+    assert "SCREEN_ROTATION_OPTIONS" in script
 

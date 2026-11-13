@@ -573,6 +573,24 @@
               <button id="resume-job" class="ghost-button" type="button">Resume</button>
               <button id="cancel-job" class="danger-button" type="button">Stop</button>
             </div>
+            <div class="audio-alert-row">
+              <label class="toggle-row" title="Play sound notification when a job finishes or stops">
+                <input id="audio-alert-enabled" type="checkbox">
+                <span>Completion alert</span>
+              </label>
+              <button id="test-audio-alert" class="ghost-button" type="button" title="Play completion sound preview">Test</button>
+            </div>
+            <div class="audio-alert-controls">
+              <select id="audio-alert-tone" class="field" aria-label="Completion sound tone">
+                <option value="chime">Chime</option>
+                <option value="bell">Bell</option>
+                <option value="beep">Soft beep</option>
+                <option value="custom">Custom audio</option>
+              </select>
+              <button id="choose-audio-alert" class="ghost-button" type="button" title="Select custom audio file">Audio file</button>
+              <input id="audio-alert-file" type="file" accept="audio/*" hidden>
+            </div>
+            <div id="audio-alert-file-name" class="status-line" hidden></div>
             <div id="job-error" class="job-error" hidden></div>
           </section>
 
@@ -664,6 +682,7 @@
             <label class="field-stack" title="Additional random wait, in seconds"><span>Random wait (s)</span><input class="field" data-run-option="randomTime" type="number" min="0" max="10" step="any" required></label>
             <label class="checkline" title="Normalize battle menu options at the start of the first battle"><input data-run-option="firstBattleSet" type="checkbox"><span>First battle setup</span></label>
             <label class="checkline" title="Do not send extra taps to advance skill animations"><input data-run-option="noSpeedupSkill" type="checkbox"><span>No skill speedup</span></label>
+            <label class="field-stack" title="Lock screen orientation for this script when running"><span>Screen rotation</span><select class="field" data-run-option="screenRotation"><option value="">Auto</option><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
           </fieldset>
         </details>
         <details id="preset-operation-timing" class="preset-run-options" hidden>

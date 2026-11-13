@@ -1921,6 +1921,28 @@ select:disabled {
   padding: 0 8px;
 }
 
+.audio-alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.audio-alert-row .ghost-button {
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.audio-alert-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.audio-alert-controls .ghost-button {
+  padding: 0 10px;
+}
+
 .job-error {
   border-left: 3px solid var(--danger);
   background: #fff5f3;

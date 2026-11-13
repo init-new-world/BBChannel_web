@@ -13,6 +13,8 @@ import { setLocale, t } from "./i18n.js";
 
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
 const ACTIVE_JOB_STATES = new Set(["queued", "running", "paused", "cancelling"]);
+const AUDIO_ALERT_STORAGE_KEY = "bbchannel.audioAlert";
+const SCREEN_ROTATION_OPTIONS = new Set([0, 90, 180, 270]);
 
 const state = {
   connected: false,
@@ -57,6 +59,12 @@ const state = {
   activeJob: null,
   jobEvents: [],
   jobEventSource: null,
+  lastJobStatusById: new Map(),
+  announcedTerminalJobIds: new Set(),
+  audioAlert: { enabled: false, tone: "chime" },
+  audioAlertFileUrl: null,
+  audioAlertFileName: "",
+  audioContext: null,
 };
 
 const els = {
@@ -343,6 +351,12 @@ const els = {
   pauseJob: document.querySelector("#pause-job"),
   resumeJob: document.querySelector("#resume-job"),
   cancelJob: document.querySelector("#cancel-job"),
+  audioAlertEnabled: document.querySelector("#audio-alert-enabled"),
+  testAudioAlert: document.querySelector("#test-audio-alert"),
+  audioAlertTone: document.querySelector("#audio-alert-tone"),
+  chooseAudioAlert: document.querySelector("#choose-audio-alert"),
+  audioAlertFile: document.querySelector("#audio-alert-file"),
+  audioAlertFileName: document.querySelector("#audio-alert-file-name"),
   jobError: document.querySelector("#job-error"),
   jobEvents: document.querySelector("#job-events"),
   jobEventCount: document.querySelector("#job-event-count"),
@@ -442,6 +456,7 @@ async function api(path, options = {}) {
 }
 
 async function init() {
+  initAudioAlertControls();
   bindEvents();
   await Promise.allSettled([
     loadCapabilities(),
@@ -467,6 +482,7 @@ function bindEvents() {
     renderStrategyDetail(state.selectedStrategy);
     renderJob(state.activeJob);
     renderJobEvents();
+    renderAudioAlertState();
     if (!state.connected) els.connectionState.textContent = t("Disconnected");
     els.screenMeta.textContent = formatScreenMeta();
     if (state.presetEditor) {
@@ -732,6 +748,21 @@ function bindEvents() {
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
   els.cancelJob.addEventListener("click", () => controlJob("cancel"));
+  els.audioAlertEnabled?.addEventListener("change", () => {
+    state.audioAlert.enabled = Boolean(els.audioAlertEnabled.checked);
+    if (state.audioAlert.enabled) ensureAudioContext();
+    saveAudioAlertPreference();
+  });
+  els.audioAlertTone?.addEventListener("change", () => {
+    state.audioAlert.tone = els.audioAlertTone.value || "chime";
+    saveAudioAlertPreference();
+    renderAudioAlertState();
+  });
+  els.chooseAudioAlert?.addEventListener("click", () => els.audioAlertFile?.click());
+  els.audioAlertFile?.addEventListener("change", handleAudioAlertFile);
+  els.testAudioAlert?.addEventListener("click", () => {
+    void playAudioAlert("succeeded");
+  });
 }
 
 async function loadCapabilities() {
@@ -2311,6 +2342,24 @@ function renderPresetRunOptions() {
         input.checked = enabled(config[field]);
         input.disabled = ambiguous;
         input.title = ambiguous ? t("Ambiguous run option.") : "";
+      } else if (input.tagName === "SELECT") {
+        input.querySelectorAll("option[data-legacy-rotation]").forEach((option) => option.remove());
+        const hasOwn = Object.hasOwn(config, field);
+        const raw = config[field];
+        if (!hasOwn || raw === null) {
+          input.value = "";
+        } else if (typeof raw === "number" && Number.isInteger(raw) && SCREEN_ROTATION_OPTIONS.has(raw)) {
+          input.value = String(raw);
+        } else {
+          const legacyOption = document.createElement("option");
+          legacyOption.dataset.legacyRotation = "true";
+          legacyOption.value = "__legacy__";
+          legacyOption.textContent = t("{name} (current)", { name: JSON.stringify(raw) });
+          input.append(legacyOption);
+          input.value = "__legacy__";
+        }
+        input.disabled = ambiguous;
+        input.title = ambiguous ? t("Ambiguous run option.") : t("Lock screen orientation for this script when running");
       } else {
         const defaultValue = input.hasAttribute("data-default") ? Number(input.dataset.default) : field === "randomTime" ? 0 : 30;
         const value = Object.hasOwn(config, field) ? config[field] : defaultValue;
@@ -2344,6 +2393,23 @@ function updatePresetRunOption(event, draftOnly = false) {
     const config = JSON.parse(els.presetJson.value);
     if (!config || typeof config !== "object" || Array.isArray(config)) return;
     const field = input.dataset.runOption;
+    if (input.tagName === "SELECT") {
+      if (input.value === "__legacy__") return;
+      input.querySelectorAll("option[data-legacy-rotation]").forEach((option) => option.remove());
+      const sourceField = readJsonField(els.presetJson.value, field, "Ambiguous run option.");
+      if (input.value === "") {
+        els.presetJson.value = sourceField.remove();
+      } else {
+        const parsed = Number(input.value);
+        if (!Number.isInteger(parsed) || !SCREEN_ROTATION_OPTIONS.has(parsed)) {
+          throw new Error("Screen rotation must be null, 0, 90, 180, or 270.");
+        }
+        els.presetJson.value = sourceField.replace(parsed);
+      }
+      renderPresetScriptStrategy();
+      setPresetError("");
+      return;
+    }
     let value = input.checked;
     if (input.type !== "checkbox") {
       value = input.valueAsNumber;
@@ -3868,6 +3934,7 @@ async function enqueueJob(kind, payload) {
       body: JSON.stringify({ kind, payload }),
     });
     const job = response.job;
+    trackJobTransitions([job], false);
     mergeJob(job);
     renderJobHistory(job.job_id);
     await selectJob(job.job_id);
@@ -3882,6 +3949,7 @@ async function loadJobs(preferredJobId = "") {
   try {
     const payload = await api("/api/jobs?limit=50");
     state.jobs = payload.jobs || [];
+    trackJobTransitions(state.jobs, false);
     const selectedJobId = preferredJobId || state.activeJob?.job_id || state.jobs[0]?.job_id || "";
     renderJobHistory(selectedJobId);
     if (selectedJobId) {
@@ -3931,6 +3999,7 @@ async function selectJob(jobId) {
     ]);
     state.activeJob = jobPayload.job;
     state.jobEvents = eventPayload.events || [];
+    trackJobTransitions([state.activeJob], state.lastJobStatusById.has(jobId));
     mergeJob(state.activeJob);
     renderJobHistory(jobId);
     renderJob(state.activeJob);
@@ -3957,6 +4026,7 @@ async function refreshActiveJob(jobId) {
   try {
     const payload = await api(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.activeJob = payload.job;
+    trackJobTransitions([state.activeJob], true);
     mergeJob(state.activeJob);
     renderJobHistory(jobId);
     renderJob(state.activeJob);
@@ -4049,6 +4119,156 @@ function mergeJob(job) {
     return;
   }
   state.jobs[index] = job;
+}
+
+function initAudioAlertControls() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(AUDIO_ALERT_STORAGE_KEY) || "{}") || {};
+  } catch {
+    saved = {};
+  }
+  const allowedTones = new Set(["chime", "bell", "beep"]);
+  state.audioAlert = {
+    enabled: Boolean(saved.enabled),
+    tone: allowedTones.has(saved.tone) ? saved.tone : "chime",
+  };
+  if (els.audioAlertEnabled) els.audioAlertEnabled.checked = state.audioAlert.enabled;
+  if (els.audioAlertTone) els.audioAlertTone.value = state.audioAlert.tone;
+  renderAudioAlertState();
+}
+
+function saveAudioAlertPreference() {
+  try {
+    const toneToSave = state.audioAlert.tone === "custom" ? "chime" : state.audioAlert.tone;
+    localStorage.setItem(
+      AUDIO_ALERT_STORAGE_KEY,
+      JSON.stringify({ enabled: Boolean(state.audioAlert.enabled), tone: toneToSave }),
+    );
+  } catch {
+    // Storage failures should not affect console operations.
+  }
+}
+
+function renderAudioAlertState() {
+  if (!els.audioAlertFileName) return;
+  if (state.audioAlertFileName && state.audioAlert.tone === "custom") {
+    els.audioAlertFileName.hidden = false;
+    els.audioAlertFileName.textContent = t("Custom audio: {name}", { name: state.audioAlertFileName });
+  } else {
+    els.audioAlertFileName.hidden = true;
+    els.audioAlertFileName.textContent = "";
+  }
+}
+
+function handleAudioAlertFile(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+  if (state.audioAlertFileUrl) {
+    URL.revokeObjectURL(state.audioAlertFileUrl);
+  }
+  state.audioAlertFileUrl = URL.createObjectURL(file);
+  state.audioAlertFileName = file.name;
+  state.audioAlert.tone = "custom";
+  if (els.audioAlertTone) els.audioAlertTone.value = "custom";
+  renderAudioAlertState();
+  void playAudioAlert("succeeded");
+}
+
+function ensureAudioContext() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!state.audioContext) {
+    state.audioContext = new AudioCtx();
+  }
+  if (state.audioContext.state === "suspended") {
+    void state.audioContext.resume().catch(() => {});
+  }
+  return state.audioContext;
+}
+
+function playSynthesizedTone(tone, outcome = "succeeded") {
+  const ctx = ensureAudioContext();
+  if (!ctx) return false;
+  const now = ctx.currentTime;
+  const isSuccess = outcome === "succeeded";
+  const presets = {
+    chime: isSuccess
+      ? [
+          { freq: 523.25, delay: 0, duration: 0.16, type: "sine" },
+          { freq: 659.25, delay: 0.11, duration: 0.16, type: "sine" },
+          { freq: 783.99, delay: 0.22, duration: 0.28, type: "sine" },
+        ]
+      : [
+          { freq: 440.0, delay: 0, duration: 0.18, type: "triangle" },
+          { freq: 311.13, delay: 0.16, duration: 0.28, type: "triangle" },
+        ],
+    bell: isSuccess
+      ? [
+          { freq: 880.0, delay: 0, duration: 0.35, type: "sine" },
+          { freq: 1318.51, delay: 0.06, duration: 0.3, type: "sine" },
+        ]
+      : [
+          { freq: 587.33, delay: 0, duration: 0.3, type: "sine" },
+          { freq: 392.0, delay: 0.14, duration: 0.35, type: "sine" },
+        ],
+    beep: isSuccess
+      ? [
+          { freq: 880.0, delay: 0, duration: 0.11, type: "square" },
+          { freq: 880.0, delay: 0.16, duration: 0.14, type: "square" },
+        ]
+      : [
+          { freq: 330.0, delay: 0, duration: 0.24, type: "square" },
+        ],
+  };
+  const notes = presets[tone] || presets.chime;
+  for (const note of notes) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = note.type;
+    osc.frequency.setValueAtTime(note.freq, now + note.delay);
+    gain.gain.setValueAtTime(0.0001, now + note.delay);
+    gain.gain.exponentialRampToValueAtTime(0.14, now + note.delay + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + note.delay + note.duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now + note.delay);
+    osc.stop(now + note.delay + note.duration + 0.02);
+  }
+  return true;
+}
+
+async function playAudioAlert(outcome = "succeeded") {
+  try {
+    if (state.audioAlert.tone === "custom" && state.audioAlertFileUrl) {
+      const audio = new Audio(state.audioAlertFileUrl);
+      await audio.play();
+      return true;
+    }
+    return playSynthesizedTone(state.audioAlert.tone, outcome);
+  } catch {
+    return playSynthesizedTone("chime", outcome);
+  }
+}
+
+function trackJobTransitions(jobs, announce = false) {
+  for (const job of jobs) {
+    if (!job?.job_id) continue;
+    const previousStatus = state.lastJobStatusById.get(job.job_id);
+    state.lastJobStatusById.set(job.job_id, job.status);
+    if (
+      announce
+      && previousStatus
+      && !TERMINAL_JOB_STATES.has(previousStatus)
+      && TERMINAL_JOB_STATES.has(job.status)
+      && !state.announcedTerminalJobIds.has(job.job_id)
+    ) {
+      state.announcedTerminalJobIds.add(job.job_id);
+      if (state.audioAlert.enabled) {
+        void playAudioAlert(job.status);
+      }
+    }
+  }
 }
 
 function renderJob(job) {
