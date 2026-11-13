@@ -297,6 +297,75 @@ def test_assist_handler_uses_recognized_selection_point(special_filter):
     assert result["selected"]["tap_point"] == [900, 123]
 
 
+def test_assist_handler_defaults_special_filter_from_pre_run_report():
+    seen_filters = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            return b"frame"
+
+        def tap(self, x, y):
+            return Operation()
+
+    class Match:
+        matched = False
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match()
+
+        def match_not_available(self, _screenshot, _server):
+            return Match()
+
+        def recognize(self, _screenshot, _assist, *, server):
+            seen_filters.append(_assist.get("special_filter", "any"))
+            return {
+                "candidate_count": 1,
+                "servant_name": "托勒密",
+                "candidates": [
+                    {
+                        "anchor": [10, 20],
+                        "scale": 1.0,
+                        "selection_point": [900, 123],
+                        "checks": {},
+                    }
+                ],
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"mode": "从者礼装", "all_not_skip": True},
+                "pre_run": {
+                    "assist_report": {
+                        "default_special_filter": "arts",
+                    }
+                },
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, *_args, **_options):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {"setting_name": "demo", "tap_wait_seconds": 0},
+    )
+    assert seen_filters == ["arts"]
+
+
 def test_assist_handler_retries_when_selected_candidate_is_unavailable():
     state = {"screen": "candidate_1"}
     taps = []

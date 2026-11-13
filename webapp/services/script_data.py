@@ -212,6 +212,7 @@ class ScriptDataService:
             "server": config.get("server"),
             "servants": self._plan_servants(config),
             "assist": self._plan_assist(config),
+            "pre_run": self.build_pre_run_report(config),
             "run": self._plan_run(config),
             "special_keys": special_keys,
             "master": self._plan_master(config),
@@ -222,6 +223,246 @@ class ScriptDataService:
                 "action_count": action_count,
             },
             "validation": detail["validation"],
+        }
+
+    def get_setting_pre_run_report(self, name: str) -> dict[str, Any]:
+        detail = self.get_setting(name)
+        report = self.build_pre_run_report(detail["config"])
+        return {
+            "name": detail["name"],
+            "path": detail["path"],
+            **report,
+        }
+
+    def preview_pre_run_report(
+        self,
+        *,
+        config: dict[str, Any] | None = None,
+        source: str | None = None,
+    ) -> dict[str, Any]:
+        if source is not None:
+            resolved_config = self._preset_source_value(source, dict)
+        elif isinstance(config, dict):
+            resolved_config = config
+        else:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Setting configuration must be a JSON object.",
+            )
+        return self.build_pre_run_report(resolved_config)
+
+    def build_pre_run_report(self, config: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(config, dict):
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                "Setting configuration must be a JSON object.",
+            )
+        raw_server = config.get("server")
+        server = (
+            raw_server.upper()
+            if isinstance(raw_server, str) and raw_server.strip()
+            else "CH"
+        )
+        server_label = {"CH": "简中服", "CNTW": "繁中服", "JP": "日服"}.get(
+            server,
+            str(raw_server or "CH"),
+        )
+        raw_assist_idx = config.get("assistIdx")
+        assist_idx = (
+            raw_assist_idx
+            if isinstance(raw_assist_idx, int)
+            and not isinstance(raw_assist_idx, bool)
+            and 0 <= raw_assist_idx < 6
+            else None
+        )
+        missing_frontline_slots = [
+            slot
+            for slot in range(3)
+            if not (
+                isinstance(config.get(f"servant_{slot}_name"), str)
+                and bool(config.get(f"servant_{slot}_name"))
+            )
+        ]
+        frontline_ready = len(missing_frontline_slots) == 0
+        frontline_warning = (
+            "编队前排不足3人，是否仍然开始脚本？"
+            if not frontline_ready
+            else None
+        )
+        subtitle_warning_applicable = server in {"CH", "CNTW"}
+        subtitle_warning = (
+            "简中服及繁中服请务必在游戏设置中关闭战斗语音字幕，否则字幕遮挡会导致无法识别宝具值！"
+            if subtitle_warning_applicable
+            else None
+        )
+
+        raw_mode = config.get("assistMode")
+        mode = (
+            raw_mode
+            if isinstance(raw_mode, str) and raw_mode.strip()
+            else "从者礼装"
+        )
+        configured_servant_name = (
+            config.get(f"servant_{assist_idx}_name")
+            if assist_idx is not None
+            else None
+        )
+        if not isinstance(configured_servant_name, str) or not configured_servant_name:
+            configured_servant_name = None
+        catalog_by_name = self._servant_canonical_lookup(config)
+        servant_canonical_name = (
+            catalog_by_name.get(configured_servant_name, configured_servant_name)
+            if configured_servant_name
+            else None
+        )
+        servant_specified = (
+            mode not in {"仅礼装", "不识别", "冠位助战仅礼装"}
+            and configured_servant_name is not None
+        )
+        servant_display = (
+            configured_servant_name
+            if servant_specified and configured_servant_name is not None
+            else "未指定"
+        )
+
+        if mode in {"仅从者", "不识别"}:
+            equip_slots = [[], [], []]
+        else:
+            raw_equip = config.get("assistEquip")
+            if isinstance(raw_equip, dict):
+                equip_slots = [
+                    self._assist_equip_names(raw_equip.get(slot_key))
+                    for slot_key in ("normal", "kizuna", "houshuu")
+                ]
+            elif isinstance(raw_equip, list):
+                if not raw_equip:
+                    equip_slots = [[], [], []]
+                elif isinstance(raw_equip[0], list) or (
+                    len(raw_equip) == 3
+                    and any(isinstance(item, list) or item is None for item in raw_equip)
+                ):
+                    equip_slots = [
+                        self._assist_equip_names(
+                            raw_equip[idx] if idx < len(raw_equip) else None
+                        )
+                        for idx in range(3)
+                    ]
+                else:
+                    equip_slots = [self._assist_equip_names(raw_equip), [], []]
+            else:
+                equip_slots = [[], [], []]
+        equip_slots_display = [
+            "、".join(slot_names) if slot_names else "未指定"
+            for slot_names in equip_slots
+        ]
+        equip_specified = mode not in {"仅从者", "不识别"} and any(
+            slot_names for slot_names in equip_slots
+        )
+
+        friend_only = bool(config.get("onlyFriendAssist", 0))
+        friend_only_effective = (
+            mode not in {"仅礼装", "不识别"} and configured_servant_name is not None
+        )
+        friend_only_warning = (
+            "(从者未指定不生效)" if not friend_only_effective else None
+        )
+
+        full_limit_break = bool(config.get("fullEquip", 0))
+        full_limit_break_effective = equip_specified
+        full_limit_break_warning = (
+            "(礼装未指定不生效)" if not full_limit_break_effective else None
+        )
+
+        servant_constraints_effective = servant_specified
+        servant_constraints_warning = (
+            "注意以下设置在从者未指定时不生效"
+            if not servant_constraints_effective
+            else None
+        )
+
+        raw_np_level = config.get("NPlevel")
+        np_level = (
+            raw_np_level
+            if isinstance(raw_np_level, int) and not isinstance(raw_np_level, bool)
+            else 1
+        )
+        raw_servant_level = config.get("servantLevel")
+        servant_level = (
+            raw_servant_level
+            if isinstance(raw_servant_level, int)
+            and not isinstance(raw_servant_level, bool)
+            else 1
+        )
+        raw_skills = config.get("skillsLevel")
+        default_skills = [10, 10, 10, 0, 0, 0, 0, 0]
+        if isinstance(raw_skills, list) and raw_skills:
+            padded_skills = (raw_skills + [0] * 8)[:8]
+        else:
+            padded_skills = default_skills
+        skill_levels = padded_skills[:3]
+        append_skill_levels = (
+            padded_skills[3:6] if server == "CNTW" else padded_skills[3:8]
+        )
+
+        matched_names = {
+            name
+            for name in (configured_servant_name, servant_canonical_name)
+            if isinstance(name, str) and name
+        }
+        check_np_color = servant_specified and bool(
+            matched_names & {"托勒密", "妖精骑士兰斯洛特"}
+        )
+        check_servant_name = servant_specified and (
+            "U－奥尔加玛丽" in matched_names
+        )
+        if check_np_color:
+            special_filter_options = ["arts", "buster"]
+            default_special_filter = "arts"
+        elif check_servant_name:
+            special_filter_options = ["u_olga", "olga"]
+            default_special_filter = "u_olga"
+        else:
+            special_filter_options = []
+            default_special_filter = "any"
+
+        return {
+            "frontline_ready": frontline_ready,
+            "missing_frontline_slots": missing_frontline_slots,
+            "frontline_warning": frontline_warning,
+            "subtitle_warning_applicable": subtitle_warning_applicable,
+            "subtitle_warning": subtitle_warning,
+            "subtitle_tip_image": (
+                "ui/closesub.png" if subtitle_warning_applicable else None
+            ),
+            "assist_report": {
+                "server": server,
+                "server_label": server_label,
+                "mode": mode,
+                "slot": assist_idx,
+                "servant_name": configured_servant_name,
+                "servant_canonical_name": servant_canonical_name,
+                "servant_specified": servant_specified,
+                "servant_display": servant_display,
+                "equip_slots": equip_slots,
+                "equip_slots_display": equip_slots_display,
+                "equip_specified": equip_specified,
+                "friend_only": friend_only,
+                "friend_only_effective": friend_only_effective,
+                "friend_only_warning": friend_only_warning,
+                "full_limit_break": full_limit_break,
+                "full_limit_break_effective": full_limit_break_effective,
+                "full_limit_break_warning": full_limit_break_warning,
+                "servant_constraints_effective": servant_constraints_effective,
+                "servant_constraints_warning": servant_constraints_warning,
+                "np_level": np_level,
+                "servant_level": servant_level,
+                "skill_levels": skill_levels,
+                "append_skill_levels": append_skill_levels,
+                "check_np_color": check_np_color,
+                "check_servant_name": check_servant_name,
+                "special_filter_options": special_filter_options,
+                "default_special_filter": default_special_filter,
+            },
         }
 
     def list_strategies(self) -> list[dict[str, str]]:
@@ -1272,7 +1513,13 @@ class ScriptDataService:
         try:
             catalog = self._load_servant_catalog(server)
         except AppError:
-            return {}
+            if server != "CH":
+                try:
+                    catalog = self._load_servant_catalog("CH")
+                except AppError:
+                    return {}
+            else:
+                return {}
         lookup: dict[str, str] = {}
         for canonical_name, details in catalog.items():
             lookup[canonical_name] = canonical_name

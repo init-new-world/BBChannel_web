@@ -948,3 +948,106 @@ def test_calculate_turn_replacements_endpoint_and_chen_gong_error(tmp_path: Path
     assert payload["used_servants"] == [0, 1]
 
 
+def test_pre_run_report_checks_frontline_subtitles_and_special_assist_servants(tmp_path: Path):
+    assets_dir = tmp_path / "assets"
+    data_dir = tmp_path / "data"
+    assets_dir.mkdir()
+    _write_json(
+        data_dir / "servant_info_CH.json",
+        {
+            "妖精骑士兰斯洛特": {"SN": "312", "class": "Lancer", "other_name": ["妖兰"]},
+            "托勒密": {"SN": "391", "class": "Archer", "other_name": []},
+            "U－奥尔加玛丽": {"SN": "430", "class": "Beast", "other_name": ["总统"]},
+        },
+    )
+    _write_json(
+        data_dir / "settings" / "melusine.json",
+        {
+            "server": "CH",
+            "servant_0_name": "妖兰",
+            "servant_1_name": "托勒密",
+            "servant_2_name": "",
+            "assistIdx": 0,
+            "assistMode": "从者礼装",
+            "assistEquip": [["黑之圣杯"], [], ["迦勒底午餐时光"]],
+            "onlyFriendAssist": 1,
+            "fullEquip": 1,
+            "NPlevel": 2,
+            "servantLevel": 100,
+            "skillsLevel": [10, 10, 10, 0, 10, 0, 0, 0],
+            "round1_turns": 1,
+        },
+    )
+    client = TestClient(create_app(assets_dir=assets_dir, data_dir=data_dir))
+
+    get_resp = client.get("/api/settings/melusine/pre-run-report")
+    assert get_resp.status_code == 200
+    report = get_resp.json()
+    assert report["frontline_ready"] is False
+    assert report["missing_frontline_slots"] == [2]
+    assert report["frontline_warning"] == "编队前排不足3人，是否仍然开始脚本？"
+    assert report["subtitle_warning_applicable"] is True
+    assert report["subtitle_tip_image"] == "ui/closesub.png"
+    assist = report["assist_report"]
+    assert assist["server_label"] == "简中服"
+    assert assist["servant_display"] == "妖兰"
+    assert assist["servant_canonical_name"] == "妖精骑士兰斯洛特"
+    assert assist["equip_slots_display"] == ["黑之圣杯", "未指定", "迦勒底午餐时光"]
+    assert assist["friend_only_effective"] is True
+    assert assist["full_limit_break_effective"] is True
+    assert assist["servant_constraints_effective"] is True
+    assert assist["check_np_color"] is True
+    assert assist["check_servant_name"] is False
+    assert assist["special_filter_options"] == ["arts", "buster"]
+    assert assist["default_special_filter"] == "arts"
+
+    # Preview endpoint with U-Olga Marie on JP and CE-only mode warnings
+    olga_resp = client.post(
+        "/api/settings/pre-run-report",
+        json={
+            "config": {
+                "server": "JP",
+                "servant_0_name": "总统",
+                "servant_1_name": "托勒密",
+                "servant_2_name": "妖兰",
+                "assistIdx": 0,
+                "assistMode": "冠位助战",
+            }
+        },
+    )
+    assert olga_resp.status_code == 200
+    olga = olga_resp.json()
+    assert olga["frontline_ready"] is True
+    assert olga["missing_frontline_slots"] == []
+    assert olga["subtitle_warning_applicable"] is False
+    assert olga["assist_report"]["check_servant_name"] is True
+    assert olga["assist_report"]["special_filter_options"] == ["u_olga", "olga"]
+    assert olga["assist_report"]["default_special_filter"] == "u_olga"
+    assert olga["assist_report"]["full_limit_break_effective"] is False
+    assert olga["assist_report"]["full_limit_break_warning"] == "(礼装未指定不生效)"
+
+    ce_only_resp = client.post(
+        "/api/settings/pre-run-report",
+        json={
+            "config": {
+                "server": "CNTW",
+                "assistIdx": 0,
+                "servant_0_name": "总统",
+                "assistMode": "仅礼装",
+                "assistEquip": ["黑之圣杯"],
+            }
+        },
+    )
+    assert ce_only_resp.status_code == 200
+    ce_only = ce_only_resp.json()["assist_report"]
+    assert ce_only["server_label"] == "繁中服"
+    assert ce_only["servant_display"] == "未指定"
+    assert ce_only["friend_only_effective"] is False
+    assert ce_only["friend_only_warning"] == "(从者未指定不生效)"
+    assert ce_only["servant_constraints_effective"] is False
+    assert ce_only["servant_constraints_warning"] == "注意以下设置在从者未指定时不生效"
+    assert ce_only["append_skill_levels"] == [0, 0, 0]
+    assert ce_only["default_special_filter"] == "any"
+
+
+

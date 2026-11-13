@@ -58,8 +58,14 @@ def create_assist_handler(
         plan = script_data.get_setting_plan(setting_name.strip())
         if not plan.get("validation", {"ok": True})["ok"]:
             raise ValueError(f"Setting {setting_name.strip()} has validation errors.")
+        default_special_filter = (
+            plan.get("pre_run", {})
+            .get("assist_report", {})
+            .get("default_special_filter", "any")
+        )
         special_filter = validate_assist_special_filter(
-            payload.get("special_filter", "any"), plan["assist"].get("mode"),
+            payload.get("special_filter", default_special_filter),
+            plan["assist"].get("mode"),
         )
         if special_filter != "any":
             plan["assist"] = {**plan["assist"], "special_filter": special_filter}

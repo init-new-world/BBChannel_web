@@ -173,6 +173,17 @@ class CalculateTurnReplaceRequest(BaseModel):
         return self
 
 
+class PreviewPreRunReportRequest(BaseModel):
+    config: dict | None = None
+    source: StrictStr | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def require_one_payload(self) -> PreviewPreRunReportRequest:
+        if (self.config is None) == (self.source is None):
+            raise ValueError("Supply exactly one of config or source.")
+        return self
+
+
 class SaveStrategyRequest(BaseModel):
     entries: list[dict] | None = None
     source: StrictStr | None = Field(default=None, min_length=1)
@@ -957,9 +968,20 @@ def create_app(
             will_nums=request.will_nums,
         )
 
+    @app.post("/api/settings/pre-run-report")
+    def preview_pre_run_report(request: PreviewPreRunReportRequest) -> dict:
+        return script_data.preview_pre_run_report(
+            config=request.config,
+            source=request.source,
+        )
+
     @app.get("/api/settings/{name}")
     def setting_detail(name: str) -> dict:
         return script_data.get_setting(name)
+
+    @app.get("/api/settings/{name}/pre-run-report")
+    def setting_pre_run_report(name: str) -> dict:
+        return script_data.get_setting_pre_run_report(name)
 
     @app.get("/api/settings/{name}/plan")
     def setting_plan(name: str) -> dict:

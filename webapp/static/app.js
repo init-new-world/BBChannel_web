@@ -182,24 +182,44 @@ const els = {
   fullRunApple: document.querySelector("#full-run-apple"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   fullRunCrawlTower: document.querySelector("#full-run-crawl-tower"),
+  fullRunCrawlTowerMode: document.querySelector("#full-run-crawl-tower-mode"),
   fullRunAssistFilter: document.querySelector("#full-run-assist-filter"),
   startFullRun: document.querySelector("#start-full-run"),
   restartGame: document.querySelector("#restart-game"),
   inspectChocolate: document.querySelector("#inspect-chocolate"),
+  captureChocolateBanner: document.querySelector("#capture-chocolate-banner"),
+  chocolateFemale: document.querySelector("#chocolate-female"),
+  chocolateMale: document.querySelector("#chocolate-male"),
+  chocolateBatch10: document.querySelector("#chocolate-batch-10"),
   runChocolate: document.querySelector("#run-chocolate"),
   inspectDigdig: document.querySelector("#inspect-digdig"),
   inspectDigdigGrid: document.querySelector("#inspect-digdig-grid"),
+  digdigOneKey: document.querySelector("#digdig-one-key"),
+  digdigResetBoard: document.querySelector("#digdig-reset-board"),
+  digdigTargetPieces: document.querySelector("#digdig-target-pieces"),
+  digdigTargetExtras: document.querySelector("#digdig-target-extras"),
   digdigMaxCycles: document.querySelector("#digdig-max-cycles"),
   executeDigdig: document.querySelector("#execute-digdig"),
   runDigdig: document.querySelector("#run-digdig"),
   inspectLottery: document.querySelector("#inspect-lottery"),
   inspectLotteryStacks: document.querySelector("#inspect-lottery-stacks"),
   runLottery: document.querySelector("#run-lottery"),
+  lotteryDrawPool: document.querySelector("#lottery-draw-pool"),
+  lotteryTidyGiftbox: document.querySelector("#lottery-tidy-giftbox"),
+  lotteryLongTouchDraw: document.querySelector("#lottery-long-touch-draw"),
   lotteryPaySlot: document.querySelector("#lottery-pay-slot"),
+  lotteryOneKey3: document.querySelector("#lottery-onekey-3"),
+  lotteryOneKey4: document.querySelector("#lottery-onekey-4"),
+  lotteryOneKey5: document.querySelector("#lottery-onekey-5"),
   lotteryStar3: document.querySelector("#lottery-star-3"),
   lotteryStar4: document.querySelector("#lottery-star-4"),
   lotteryStar5: document.querySelector("#lottery-star-5"),
+  lotteryKeep3: document.querySelector("#lottery-keep-3"),
+  lotteryKeep4: document.querySelector("#lottery-keep-4"),
+  lotteryKeep5: document.querySelector("#lottery-keep-5"),
+  lotteryFirstRoundCount: document.querySelector("#lottery-first-round-count"),
   lotteryOverflowAction: document.querySelector("#lottery-overflow-action"),
+  lotteryOverflowActions: document.querySelector("#lottery-overflow-actions"),
   inspectExpball: document.querySelector("#inspect-expball"),
   expballDestination: document.querySelector("#expball-destination"),
   navigateExpball: document.querySelector("#navigate-expball"),
@@ -213,6 +233,7 @@ const els = {
   expballStorageTarget: document.querySelector("#expball-storage-target"),
   expballSellTarget: document.querySelector("#expball-sell-target"),
   expballOverflowAction: document.querySelector("#expball-overflow-action"),
+  expballOverflowActions: document.querySelector("#expball-overflow-actions"),
   expballEnhanceTarget: document.querySelector("#expball-enhance-target"),
   expballMaterialSelectMode: document.querySelector("#expball-material-select-mode"),
   expballServantTarget: document.querySelector("#expball-servant-target"),
@@ -220,6 +241,9 @@ const els = {
   expballMaxBatches: document.querySelector("#expball-max-batches"),
   expballAutoLimitBreak: document.querySelector("#expball-auto-limit-break"),
   expballLockCeBombs: document.querySelector("#expball-lock-ce-bombs"),
+  expballAutoStoreCeBombs: document.querySelector("#expball-auto-store-ce-bombs"),
+  expballEat3Star: document.querySelector("#expball-eat-3star"),
+  expballEat4Star: document.querySelector("#expball-eat-4star"),
   expballLockGoldServants: document.querySelector("#expball-lock-gold-servants"),
   expballLockInscribedCc: document.querySelector("#expball-lock-inscribed-cc"),
   expballAllowQpFull: document.querySelector("#expball-allow-qp-full"),
@@ -227,6 +251,8 @@ const els = {
   inspectExpballServantLevel: document.querySelector("#inspect-expball-servant-level"),
   runExpballEnhance: document.querySelector("#run-expball-enhance"),
   fpSummonBatches: document.querySelector("#fp-summon-batches"),
+  expballBannerDirection: document.querySelector("#expball-banner-direction"),
+  expballDraw100: document.querySelector("#expball-draw-100"),
   expballLockLily: document.querySelector("#expball-lock-lily"),
   expballLockHabe: document.querySelector("#expball-lock-habe"),
   expballLockHakuno: document.querySelector("#expball-lock-hakuno"),
@@ -545,21 +571,38 @@ function bindEvents() {
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.startBattlePlan.addEventListener("click", startBattlePlan);
   els.fullRunEntryMode.addEventListener("change", updateControls);
+  els.fullRunCrawlTower?.addEventListener("change", updateControls);
+  els.fullRunCrawlTowerMode?.addEventListener("change", updateControls);
   els.startFullRun.addEventListener("click", startFullRun);
   els.restartGame.addEventListener("click", restartGame);
   els.inspectChocolate.addEventListener("click", inspectChocolate);
+  els.captureChocolateBanner?.addEventListener("click", captureChocolateBanner);
+  els.chocolateFemale?.addEventListener("change", updateControls);
+  els.chocolateMale?.addEventListener("change", updateControls);
+  els.chocolateBatch10?.addEventListener("change", updateControls);
   els.runChocolate.addEventListener("click", runChocolate);
   els.inspectDigdig.addEventListener("click", inspectDigdig);
   els.inspectDigdigGrid.addEventListener("click", inspectDigdigGrid);
+  els.digdigOneKey.addEventListener("change", updateControls);
+  els.digdigResetBoard.addEventListener("change", updateControls);
+  els.digdigTargetPieces.addEventListener("input", updateControls);
+  els.digdigTargetExtras.addEventListener("input", updateControls);
   els.executeDigdig.addEventListener("click", executeDigdig);
   els.runDigdig.addEventListener("click", runDigdig);
   els.inspectLottery.addEventListener("click", inspectLottery);
   els.inspectLotteryStacks.addEventListener("click", inspectLotteryStacks);
   els.runLottery.addEventListener("click", runLottery);
+  els.lotteryDrawPool.addEventListener("change", updateControls);
+  els.lotteryTidyGiftbox.addEventListener("change", updateControls);
+  els.lotteryLongTouchDraw.addEventListener("change", updateControls);
+  els.lotteryOneKey3.addEventListener("change", updateControls);
+  els.lotteryOneKey4.addEventListener("change", updateControls);
+  els.lotteryOneKey5.addEventListener("change", updateControls);
   els.lotteryStar3.addEventListener("change", updateControls);
   els.lotteryStar4.addEventListener("change", updateControls);
   els.lotteryStar5.addEventListener("change", updateControls);
   els.lotteryOverflowAction.addEventListener("change", updateControls);
+  els.lotteryOverflowActions.addEventListener("input", updateControls);
   els.inspectExpball.addEventListener("click", inspectExpball);
   els.navigateExpball.addEventListener("click", navigateExpball);
   els.inspectExpballGrid.addEventListener("click", inspectExpballGrid);
@@ -582,6 +625,8 @@ function bindEvents() {
   els.inspectExpballServantTarget.addEventListener("click", inspectExpballServantTarget);
   els.inspectExpballServantLevel.addEventListener("click", inspectExpballServantLevel);
   els.runExpballEnhance.addEventListener("click", runExpballEnhance);
+  els.expballBannerDirection.addEventListener("change", updateControls);
+  els.expballDraw100.addEventListener("change", updateControls);
   els.expballLockLily.addEventListener("change", updateControls);
   els.expballLockHabe.addEventListener("change", updateControls);
   els.expballLockHakuno.addEventListener("change", updateControls);
@@ -1806,6 +1851,10 @@ async function loadSelectedSettingPlan() {
       api(`/api/settings/${encodeURIComponent(name)}/plan`),
       api(`/api/settings/${encodeURIComponent(name)}/program`),
     ]);
+    const defaultSpecialFilter = state.selectedSettingPlan?.pre_run?.assist_report?.default_special_filter;
+    if (defaultSpecialFilter && els.fullRunAssistFilter) {
+      els.fullRunAssistFilter.value = defaultSpecialFilter;
+    }
     renderSettingPlan(state.selectedSettingPlan);
     renderBattleProgram(state.selectedSettingProgram);
   } catch (error) {
@@ -3148,27 +3197,45 @@ async function startBattleDryRun() {
   });
 }
 
+function isBattlePlanReady() {
+  if (state.selectedSettingProgram?.execution?.battle?.ready) {
+    return true;
+  }
+  return Boolean(
+    els.settingSelect.value
+      && state.selectedSettingPlan?.validation?.ok
+      && els.fullRunCrawlTower?.checked
+      && els.fullRunCrawlTowerMode?.value === "autonomous",
+  );
+}
+
 async function startBattlePlan() {
   const settingName = els.settingSelect.value;
-  if (!settingName || !state.selectedSettingProgram?.execution?.battle?.ready) {
+  if (!settingName || !isBattlePlanReady()) {
     return;
   }
+  const crawlTower = Boolean(els.fullRunCrawlTower?.checked);
+  const crawlTowerMode = els.fullRunCrawlTowerMode?.value || "script";
   await enqueueJob("battle.execute-plan", {
     setting_name: settingName,
     tap_interval_seconds: Number(els.battleActionDelay.value),
+    ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
   });
 }
 
 async function startFullRun() {
   const settingName = els.settingSelect.value;
-  if (!settingName || !state.selectedSettingProgram?.execution?.battle?.ready) {
+  if (!settingName || !isBattlePlanReady()) {
     return;
   }
+  const crawlTower = Boolean(els.fullRunCrawlTower?.checked);
+  const crawlTowerMode = els.fullRunCrawlTowerMode?.value || "script";
   await enqueueJob("battle.run", {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
     max_restarts: readNumber(els.fullRunRestartLimit),
     entry_mode: els.fullRunEntryMode.value,
+    ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
     entry: {
       max_map_swipes: readNumber(els.fullRunMapSwipes),
     },
@@ -3182,6 +3249,7 @@ async function startFullRun() {
     },
     battle: {
       tap_interval_seconds: Number(els.battleActionDelay.value),
+      ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
     },
   });
 }
@@ -3206,13 +3274,31 @@ async function inspectChocolate() {
   });
 }
 
+async function captureChocolateBanner() {
+  const settingName = els.settingSelect.value;
+  if (!settingName) {
+    return;
+  }
+  await enqueueJob("event.chocolate.capture-banner", {
+    setting_name: settingName,
+  });
+}
+
 async function runChocolate() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
     return;
   }
+  const female = Boolean(els.chocolateFemale?.checked ?? true);
+  const male = Boolean(els.chocolateMale?.checked ?? true);
+  if (!female && !male) {
+    return;
+  }
   await enqueueJob("event.chocolate.run", {
     setting_name: settingName,
+    female,
+    male,
+    select_10_batch: Boolean(els.chocolateBatch10?.checked),
   });
 }
 
@@ -3246,15 +3332,33 @@ async function executeDigdig() {
   });
 }
 
+function parseDigdigTargets(input) {
+  return String(input?.value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((token) => (/^\d+$/.test(token) ? Number(token) : token));
+}
+
 async function runDigdig() {
   const settingName = els.settingSelect.value;
   if (!settingName) {
     return;
   }
+  const oneKey = Boolean(els.digdigOneKey?.checked);
+  const resetBoard = Boolean(els.digdigResetBoard?.checked);
+  const targetPieces = parseDigdigTargets(els.digdigTargetPieces);
+  const targetExtras = parseDigdigTargets(els.digdigTargetExtras);
+  if (!oneKey && !targetPieces.length && !targetExtras.length) {
+    return;
+  }
   await enqueueJob("event.digdig.run", {
     setting_name: settingName,
-    one_key: true,
+    one_key: oneKey,
+    reset_board: resetBoard,
     max_cycles: readNumber(els.digdigMaxCycles),
+    ...(targetPieces.length ? { target_pieces: targetPieces } : {}),
+    ...(targetExtras.length ? { target_extras: targetExtras } : {}),
   });
 }
 
@@ -3266,6 +3370,41 @@ function selectedLotteryStars() {
   ]
     .filter(([, input]) => input.checked)
     .map(([star]) => star);
+}
+
+function selectedLotteryOneKeyStars() {
+  return [
+    [3, els.lotteryOneKey3],
+    [4, els.lotteryOneKey4],
+    [5, els.lotteryOneKey5],
+  ]
+    .filter(([, input]) => input?.checked)
+    .map(([star]) => star);
+}
+
+function parseLotteryOverflowActions() {
+  return String(els.lotteryOverflowActions?.value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function parseLotteryMaxStackCounts() {
+  const counts = {};
+  for (const [star, input] of [
+    [3, els.lotteryKeep3],
+    [4, els.lotteryKeep4],
+    [5, els.lotteryKeep5],
+  ]) {
+    if (!input) {
+      continue;
+    }
+    const value = readNumber(input);
+    if (Number.isSafeInteger(value) && value >= 1) {
+      counts[String(star)] = value;
+    }
+  }
+  return counts;
 }
 
 function selectedExpballStars() {
@@ -3282,6 +3421,13 @@ function parseExpballServantTargets() {
   return String(els.expballServantTarget?.value || "")
     .split(",")
     .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseExpballOverflowActions() {
+  return String(els.expballOverflowActions?.value || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
 }
 
@@ -3328,36 +3474,58 @@ async function inspectLotteryStacks() {
   if (!settingName || stars.length === 0) {
     return;
   }
+  const maxStackCounts = parseLotteryMaxStackCounts();
   await enqueueJob("event.lottery.inspect-giftbox-stacks", {
     setting_name: settingName,
     stars,
+    ...(Object.keys(maxStackCounts).length ? { max_stack_counts: maxStackCounts } : {}),
   });
 }
 
 async function runLottery() {
   const settingName = els.settingSelect.value;
+  const drawPool = Boolean(els.lotteryDrawPool?.checked);
+  const tidyGiftbox = Boolean(els.lotteryTidyGiftbox?.checked);
   const stars = selectedLotteryStars();
-  if (!settingName || stars.length === 0) {
+  const oneKeyStars = selectedLotteryOneKeyStars();
+  if (
+    !settingName
+    || (!drawPool && !tidyGiftbox)
+    || (tidyGiftbox && stars.length === 0 && oneKeyStars.length === 0)
+  ) {
     return;
   }
   const overflowAction = els.lotteryOverflowAction.value || "stop";
+  const overflowActions = parseLotteryOverflowActions();
+  const activeOverflows = overflowActions.length ? overflowActions : [overflowAction];
   const overflowStars = selectedExpballStars();
+  const maxStackCounts = parseLotteryMaxStackCounts();
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
+  const usesStorage = activeOverflows.some((item) => ["storage", "storage_then_sell"].includes(item));
+  const usesSell = activeOverflows.some((item) => ["sell", "storage_then_sell"].includes(item));
+  const usesServantEnhance = activeOverflows.includes("servant_enhancement");
   await enqueueJob("event.lottery.run", {
     setting_name: settingName,
+    draw_pool: drawPool,
+    tidy_giftbox: tidyGiftbox,
+    long_touch_draw: Boolean(els.lotteryLongTouchDraw?.checked),
     pay_slot: readNumber(els.lotteryPaySlot),
-    stars: selectedLotteryStars(),
+    ...(stars.length ? { stars } : {}),
+    ...(oneKeyStars.length ? { one_key_stars: oneKeyStars } : {}),
+    first_round_count: Boolean(els.lotteryFirstRoundCount?.checked),
     overflow_action: overflowAction,
+    ...(overflowActions.length ? { overflow_actions: overflowActions } : {}),
+    ...(Object.keys(maxStackCounts).length ? { max_stack_counts: maxStackCounts } : {}),
     ...(overflowStars.length ? { overflow_stars: overflowStars } : {}),
-    ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
-    ...(overflowAction === "sell" ? {
+    ...(usesStorage ? { storage_target: storageTarget } : {}),
+    ...(usesSell ? {
       sell_target: sellTarget,
       lock_gold_servants: els.expballLockGoldServants.checked,
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
       allow_qp_full: Boolean(els.expballAllowQpFull?.checked),
     } : {}),
-    ...(overflowAction === "servant_enhancement" ? {
+    ...(usesServantEnhance ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
       max_batches: readNumber(els.expballMaxBatches),
       target_level: readNumber(els.expballTargetLevel),
@@ -3384,9 +3552,13 @@ async function navigateExpball() {
   if (!settingName) {
     return;
   }
+  const bannerDirection = els.expballBannerDirection?.value || "right";
   await enqueueJob("event.expball.navigate", {
     setting_name: settingName,
     destination: els.expballDestination.value,
+    ...(els.expballDestination.value === "summon"
+      ? { banner_direction: bannerDirection }
+      : {}),
   });
 }
 
@@ -3487,8 +3659,11 @@ async function runExpballEnhance() {
       auto_limit_break: els.expballAutoLimitBreak.checked,
       ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
     } : {
+      eat_3star: Boolean(els.expballEat3Star?.checked),
+      eat_4star: Boolean(els.expballEat4Star?.checked),
       lock_full_ce_bombs: lockCeBombs,
       mark_full_ce_bombs: lockCeBombs,
+      stop_when_ce_grid_full: Boolean(els.expballAutoStoreCeBombs?.checked),
     }),
     ...(stars.length ? { stars } : {}),
   });
@@ -3501,26 +3676,35 @@ async function runExpballSummon() {
   }
   const stars = selectedExpballStars();
   const overflowAction = els.expballOverflowAction.value || "stop";
+  const overflowActions = parseExpballOverflowActions();
+  const activeOverflows = overflowActions.length ? overflowActions : [overflowAction];
   const storageTarget = els.expballStorageTarget.value || "exp";
   const sellTarget = els.expballSellTarget.value || "exp";
-  const isEnhancementOverflow = ["equipment_enhancement", "servant_enhancement"].includes(overflowAction);
+  const usesStorage = activeOverflows.some((item) => ["storage", "storage_then_sell"].includes(item));
+  const usesSell = activeOverflows.some((item) => ["sell", "storage_then_sell"].includes(item));
+  const usesEquipmentEnhance = activeOverflows.includes("equipment_enhancement");
+  const usesServantEnhance = activeOverflows.includes("servant_enhancement");
+  const isEnhancementOverflow = usesEquipmentEnhance || usesServantEnhance;
   const servantTargets = parseExpballServantTargets();
   const lockTargets = parseExpballLockTargets();
   const lockCeBombs = Boolean(
-    overflowAction === "equipment_enhancement" && els.expballLockCeBombs.checked,
+    usesEquipmentEnhance && els.expballLockCeBombs.checked,
   );
   await enqueueJob("event.expball.run", {
     setting_name: settingName,
     max_summons: readNumber(els.fpSummonBatches),
+    banner_direction: els.expballBannerDirection?.value || "right",
+    draw_100: Boolean(els.expballDraw100?.checked),
     overflow_action: overflowAction,
+    ...(overflowActions.length ? { overflow_actions: overflowActions } : {}),
     lock_lily: Boolean(els.expballLockLily?.checked),
     lock_habe: Boolean(els.expballLockHabe?.checked),
     lock_hakuno: Boolean(els.expballLockHakuno?.checked),
     lock_enough_stop: Boolean(els.expballLockEnoughStop?.checked),
     ...(lockTargets.length ? { lock_targets: lockTargets } : {}),
     ...(stars.length ? { stars } : {}),
-    ...(overflowAction === "storage" ? { storage_target: storageTarget } : {}),
-    ...(overflowAction === "sell" ? {
+    ...(usesStorage ? { storage_target: storageTarget } : {}),
+    ...(usesSell ? {
       sell_target: sellTarget,
       lock_gold_servants: els.expballLockGoldServants.checked,
       lock_inscribed_command_codes: els.expballLockInscribedCc.checked,
@@ -3529,16 +3713,18 @@ async function runExpballSummon() {
     ...(isEnhancementOverflow ? {
       material_select_mode: els.expballMaterialSelectMode.value || "auto",
       max_batches: readNumber(els.expballMaxBatches),
-      ...(overflowAction === "servant_enhancement"
-        ? {
-          target_level: readNumber(els.expballTargetLevel),
-          auto_limit_break: els.expballAutoLimitBreak.checked,
-          ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
-        }
-        : {
-          lock_full_ce_bombs: lockCeBombs,
-          mark_full_ce_bombs: lockCeBombs,
-        }),
+      ...(usesServantEnhance ? {
+        target_level: readNumber(els.expballTargetLevel),
+        auto_limit_break: els.expballAutoLimitBreak.checked,
+        ...(servantTargets.length ? { servant_targets: servantTargets } : {}),
+      } : {}),
+      ...(usesEquipmentEnhance ? {
+        eat_3star: Boolean(els.expballEat3Star?.checked),
+        eat_4star: Boolean(els.expballEat4Star?.checked),
+        lock_full_ce_bombs: lockCeBombs,
+        mark_full_ce_bombs: lockCeBombs,
+        auto_store_ce_bombs: Boolean(els.expballAutoStoreCeBombs?.checked),
+      } : {}),
     } : {}),
   });
 }
@@ -3833,6 +4019,14 @@ function renderJobResult(job) {
       details.push(humanizeResultValue(result.reason));
     }
     els.jobResult.textContent = details.join(" · ");
+    return;
+  }
+  if (job.kind === "event.chocolate.capture-banner") {
+    els.jobResult.textContent = [
+      "Valentine banner captured",
+      result.server || "unknown",
+      result.template_path || "valentino.png",
+    ].join(" · ");
     return;
   }
   if (job.kind === "event.chocolate.run") {
@@ -4170,6 +4364,34 @@ function renderSettingPlan(plan) {
     `${t("Servants")}: ${servantText || t("None")}`,
     `${t("Master")}: ${plan.master.equip ?? "-"} · ${t("sex")} ${plan.master.sex ?? "-"}`,
   ];
+  const preRun = plan.pre_run;
+  if (preRun?.assist_report) {
+    const report = preRun.assist_report;
+    const equipDisplay = Array.isArray(report.equip_slots_display)
+      ? report.equip_slots_display.filter((slot) => slot && slot !== "未指定").join(" / ") || t("Unspecified")
+      : t("Unspecified");
+    lines.push(
+      `${t("Assist")}: ${report.mode || "-"} · ${report.servant_display || t("Unspecified")} · CE: ${equipDisplay}`,
+    );
+    const friendFlag = `${t("Friend only")}: ${report.friend_only ? t("Yes") : t("No")}${report.friend_only_warning ? ` ${report.friend_only_warning}` : ""}`;
+    const mlbFlag = `${t("MLB CE")}: ${report.full_limit_break ? t("Yes") : t("No")}${report.full_limit_break_warning ? ` ${report.full_limit_break_warning}` : ""}`;
+    lines.push(`${friendFlag} · ${mlbFlag}`);
+    const skillText = Array.isArray(report.skill_levels) ? report.skill_levels.join("/") : "10/10/10";
+    const appendText = Array.isArray(report.append_skill_levels) ? report.append_skill_levels.join("/") : "0/0/0";
+    lines.push(
+      `${t("Assist reqs")}: NP${report.np_level ?? 1} · Lv.${report.servant_level ?? 1} · ${skillText} · Append ${appendText}${report.servant_constraints_warning ? ` (${report.servant_constraints_warning})` : ""}`,
+    );
+    if (report.default_special_filter && report.default_special_filter !== "any") {
+      lines.push(`${t("Special assist filter")}: ${report.default_special_filter}`);
+    }
+  }
+  if (preRun && !preRun.frontline_ready) {
+    const missingSlots = (preRun.missing_frontline_slots || []).map((slot) => slot + 1).join(", ");
+    lines.push(`${t("Frontline warning")}: ${preRun.frontline_warning} (${t("Missing slots")}: ${missingSlots})`);
+  }
+  if (preRun?.subtitle_warning) {
+    lines.push(`${t("Subtitle tip")}: ${preRun.subtitle_warning}`);
+  }
   for (const round of plan.rounds) {
     lines.push(`R${round.round}: ${round.turns.length} ${t("turns")}`);
     for (const turn of round.turns) {
@@ -4279,19 +4501,31 @@ function updateControls() {
   els.startDiagnostic.disabled = !state.connected || !hasTemplate || hasRunningJob;
   els.startBattleDryRun.disabled = !els.settingSelect.value || hasRunningJob;
   els.startBattlePlan.disabled = !state.connected
-    || !state.selectedSettingProgram?.execution?.battle?.ready
+    || !isBattlePlanReady()
     || hasRunningJob;
   els.startFullRun.disabled = !state.connected
-    || !state.selectedSettingProgram?.execution?.battle?.ready
+    || !isBattlePlanReady()
     || hasRunningJob;
+  if (els.fullRunCrawlTowerMode) {
+    els.fullRunCrawlTowerMode.disabled = !els.fullRunCrawlTower?.checked || hasRunningJob;
+  }
   els.restartGame.disabled = !state.connected
     || !state.selectedSettingPlan?.run?.game_crash_restart
     || hasRunningJob;
+  const hasChocolateGender = Boolean(
+    els.chocolateFemale?.checked || els.chocolateMale?.checked
+  );
   els.inspectChocolate.disabled = !state.connected
     || !els.settingSelect.value
     || hasRunningJob;
+  if (els.captureChocolateBanner) {
+    els.captureChocolateBanner.disabled = !state.connected
+      || !els.settingSelect.value
+      || hasRunningJob;
+  }
   els.runChocolate.disabled = !state.connected
     || !els.settingSelect.value
+    || !hasChocolateGender
     || hasRunningJob;
   els.inspectDigdig.disabled = !state.connected
     || !els.settingSelect.value
@@ -4305,11 +4539,27 @@ function updateControls() {
     || !els.settingSelect.value
     || !supportsDigdig
     || hasRunningJob;
+  els.digdigOneKey.disabled = !supportsDigdig || hasRunningJob;
+  els.digdigResetBoard.disabled = !supportsDigdig || hasRunningJob;
+  els.digdigTargetPieces.disabled = !supportsDigdig || hasRunningJob;
+  els.digdigTargetExtras.disabled = !supportsDigdig || hasRunningJob;
   els.digdigMaxCycles.disabled = !supportsDigdig || hasRunningJob;
+  const hasDigdigMode = Boolean(
+    els.digdigOneKey?.checked
+      || parseDigdigTargets(els.digdigTargetPieces).length
+      || parseDigdigTargets(els.digdigTargetExtras).length,
+  );
   els.runDigdig.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsDigdig
+    || !hasDigdigMode
     || hasRunningJob;
+  const hasLotteryMode = Boolean(
+    els.lotteryDrawPool?.checked || els.lotteryTidyGiftbox?.checked,
+  );
+  const hasLotteryTidyStars = Boolean(
+    hasLotteryStars || selectedLotteryOneKeyStars().length > 0,
+  );
   els.inspectLottery.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsLottery
@@ -4322,13 +4572,25 @@ function updateControls() {
   els.runLottery.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsLottery
-    || !hasLotteryStars
+    || !hasLotteryMode
+    || (Boolean(els.lotteryTidyGiftbox?.checked) && !hasLotteryTidyStars)
     || hasRunningJob;
+  els.lotteryDrawPool.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryTidyGiftbox.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryLongTouchDraw.disabled = !supportsLottery || hasRunningJob;
   els.lotteryPaySlot.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOneKey3.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOneKey4.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOneKey5.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar3.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar4.disabled = !supportsLottery || hasRunningJob;
   els.lotteryStar5.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryKeep3.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryKeep4.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryKeep5.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryFirstRoundCount.disabled = !supportsLottery || hasRunningJob;
   els.lotteryOverflowAction.disabled = !supportsLottery || hasRunningJob;
+  els.lotteryOverflowActions.disabled = !supportsLottery || hasRunningJob;
   els.inspectExpball.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
@@ -4360,6 +4622,7 @@ function updateControls() {
   els.expballStorageTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballSellTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballOverflowAction.disabled = !supportsExpball || hasRunningJob;
+  els.expballOverflowActions.disabled = !supportsExpball || hasRunningJob;
   els.expballEnhanceTarget.disabled = !supportsExpball || hasRunningJob;
   els.expballMaterialSelectMode.disabled = !supportsExpball || hasRunningJob;
   els.expballServantTarget.disabled = !supportsExpball || hasRunningJob;
@@ -4367,6 +4630,9 @@ function updateControls() {
   els.expballMaxBatches.disabled = !supportsExpball || hasRunningJob;
   els.expballAutoLimitBreak.disabled = !supportsExpball || hasRunningJob;
   els.expballLockCeBombs.disabled = !supportsExpball || hasRunningJob;
+  els.expballAutoStoreCeBombs.disabled = !supportsExpball || hasRunningJob;
+  els.expballEat3Star.disabled = !supportsExpball || hasRunningJob;
+  els.expballEat4Star.disabled = !supportsExpball || hasRunningJob;
   els.expballLockGoldServants.disabled = !supportsExpball || hasRunningJob;
   els.expballLockInscribedCc.disabled = !supportsExpball || hasRunningJob;
   els.expballAllowQpFull.disabled = !supportsExpball || hasRunningJob;
@@ -4398,6 +4664,8 @@ function updateControls() {
     || !supportsExpball
     || hasRunningJob;
   els.fpSummonBatches.disabled = !supportsExpball || hasRunningJob;
+  els.expballBannerDirection.disabled = !supportsExpball || hasRunningJob;
+  els.expballDraw100.disabled = !["CH", "JP"].includes(state.selectedSettingPlan?.server) || hasRunningJob;
   els.runExpballStorage.disabled = !state.connected
     || !els.settingSelect.value
     || !supportsExpball
@@ -4413,6 +4681,7 @@ function updateControls() {
   els.fullRunMapSwipes.disabled = ![
     "free_quest",
     "main_story",
+    "ooku",
     "interlude",
   ].includes(
     els.fullRunEntryMode.value,

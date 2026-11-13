@@ -98,6 +98,16 @@ def create_full_run_handler(
                 "recovery",
             )
         }
+        default_special_filter = (
+            plan.get("pre_run", {})
+            .get("assist_report", {})
+            .get("default_special_filter", "any")
+        )
+        if (
+            "special_filter" not in stage_options["assist"]
+            and default_special_filter != "any"
+        ):
+            stage_options["assist"]["special_filter"] = default_special_filter
         validate_assist_special_filter(
             stage_options["assist"].get("special_filter", "any"),
             plan.get("assist", {}).get("mode"),
