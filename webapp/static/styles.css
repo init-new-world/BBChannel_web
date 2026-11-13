@@ -1719,7 +1719,31 @@ select:disabled {
 
 .screen-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+.screen-toggle {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.screen-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .segmented-control {
@@ -2194,7 +2218,8 @@ select:disabled {
   }
 
   .screen-actions,
-  .screen-actions button {
+  .screen-actions > button,
+  .screen-actions .screen-toggle {
     width: 100%;
   }
 

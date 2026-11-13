@@ -184,6 +184,23 @@ class PreviewPreRunReportRequest(BaseModel):
         return self
 
 
+class ScreenRotationRequest(BaseModel):
+    rotation: StrictInt | None = None
+    steps: StrictInt | None = None
+
+    @model_validator(mode="after")
+    def validate_rotation_choice(self) -> ScreenRotationRequest:
+        has_rotation = "rotation" in self.model_fields_set
+        has_steps = "steps" in self.model_fields_set and self.steps is not None
+        if has_steps and has_rotation:
+            raise ValueError("Supply either rotation or steps, not both.")
+        if not has_steps and not has_rotation:
+            raise ValueError("Supply rotation or steps.")
+        if has_rotation and self.rotation is not None and self.rotation not in {0, 90, 180, 270}:
+            raise ValueError("rotation must be null, 0, 90, 180, or 270.")
+        return self
+
+
 class SaveStrategyRequest(BaseModel):
     entries: list[dict] | None = None
     source: StrictStr | None = Field(default=None, min_length=1)
@@ -582,6 +599,7 @@ def create_app(
             stage_handler,
         ),
         screen_is_stuck=device_service.screen_is_stuck,
+        apply_screen_rotation=device_service.set_screen_rotation,
     )
 
     for kind in job_manager.registered_kinds():
@@ -652,6 +670,16 @@ def create_app(
     @app.get("/api/screen/geometry")
     def screen_geometry() -> dict:
         return {"geometry": device_service.screen_geometry()}
+
+    @app.get("/api/screen/rotation")
+    def screen_rotation() -> dict:
+        return device_service.screen_rotation()
+
+    @app.post("/api/screen/rotation")
+    def set_screen_rotation(request: ScreenRotationRequest) -> dict:
+        if request.steps is not None:
+            return device_service.rotate_screen(request.steps)
+        return device_service.set_screen_rotation(request.rotation)
 
     @app.post("/api/connect")
     def connect(request: ConnectRequest) -> dict:

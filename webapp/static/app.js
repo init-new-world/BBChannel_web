@@ -43,6 +43,9 @@ const state = {
   screenshotBase64: "",
   debugOverlayDataUrl: null,
   screenMode: "source",
+  screenRotation: null,
+  autoRefreshScreenTimer: null,
+  autoRefreshScreenInFlight: false,
   screenshotNaturalSize: null,
   latestMatch: null,
   selectedSettingPlan: null,
@@ -163,6 +166,11 @@ const els = {
   matchOverlay: document.querySelector("#match-overlay"),
   screenSourceMode: document.querySelector("#screen-source-mode"),
   screenDebugMode: document.querySelector("#screen-debug-mode"),
+  rotateScreenLeft: document.querySelector("#rotate-screen-left"),
+  rotateScreenRight: document.querySelector("#rotate-screen-right"),
+  rotateScreenAuto: document.querySelector("#rotate-screen-auto"),
+  clickToTap: document.querySelector("#click-to-tap"),
+  autoRefreshScreen: document.querySelector("#auto-refresh-screen"),
   fitScreen: document.querySelector("#fit-screen"),
   actualScreen: document.querySelector("#actual-screen"),
   refreshEvents: document.querySelector("#refresh-events"),
@@ -438,6 +446,7 @@ async function init() {
   await Promise.allSettled([
     loadCapabilities(),
     loadDevices(),
+    loadScreenRotation(),
     loadSettings(),
     loadStrategies(),
     loadTemplates(),
@@ -459,6 +468,7 @@ function bindEvents() {
     renderJob(state.activeJob);
     renderJobEvents();
     if (!state.connected) els.connectionState.textContent = t("Disconnected");
+    els.screenMeta.textContent = formatScreenMeta();
     if (state.presetEditor) {
       els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
     }
@@ -552,7 +562,7 @@ function bindEvents() {
   els.presetStrategyCards.forEach((row) => row.addEventListener("change", updatePresetStrategyCard));
   els.closePreset.addEventListener("click", closePresetEditor);
   els.cancelPreset.addEventListener("click", closePresetEditor);
-  els.snapshotButton.addEventListener("click", captureScreenshot);
+  els.snapshotButton.addEventListener("click", () => captureScreenshot());
   els.clearScreenshot.addEventListener("click", clearScreenshot);
   els.matchButton.addEventListener("click", matchTemplate);
   els.recognitionRoiEnabled.addEventListener("change", () => {
@@ -564,6 +574,13 @@ function bindEvents() {
   els.actualScreen.addEventListener("click", () => setScreenScale("actual"));
   els.screenSourceMode.addEventListener("click", () => setScreenMode("source"));
   els.screenDebugMode.addEventListener("click", () => setScreenMode("debug"));
+  els.rotateScreenLeft?.addEventListener("click", () => rotateScreen({ steps: -1 }));
+  els.rotateScreenRight?.addEventListener("click", () => rotateScreen({ steps: 1 }));
+  els.rotateScreenAuto?.addEventListener("click", () => rotateScreen({ rotation: null }));
+  els.autoRefreshScreen?.addEventListener("change", () => {
+    syncAutoRefreshScreen(true);
+    updateControls();
+  });
   els.refreshEvents.addEventListener("click", loadEvents);
   els.screenshot.addEventListener("load", onScreenshotLoaded);
   els.screenStage.addEventListener("click", populateTapFromClick);
@@ -3036,7 +3053,7 @@ async function connect() {
     });
     state.connected = payload.connected;
     setConnectionLabel(payload);
-    await loadEvents();
+    await Promise.allSettled([loadScreenRotation(), loadEvents()]);
   } catch (error) {
     showError(error);
   } finally {
@@ -3046,8 +3063,11 @@ async function connect() {
 
 async function disconnect() {
   try {
+    if (els.autoRefreshScreen) els.autoRefreshScreen.checked = false;
+    stopAutoRefreshScreen();
     const payload = await api("/api/disconnect", { method: "POST" });
     state.connected = payload.connected;
+    state.screenRotation = null;
     setConnectionLabel(payload);
     clearScreenshot();
     await loadEvents();
@@ -3058,12 +3078,92 @@ async function disconnect() {
   }
 }
 
-async function captureScreenshot() {
+async function loadScreenRotation() {
+  try {
+    const payload = await api("/api/screen/rotation");
+    state.screenRotation = payload.rotation ?? null;
+    els.screenMeta.textContent = formatScreenMeta();
+    updateControls();
+  } catch {
+    // Non-critical if device endpoints are still initializing.
+  }
+}
+
+async function rotateScreen(requestBody) {
+  try {
+    const payload = await api("/api/screen/rotation", {
+      method: "POST",
+      body: JSON.stringify(requestBody),
+    });
+    state.screenRotation = payload.rotation ?? null;
+    els.screenMeta.textContent = formatScreenMeta();
+    if (state.connected) {
+      await captureScreenshot({ quiet: true });
+    }
+    await loadEvents();
+  } catch (error) {
+    showError(error);
+  } finally {
+    updateControls();
+  }
+}
+
+async function refreshLiveScreenFrame() {
+  if (
+    state.autoRefreshScreenInFlight
+    || !state.connected
+    || !els.autoRefreshScreen?.checked
+    || state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status))
+  ) {
+    return;
+  }
+  state.autoRefreshScreenInFlight = true;
   try {
     const response = await api("/api/snapshot");
     const blob = await response.blob();
     setScreenshot(await blobToDataUrl(blob));
-    await loadEvents();
+  } catch (error) {
+    if (els.autoRefreshScreen) els.autoRefreshScreen.checked = false;
+    stopAutoRefreshScreen();
+    showError(error);
+  } finally {
+    state.autoRefreshScreenInFlight = false;
+    updateControls();
+  }
+}
+
+function stopAutoRefreshScreen() {
+  if (state.autoRefreshScreenTimer) {
+    window.clearInterval(state.autoRefreshScreenTimer);
+    state.autoRefreshScreenTimer = null;
+  }
+}
+
+function syncAutoRefreshScreen(triggerImmediate = false) {
+  const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
+  const shouldRun = Boolean(state.connected && els.autoRefreshScreen?.checked && !hasRunningJob);
+  if (!shouldRun) {
+    stopAutoRefreshScreen();
+    return;
+  }
+  if (!state.autoRefreshScreenTimer) {
+    state.autoRefreshScreenTimer = window.setInterval(() => {
+      void refreshLiveScreenFrame();
+    }, 750);
+  }
+  if (triggerImmediate) {
+    void refreshLiveScreenFrame();
+  }
+}
+
+async function captureScreenshot(options = {}) {
+  try {
+    const response = await api("/api/snapshot");
+    const blob = await response.blob();
+    setScreenshot(await blobToDataUrl(blob));
+    if (!options?.quiet) {
+      await loadEvents();
+    }
   } catch (error) {
     showError(error);
   }
@@ -3098,7 +3198,7 @@ function clearScreenshot() {
   els.screenshot.removeAttribute("src");
   els.screenshot.classList.remove("visible", "actual-size");
   els.screenEmpty.hidden = false;
-  els.screenMeta.textContent = t("No capture");
+  els.screenMeta.textContent = formatScreenMeta();
   els.matchResult.textContent = t("No match");
   clearMatchOverlay();
   setScreenMode("source");
@@ -3135,19 +3235,20 @@ async function matchTemplate() {
   }
 }
 
-async function sendTap() {
+async function sendTapCoordinates(x, y) {
   try {
     await api("/api/tap", {
       method: "POST",
-      body: JSON.stringify({
-        x: readNumber(els.tapX),
-        y: readNumber(els.tapY),
-      }),
+      body: JSON.stringify({ x, y }),
     });
     await loadEvents();
   } catch (error) {
     showError(error);
   }
+}
+
+async function sendTap() {
+  await sendTapCoordinates(readNumber(els.tapX), readNumber(els.tapY));
 }
 
 async function sendSwipe() {
@@ -4476,6 +4577,15 @@ function updateControls() {
   els.clearScreenshot.disabled = !hasScreenshot;
   els.matchButton.disabled = !hasScreenshot || !hasTemplate;
   els.screenDebugMode.disabled = !state.debugOverlayDataUrl;
+  if (els.rotateScreenLeft) els.rotateScreenLeft.disabled = !state.connected;
+  if (els.rotateScreenRight) els.rotateScreenRight.disabled = !state.connected;
+  if (els.rotateScreenAuto) els.rotateScreenAuto.disabled = !state.connected || state.screenRotation === null;
+  if (els.clickToTap) els.clickToTap.disabled = !state.connected;
+  if (els.autoRefreshScreen) {
+    els.autoRefreshScreen.disabled = !state.connected;
+    if (!state.connected) els.autoRefreshScreen.checked = false;
+  }
+  syncAutoRefreshScreen(false);
   els.tapButton.disabled = !state.connected;
   els.swipeButton.disabled = !state.connected;
   const selectedJobStatus = state.activeJob?.status || "idle";
@@ -4767,12 +4877,25 @@ function selectBackend(name) {
   }
 }
 
+function formatScreenMeta() {
+  if (!state.screenshotNaturalSize) {
+    return state.connected && state.screenRotation !== null
+      ? `${t("No capture")} · ${t("Rotation {angle}°", { angle: state.screenRotation })}`
+      : t("No capture");
+  }
+  const modeLabel = state.screenMode === "debug" ? "Debug" : "Source";
+  const rotationLabel = state.screenRotation === null
+    ? ""
+    : ` · ${t("Rotation {angle}°", { angle: state.screenRotation })}`;
+  return `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${modeLabel}${rotationLabel}`;
+}
+
 function onScreenshotLoaded() {
   state.screenshotNaturalSize = {
     width: els.screenshot.naturalWidth,
     height: els.screenshot.naturalHeight,
   };
-  els.screenMeta.textContent = `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${state.screenMode === "debug" ? "Debug" : "Source"}`;
+  els.screenMeta.textContent = formatScreenMeta();
   if (!els.recognitionRoiEnabled.checked) {
     els.recognitionRoiWidth.value = state.screenshotNaturalSize.width;
     els.recognitionRoiHeight.value = state.screenshotNaturalSize.height;
@@ -4826,6 +4949,9 @@ function populateTapFromClick(event) {
   const y = Math.round(((event.clientY - rect.top) / rect.height) * state.screenshotNaturalSize.height);
   els.tapX.value = x;
   els.tapY.value = y;
+  if (els.clickToTap?.checked && state.connected) {
+    void sendTapCoordinates(x, y);
+  }
 }
 
 function setScreenScale(mode) {
@@ -4852,7 +4978,7 @@ function setScreenMode(mode) {
     clearMatchOverlay();
   }
   if (state.screenshotNaturalSize) {
-    els.screenMeta.textContent = `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${nextMode === "debug" ? "Debug" : "Source"}`;
+    els.screenMeta.textContent = formatScreenMeta();
   }
   updateControls();
 }

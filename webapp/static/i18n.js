@@ -638,6 +638,15 @@ const zh = {
   "Additional random wait, in seconds": "额外随机等待时间，单位秒",
   "Normalize battle menu options at the start of the first battle": "首次战斗开始时整理战斗菜单设置",
   "Do not send extra taps to advance skill animations": "不发送额外点击以加快技能动画",
+  "Rotate screen counter-clockwise 90 degrees": "逆时针旋转画面 90°",
+  "Rotate screen clockwise 90 degrees": "顺时针旋转画面 90°",
+  "Reset screen rotation to automatic": "重置画面旋转为自动",
+  "Auto": "自动",
+  "Click to tap": "点击即触控",
+  "Send tap immediately when clicking the screenshot": "点击截图时立即向设备发送点击",
+  "Live": "实时刷新",
+  "Continuously refresh the screenshot for connection calibration": "持续刷新截图以测试连接与校准方向",
+  "Rotation {angle}°": "旋转 {angle}°",
 };
 
 let locale = preferredLocale();

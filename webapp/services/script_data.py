@@ -213,6 +213,7 @@ class ScriptDataService:
             "servants": self._plan_servants(config),
             "assist": self._plan_assist(config),
             "pre_run": self.build_pre_run_report(config),
+            "screen_rotation": self._plan_screen_rotation(config),
             "run": self._plan_run(config),
             "special_keys": special_keys,
             "master": self._plan_master(config),
@@ -987,6 +988,21 @@ class ScriptDataService:
                     )
                 )
 
+        if "screenRotation" in config and config["screenRotation"] is not None:
+            rotation = config["screenRotation"]
+            if (
+                isinstance(rotation, bool)
+                or not isinstance(rotation, int)
+                or rotation not in {0, 90, 180, 270}
+            ):
+                errors.append(
+                    self._issue(
+                        "invalid_screen_rotation",
+                        "screenRotation",
+                        "Screen rotation must be null, 0, 90, 180, or 270.",
+                    )
+                )
+
         skill_levels = config.get("skillsLevel")
         if skill_levels is not None and (
             not isinstance(skill_levels, list)
@@ -1317,6 +1333,18 @@ class ScriptDataService:
             if 1 <= position <= 5:
                 positions.append(position)
         return positions
+
+    @staticmethod
+    def _plan_screen_rotation(config: dict[str, Any]) -> int | None:
+        rotation = config.get("screenRotation")
+        if (
+            rotation is None
+            or isinstance(rotation, bool)
+            or not isinstance(rotation, int)
+            or rotation not in {0, 90, 180, 270}
+        ):
+            return None
+        return rotation
 
     @staticmethod
     def _plan_run(config: dict[str, Any]) -> dict[str, Any]:

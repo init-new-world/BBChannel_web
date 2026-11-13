@@ -12,6 +12,7 @@ from webapp.services.script_data import ScriptDataService
 FULL_RUN_JOB_KIND = "battle.run"
 StageHandler = Callable[[RunContext, dict[str, Any]], dict[str, Any] | None]
 ScreenStuckCheck = Callable[[float], bool]
+ScreenRotationApplier = Callable[[int | None], Any]
 
 
 def create_full_run_handler(
@@ -26,6 +27,7 @@ def create_full_run_handler(
     enter_main_story: StageHandler | None = None,
     enter_interlude: StageHandler | None = None,
     screen_is_stuck: ScreenStuckCheck | None = None,
+    apply_screen_rotation: ScreenRotationApplier | None = None,
 ):
 
     def handler(context: RunContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -135,6 +137,14 @@ def create_full_run_handler(
             stage_options["completion"].setdefault(
                 "ignore_full_friendship",
                 True,
+            )
+        screen_rotation = plan.get("screen_rotation")
+        if apply_screen_rotation is not None and screen_rotation is not None:
+            apply_screen_rotation(screen_rotation)
+            context.checkpoint(
+                "run.screen_rotation",
+                progress=0.0,
+                message=f"Applied script screenRotation={screen_rotation}.",
             )
         drop_count = 0
         run_results: list[dict[str, Any]] = []
@@ -597,6 +607,7 @@ def register_full_run_job(
     enter_main_story: StageHandler | None = None,
     enter_interlude: StageHandler | None = None,
     screen_is_stuck: ScreenStuckCheck | None = None,
+    apply_screen_rotation: ScreenRotationApplier | None = None,
 ) -> None:
     if job_manager.has_kind(FULL_RUN_JOB_KIND):
         return
@@ -614,6 +625,7 @@ def register_full_run_job(
             enter_main_story,
             enter_interlude,
             screen_is_stuck,
+            apply_screen_rotation,
         ),
         requires_device=True,
     )

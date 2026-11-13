@@ -20,6 +20,7 @@ class _ScriptData:
         game_crash_restart: bool = False,
         stuck_restart: bool = False,
         check_stuck_interval: float = 30,
+        screen_rotation: int | None = None,
     ) -> None:
         self.before = before
         self.after = after
@@ -28,9 +29,11 @@ class _ScriptData:
         self.game_crash_restart = game_crash_restart
         self.stuck_restart = stuck_restart
         self.check_stuck_interval = check_stuck_interval
+        self.screen_rotation = screen_rotation
 
     def get_setting_plan(self, _name: str):
         return {
+            "screen_rotation": self.screen_rotation,
             "run": {
                 "interval_before_fight": self.before,
                 "interval_after_fight": self.after,
@@ -39,7 +42,7 @@ class _ScriptData:
                 "game_crash_restart": self.game_crash_restart,
                 "stuck_restart": self.stuck_restart,
                 "check_stuck_interval": self.check_stuck_interval,
-            }
+            },
         }
 
 
@@ -970,5 +973,35 @@ def test_full_run_resumes_at_prepare_when_completion_returns_prepare_next_stage(
         "battle",
         "complete",
     ]
+
+
+def test_full_run_applies_configured_screen_rotation_before_execution():
+    applied: list[int | None] = []
+
+    def stage(_context, _payload):
+        return {"complete": True, "repeated": False, "drop_count": 0}
+
+    handler = create_full_run_handler(
+        _ScriptData(screen_rotation=180),
+        stage,
+        stage,
+        stage,
+        stage,
+        apply_screen_rotation=applied.append,
+    )
+    handler(_Context(), {"setting_name": "demo"})
+
+    handler_without_rotation = create_full_run_handler(
+        _ScriptData(screen_rotation=None),
+        stage,
+        stage,
+        stage,
+        stage,
+        apply_screen_rotation=applied.append,
+    )
+    handler_without_rotation(_Context(), {"setting_name": "demo"})
+
+    assert applied == [180]
+
 
 

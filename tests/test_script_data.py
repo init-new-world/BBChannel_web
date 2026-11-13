@@ -1050,4 +1050,29 @@ def test_pre_run_report_checks_frontline_subtitles_and_special_assist_servants(t
     assert ce_only["default_special_filter"] == "any"
 
 
+def test_setting_plan_validates_and_exposes_screen_rotation(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    _write_json(data_dir / "servant_info_CH.json", {})
+    _write_json(
+        data_dir / "settings" / "rotated.json",
+        {
+            "server": "CH",
+            "round1_turns": 1,
+            "screenRotation": 270,
+        },
+    )
+    service = ScriptDataService(data_dir)
+    plan = service.get_setting_plan("rotated")
+    assert plan["screen_rotation"] == 270
+
+    invalid_angle = service._validate_setting({"server": "CH", "screenRotation": 45})
+    assert invalid_angle["ok"] is False
+    assert any(item["code"] == "invalid_screen_rotation" for item in invalid_angle["errors"])
+
+    invalid_bool = service._validate_setting({"server": "CH", "screenRotation": True})
+    assert invalid_bool["ok"] is False
+    assert any(item["code"] == "invalid_screen_rotation" for item in invalid_bool["errors"])
+
+
+
 

@@ -360,3 +360,57 @@ def test_same_endpoint_refreshes_control_mapping_when_display_size_changes():
 
     assert before_snapshot.data["mapped"] == [1826, 480]
     assert after_snapshot.data["mapped"] == [2434, 640]
+
+
+def test_screen_rotation_cycles_steps_and_resets_transform_calibration():
+    class SizedBackend(FakeBackend):
+        def list_devices(self):
+            return [
+                DeviceInfo(
+                    backend=self.name,
+                    device_id=self.device_id,
+                    name="Sized Device",
+                    details={"display_size": {"width": 1280, "height": 720}},
+                )
+            ]
+
+        def snapshot(self, device_id):
+            image = Image.new("RGB", (720, 1280), (10, 20, 30))
+            output = BytesIO()
+            image.save(output, format="PNG")
+            return output.getvalue()
+
+    backend = SizedBackend("adb", "rot-1")
+    service = DeviceService(
+        [backend],
+        EventLog(),
+        frame_normalizer=FrameNormalizer(),
+    )
+    service.connect("adb", "rot-1")
+
+    assert service.screen_rotation()["rotation"] is None
+    assert service.rotate_screen(1)["rotation"] == 90
+    assert service.rotate_screen(1)["rotation"] == 180
+    assert service.rotate_screen(1)["rotation"] == 270
+    assert service.rotate_screen(1)["rotation"] is None
+    assert service.rotate_screen(-1)["rotation"] == 270
+
+    # Manual lock to 0 degrees prevents portrait auto-rotation (90 deg).
+    locked = service.set_screen_rotation(0)
+    assert locked["rotation"] == 0
+    assert Image.open(BytesIO(service.snapshot())).size == (1280, 720)
+    assert service.screen_geometry()["rotation"] == 0
+
+    # Disconnecting clears transient frame state while keeping user rotation calibration.
+    service.disconnect()
+    assert service.screen_rotation()["rotation"] == 0
+    assert service.screen_geometry() is None
+
+    service.connect("adb", "rot-1")
+    service.set_screen_rotation(None)
+    service.snapshot()
+    assert service.screen_geometry()["rotation"] == 90
+
+    with pytest.raises(ValueError, match="rotation must be null, 0, 90, 180, or 270"):
+        service.set_screen_rotation(45)
+

@@ -1778,3 +1778,42 @@ def test_match_route_returns_missing_template_error(tmp_path: Path):
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "template_not_found"
+
+
+def test_screen_rotation_routes_get_and_post_calibration(tmp_path: Path):
+    from webapp.devices.coordinates import FrameNormalizer
+
+    unconfigured_dir = tmp_path / "unconfigured"
+    configured_dir = tmp_path / "configured"
+    unconfigured_dir.mkdir()
+    configured_dir.mkdir()
+
+    unconfigured = _client(unconfigured_dir)
+    missing_normalizer = unconfigured.post("/api/screen/rotation", json={"steps": 1})
+    assert missing_normalizer.status_code == 400
+    assert missing_normalizer.json()["error"]["code"] == "screen_geometry_unavailable"
+
+    client = _client(
+        configured_dir,
+        DeviceService([FakeBackend()], EventLog(), frame_normalizer=FrameNormalizer()),
+    )
+
+    initial = client.get("/api/screen/rotation")
+    assert initial.status_code == 200
+    assert initial.json()["rotation"] is None
+
+    stepped = client.post("/api/screen/rotation", json={"steps": 1})
+    assert stepped.status_code == 200
+    assert stepped.json()["rotation"] == 90
+
+    explicit = client.post("/api/screen/rotation", json={"rotation": 180})
+    assert explicit.status_code == 200
+    assert explicit.json()["rotation"] == 180
+
+    reset = client.post("/api/screen/rotation", json={"rotation": None})
+    assert reset.status_code == 200
+    assert reset.json()["rotation"] is None
+
+    invalid = client.post("/api/screen/rotation", json={"rotation": 45})
+    assert invalid.status_code == 422
+

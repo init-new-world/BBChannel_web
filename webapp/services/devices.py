@@ -19,6 +19,9 @@ from webapp.services.event_log import EventLog
 from webapp.services.frame_watchdog import FrameStabilityTracker
 
 
+VALID_SCREEN_ROTATIONS = frozenset({0, 90, 180, 270})
+
+
 class DeviceService:
     def __init__(
         self,
@@ -35,6 +38,7 @@ class DeviceService:
         self._frame_watchdog = frame_watchdog or FrameStabilityTracker()
         self._screen_transform: ScreenTransform | None = None
         self._control_transform: ScreenTransform | None = None
+        self._initial_control_transform: ScreenTransform | None = None
         self._state_lock = threading.RLock()
         self._endpoint_locks_guard = threading.Lock()
         self._endpoint_locks: dict[str, threading.RLock] = {}
@@ -94,6 +98,47 @@ class DeviceService:
             transform = self._screen_transform
         return transform.to_dict() if transform is not None else None
 
+    def screen_rotation(self) -> dict[str, object]:
+        with self._state_lock:
+            rotation = self._frame_normalizer.rotation if self._frame_normalizer is not None else None
+            geometry = self._screen_transform.to_dict() if self._screen_transform is not None else None
+        return {
+            "rotation": rotation,
+            "geometry": geometry,
+        }
+
+    def set_screen_rotation(self, rotation: int | None) -> dict[str, object]:
+        if rotation is not None and (
+            isinstance(rotation, bool)
+            or not isinstance(rotation, int)
+            or rotation not in VALID_SCREEN_ROTATIONS
+        ):
+            raise ValueError("rotation must be null, 0, 90, 180, or 270.")
+        if self._frame_normalizer is None:
+            raise AppError(
+                ErrorCode.SCREEN_GEOMETRY_UNAVAILABLE,
+                "Frame normalization is not configured.",
+            )
+        with self._state_lock:
+            self._frame_normalizer.rotation = rotation
+            self._screen_transform = None
+            if _same_endpoint(self._capture, self._control):
+                self._control_transform = self._initial_control_transform
+        self._event_log.info(
+            "screen_rotation",
+            "Screen rotation updated.",
+            {"rotation": rotation},
+        )
+        return self.screen_rotation()
+
+    def rotate_screen(self, steps: int = 1) -> dict[str, object]:
+        if isinstance(steps, bool) or not isinstance(steps, int):
+            raise ValueError("steps must be an integer.")
+        current = self._frame_normalizer.rotation if self._frame_normalizer is not None else None
+        next_degrees = ((current or 0) + steps * 90) % 360
+        next_rotation = None if next_degrees == 0 else next_degrees
+        return self.set_screen_rotation(next_rotation)
+
     def capabilities(self) -> list[Capability]:
         return [backend.capability() for backend in self._backends.values()]
 
@@ -143,6 +188,7 @@ class DeviceService:
             self._capture = capture
             self._control = control
             self._screen_transform = None
+            self._initial_control_transform = control_transform
             self._control_transform = control_transform
         self._frame_watchdog.reset()
         self._event_log.info(
@@ -179,6 +225,7 @@ class DeviceService:
             self._capture = None
             self._control = None
             self._screen_transform = None
+            self._initial_control_transform = None
             self._control_transform = None
         self._frame_watchdog.reset()
         if previous_state.capture is not None or previous_state.control is not None:

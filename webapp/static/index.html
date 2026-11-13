@@ -142,6 +142,17 @@
                 <button id="screen-source-mode" class="segment active" type="button" aria-pressed="true">Source</button>
                 <button id="screen-debug-mode" class="segment" type="button" aria-pressed="false" disabled>Debug</button>
               </div>
+              <button id="rotate-screen-left" class="ghost-button" type="button" title="Rotate screen counter-clockwise 90 degrees" disabled>-90°</button>
+              <button id="rotate-screen-right" class="ghost-button" type="button" title="Rotate screen clockwise 90 degrees" disabled>+90°</button>
+              <button id="rotate-screen-auto" class="ghost-button" type="button" title="Reset screen rotation to automatic" disabled>Auto</button>
+              <label class="screen-toggle" title="Send tap immediately when clicking the screenshot">
+                <input id="click-to-tap" type="checkbox" disabled>
+                <span>Click to tap</span>
+              </label>
+              <label class="screen-toggle" title="Continuously refresh the screenshot for connection calibration">
+                <input id="auto-refresh-screen" type="checkbox" disabled>
+                <span>Live</span>
+              </label>
               <button id="fit-screen" class="ghost-button" type="button">Fit</button>
               <button id="actual-screen" class="ghost-button" type="button">100%</button>
             </div>

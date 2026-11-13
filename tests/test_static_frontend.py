@@ -341,3 +341,12 @@ def test_operator_console_references_api_controls():
     assert "/program" in script
     assert "/events/stream" in script
     assert "new EventSource" in script
+    assert 'id="rotate-screen-left"' in index
+    assert 'id="rotate-screen-right"' in index
+    assert 'id="rotate-screen-auto"' in index
+    assert 'id="click-to-tap"' in index
+    assert 'id="auto-refresh-screen"' in index
+    assert "/api/screen/rotation" in script
+    assert "rotateScreen" in script
+    assert "syncAutoRefreshScreen" in script
+
