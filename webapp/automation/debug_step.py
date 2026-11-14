@@ -126,10 +126,23 @@ def with_debug_step(
                 annotated_path = str(ann_file)
 
             job_record = job_manager.get(context.job_id)
+            ignored_event_types = {"debug_step", "job_paused", "job_resumed"}
+            list_recent = getattr(job_manager.database, "list_recent_events", None)
+            if callable(list_recent):
+                recent_source = list_recent(
+                    context.job_id,
+                    limit=5,
+                    exclude_types=ignored_event_types,
+                )
+            else:
+                recent_source = [
+                    e
+                    for e in job_manager.database.list_events(context.job_id, limit=1000)
+                    if e.event_type not in ignored_event_types
+                ][-5:]
             recent_events = [
                 {"event_type": e.event_type, "message": e.message}
-                for e in job_manager.database.list_events(context.job_id, limit=50)[-5:]
-                if e.event_type not in {"debug_step", "job_paused", "job_resumed"}
+                for e in recent_source
             ]
             entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),

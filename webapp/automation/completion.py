@@ -7,6 +7,7 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from webapp.automation.interaction import (
+    active_monotonic,
     configured_random_time,
     match_touch_point,
     randomized_touch_point,
@@ -85,7 +86,7 @@ def create_completion_handler(
             plan["run"]["drop_image"],
         )
         drop_recognizer = DropRecognizer(resources, recognition, drop_template) if drop_limit > 0 and drop_template else None
-        started = monotonic()
+        started = active_monotonic(context, clock=monotonic)
         attempts = 0
         actions: list[str] = []
         drop_count = initial_drop_count
@@ -93,8 +94,8 @@ def create_completion_handler(
         cant_add_friend = False
         reentering_quest = False
 
-        while monotonic() - started <= timeout_seconds:
-            elapsed = monotonic() - started
+        while active_monotonic(context, clock=monotonic) - started <= timeout_seconds:
+            elapsed = active_monotonic(context, clock=monotonic) - started
             context.checkpoint(
                 "complete_battle",
                 progress=min(elapsed / timeout_seconds, 0.95),

@@ -211,3 +211,59 @@ def test_assist_handler_stops_when_skill_view_cannot_be_confirmed(view):
         create_assist_handler(script_data, device, recognizer)(context, {"setting_name": "demo"})
     assert len(taps) == (5 if view else 0)
     assert all(point == (847, 130) for point in taps)
+
+
+def test_match_skill_view_ignores_antialiased_rgba_alpha_mask_false_positives(tmp_path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    directory = assets / "battle" / "CH"
+    directory.mkdir(parents=True)
+
+    main_tpl = Image.new("RGBA", (90, 24), (240, 220, 50, 255))
+    draw_main = ImageDraw.Draw(main_tpl)
+    draw_main.text((8, 5), "main", fill=(0, 0, 0, 255))
+    main_tpl.putpixel((0, 0), (240, 220, 50, 222))
+    main_tpl.save(directory / "main_skill.png")
+
+    append_tpl = Image.new("RGBA", (90, 24), (40, 180, 220, 255))
+    draw_app = ImageDraw.Draw(append_tpl)
+    draw_app.text((8, 5), "append", fill=(0, 0, 0, 255))
+    append_tpl.putpixel((0, 0), (40, 180, 220, 222))
+    append_tpl.save(directory / "append_skill.png")
+
+    screen = Image.new("RGB", (1280, 720), (40, 60, 80))
+    # Bright divider stripe below the main header that triggers high TM_CCORR_NORMED if alpha mask is enabled.
+    ImageDraw.Draw(screen).rectangle((820, 520, 950, 540), fill=(210, 200, 175))
+    screen.paste(main_tpl.resize((60, 16), Image.Resampling.LANCZOS).convert("RGB"), (830, 320))
+
+    resources = ResourceService(assets, tmp_path / "data")
+    recognizer = AssistRecognizer(resources, RecognitionService(resources))
+    marker = recognizer.match_skill_view(_png(screen), "CH")
+    assert marker is not None
+    assert marker["view"] == "main"
+    assert recognizer.match_skill_view(_png(screen), "CH", anchor=[130, 500]) is None
+
+
+def test_same_candidate_row_tolerates_right_strip_animation_and_rejects_changes(append_recognizer):
+    recognizer, _templates = append_recognizer
+    base = Image.new("RGB", (1280, 720), (20, 25, 35))
+    draw = ImageDraw.Draw(base)
+    draw.rectangle((40, 120, 190, 270), fill=(90, 140, 200))
+    draw.text((400, 140), "Master A", fill="white")
+    draw.rectangle((1080, 150, 1180, 175), fill="gold")
+
+    animated = base.copy()
+    anim_draw = ImageDraw.Draw(animated)
+    anim_draw.rectangle((820, 220, 1020, 300), fill="cyan")
+    # Simulated animated support rays / FP shimmer in the right strip + faint edge pixel jitter.
+    anim_draw.rectangle((1090, 225, 1260, 305), fill=(240, 250, 255))
+    animated.putpixel((400, 140), (253, 253, 253))
+
+    replaced_player = base.copy()
+    ImageDraw.Draw(replaced_player).rectangle((400, 130, 620, 185), fill="red")
+
+    cand = {"anchor": [100, 200]}
+    shifted = {"anchor": [100, 235]}
+    assert recognizer.same_candidate_row(_png(base), cand, _png(animated), cand)
+    assert not recognizer.same_candidate_row(_png(base), cand, _png(replaced_player), cand)
+    assert not recognizer.same_candidate_row(_png(base), cand, _png(base), shifted)

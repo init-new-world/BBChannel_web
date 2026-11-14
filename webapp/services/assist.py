@@ -13,7 +13,7 @@ from webapp.services.resources import ResourceService
 
 ASSIST_FACE_SCALES = (1.25, 1.2, 1.0, 0.75, 2 / 3, 0.5)
 ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
-ASSIST_LIMIT_BREAK_SCALES = (1.25, *ASSIST_EQUIP_SCALES)
+ASSIST_LIMIT_BREAK_SCALES = (1.25, 1.1, 1.0, 0.9, 0.75, 2 / 3, 0.5)
 ASSIST_FACE_MASK_PATH = "assist/servant_face_mask.png"
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
@@ -97,6 +97,44 @@ class AssistRecognizer:
         )
         canonical_name = assist.get("servant_canonical_name")
         templates = [] if only_equip else self._servant_templates(canonical_name)
+        frame_size: tuple[int, int] | None = None
+        if callable(getattr(self._recognition, "image_size", None)):
+            try:
+                frame_size = self._recognition.image_size(screenshot)
+            except Exception:
+                frame_size = None
+        face_roi = (
+            (0, 140, 260, frame_size[1] - 140)
+            if frame_size is not None and frame_size[0] >= 1000 and frame_size[1] >= 600
+            else None
+        )
+        matches = [
+            match
+            for template_path in templates
+            for match in self._recognition.match_template_all(
+                screenshot,
+                template_path,
+                threshold=threshold,
+                roi=face_roi,
+                scales=ASSIST_FACE_SCALES,
+                mask_path=(
+                    ASSIST_FACE_MASK_PATH
+                    if (self._resources.assets_dir / ASSIST_FACE_MASK_PATH).is_file()
+                    else None
+                ),
+                max_results=20,
+            )
+        ]
+        if not only_equip and not matches:
+            return {
+                "mode": mode,
+                "servant_name": assist.get("servant_name"),
+                "servant_canonical_name": canonical_name,
+                "servant_sn": assist.get("servant_sn"),
+                "templates": templates,
+                "candidates": [],
+                "candidate_count": 0,
+            }
         equip_templates = (
             {}
             if only_servant
@@ -119,13 +157,23 @@ class AssistRecognizer:
             for equip_name, template_paths in equip_templates.items()
         }
         check_limit_break = bool(assist.get("full_limit_break")) and not only_servant
+        limit_break_roi = (
+            (300, 140, 130, frame_size[1] - 140)
+            if check_limit_break
+            and grand_layout
+            and frame_size is not None
+            and frame_size[0] >= 1000
+            and frame_size[1] >= 600
+            else None
+        )
         limit_break_matches = (
             self._recognition.match_template_all(
                 screenshot,
                 "assist/满破标记.png",
                 threshold=threshold,
+                roi=limit_break_roi,
                 scales=ASSIST_LIMIT_BREAK_SCALES,
-                max_results=20,
+                max_results=200,
             )
             if check_limit_break
             else []
@@ -177,27 +225,16 @@ class AssistRecognizer:
             and any(level > 0 for level in required_skill_levels[:3])
             else []
         )
-        skill_level_matches = (
-            self._skill_level_matches(screenshot, threshold, server=server)
-            if normalized_skill_levels and not only_equip
-            else []
+        bond_equip_type = assist.get("bond_equip_type")
+        skill_level_matches: list[tuple[int, Any]] | None = None
+        skill_roi = (
+            (740, 140, 320, frame_size[1] - 140)
+            if grand_layout
+            and frame_size is not None
+            and frame_size[0] >= 1000
+            and frame_size[1] >= 600
+            else None
         )
-        matches = [
-            match
-            for template_path in templates
-            for match in self._recognition.match_template_all(
-                screenshot,
-                template_path,
-                threshold=threshold,
-                scales=ASSIST_FACE_SCALES,
-                mask_path=(
-                    ASSIST_FACE_MASK_PATH
-                    if (self._resources.assets_dir / ASSIST_FACE_MASK_PATH).is_file()
-                    else None
-                ),
-                max_results=20,
-            )
-        ]
 
         if grand_only_equip:
             grand_marker = self.match_grand_marker(screenshot, server)
@@ -356,7 +393,30 @@ class AssistRecognizer:
                         ],
                     }
                 )
+            if mode in GRAND_ASSIST_MODES and bond_equip_type in GRAND_BOND_TEMPLATES:
+                bond_match = self._match_grand_bond_type(
+                    screenshot,
+                    candidate["anchor"],
+                    bond_equip_type,
+                    grand_only_equip=grand_only_equip,
+                )
+                if not bond_match.matched:
+                    continue
+                candidate["checks"].update(
+                    {
+                        "bond_equip_type": bond_equip_type,
+                        "bond_equip_template": bond_match.template_path,
+                        "bond_equip_confidence": bond_match.confidence,
+                    }
+                )
             if normalized_skill_levels and not only_equip:
+                if skill_level_matches is None:
+                    skill_level_matches = self._skill_level_matches(
+                        screenshot,
+                        threshold,
+                        server=server,
+                        roi=skill_roi,
+                    )
                 recognized_skills = self._candidate_skill_levels(
                     candidate["anchor"],
                     skill_level_matches,
@@ -429,14 +489,14 @@ class AssistRecognizer:
                     candidate["checks"]["olga_state"] = int(special_filter == "olga")
             candidates.append(candidate)
 
-        bond_equip_type = assist.get("bond_equip_type")
-        if mode in GRAND_ASSIST_MODES and bond_equip_type in GRAND_BOND_TEMPLATES:
+        if only_equip and mode in GRAND_ASSIST_MODES and bond_equip_type in GRAND_BOND_TEMPLATES:
             bond_candidates = []
             for candidate in candidates:
                 bond_match = self._match_grand_bond_type(
                     screenshot,
                     candidate["anchor"],
                     bond_equip_type,
+                    grand_only_equip=grand_only_equip,
                 )
                 if not bond_match.matched:
                     continue
@@ -828,12 +888,15 @@ class AssistRecognizer:
         screenshot: bytes,
         anchor: list[int],
         bond_equip_type: str,
+        *,
+        grand_only_equip: bool = True,
     ):
         anchor_x, anchor_y = anchor
         left = round(anchor_x + 122 * 1280 / 1788)
         top = round(anchor_y - 19 * 720 / 1006)
         right = round(anchor_x + 167 * 1280 / 1788)
-        bottom = round(anchor_y + 26 * 720 / 1006)
+        bottom_offset = 26 if grand_only_equip else 46
+        bottom = round(anchor_y + bottom_offset * 720 / 1006)
         return self._recognition.match_template(
             screenshot,
             GRAND_BOND_TEMPLATES[bond_equip_type],
@@ -994,7 +1057,7 @@ class AssistRecognizer:
         screenshot: bytes,
         server: str,
         *,
-        threshold: float = 0.7,
+        threshold: float = 0.9,
     ):
         return self._recognition.match_template(
             screenshot,
@@ -1014,6 +1077,34 @@ class AssistRecognizer:
         return self._recognition.match_template(
             screenshot,
             f"battle/{server.upper()}/listupdate.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
+    def match_refresh_close(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/close.png",
+            threshold=threshold,
+            scales=ASSIST_EQUIP_SCALES,
+        )
+
+    def match_connecting(
+        self,
+        screenshot: bytes,
+        server: str,
+        *,
+        threshold: float = 0.85,
+    ):
+        return self._recognition.match_template(
+            screenshot,
+            f"battle/{server.upper()}/connecting.png",
             threshold=threshold,
             scales=ASSIST_EQUIP_SCALES,
         )
@@ -1258,24 +1349,61 @@ class AssistRecognizer:
         return best if best is not None and best.template_path == paths[special_filter] else None
 
     @staticmethod
-    def candidate_identity(screenshot: bytes, candidate: dict[str, Any]) -> str:
+    def _identity_region_boxes(image_size: tuple[int, int], anchor_y: int) -> tuple[tuple[int, int, int, int], ...]:
+        width, height = image_size
+        scale = min(width / 1280, height / 720)
+        top = max(0, round(anchor_y - 100 * scale))
+        middle = min(height, round(anchor_y + 20 * scale))
+        bottom = min(height, round(anchor_y + 110 * scale))
+        # Exclude the changing skill panel and the animated right-side support rays/badge.
+        return (
+            (0, top, width, middle),
+            (0, middle, round(760 * scale), bottom),
+        )
+
+    @classmethod
+    def candidate_identity(cls, screenshot: bytes, candidate: dict[str, Any]) -> str:
         with Image.open(BytesIO(screenshot)) as source:
             image = source.convert("RGB")
-        scale = min(image.width / 1280, image.height / 720)
-        anchor_y = candidate["anchor"][1]
-        top = max(0, round(anchor_y - 100 * scale))
-        middle = min(image.height, round(anchor_y + 20 * scale))
-        bottom = min(image.height, round(anchor_y + 110 * scale))
-        # Exclude the changing skill panel, retaining player/name and row evidence.
-        regions = (
-            (0, top, image.width, middle),
-            (0, middle, round(760 * scale), bottom),
-            (round(1080 * scale), middle, image.width, bottom),
-        )
         digest = hashlib.sha256(str(image.size).encode("ascii"))
-        for region in regions:
+        for region in cls._identity_region_boxes(image.size, candidate["anchor"][1]):
             digest.update(image.crop(region).tobytes())
         return digest.hexdigest()
+
+    def same_candidate_row(
+        self,
+        before_screenshot: bytes,
+        before_candidate: dict[str, Any],
+        after_screenshot: bytes,
+        after_candidate: dict[str, Any],
+        *,
+        min_correlation: float = 0.92,
+    ) -> bool:
+        cv, numpy = self._recognition._require_opencv()
+        before = self._recognition._decode_screenshot(before_screenshot, None)
+        after = self._recognition._decode_screenshot(after_screenshot, None)
+        if before.shape[:2] != after.shape[:2]:
+            return False
+        height, width = before.shape[:2]
+        before_boxes = self._identity_region_boxes((width, height), before_candidate["anchor"][1])
+        after_boxes = self._identity_region_boxes((width, height), after_candidate["anchor"][1])
+        for (bx1, by1, bx2, by2), (ax1, ay1, ax2, ay2) in zip(before_boxes, after_boxes, strict=True):
+            patch_before = before[by1:by2, bx1:bx2]
+            patch_after = after[ay1:ay2, ax1:ax2]
+            common_h = min(patch_before.shape[0], patch_after.shape[0])
+            common_w = min(patch_before.shape[1], patch_after.shape[1])
+            if common_h <= 0 or common_w <= 0:
+                return False
+            patch_before = patch_before[:common_h, :common_w]
+            patch_after = patch_after[:common_h, :common_w]
+            if numpy.ptp(patch_before) == 0 or numpy.ptp(patch_after) == 0:
+                if float(numpy.abs(patch_before.astype(numpy.float32) - patch_after.astype(numpy.float32)).max()) > 4.0:
+                    return False
+                continue
+            correlation = float(cv.matchTemplate(patch_before, patch_after, cv.TM_CCOEFF_NORMED)[0, 0])
+            if correlation < min_correlation:
+                return False
+        return True
 
     def match_skill_view(
         self, screenshot: bytes, server: str, *, anchor: list[int] | None = None,
@@ -1283,7 +1411,7 @@ class AssistRecognizer:
         image_width, image_height = self._recognition.image_size(screenshot)
         scale = min(image_width / 1920, image_height / 1080)
         left, right = round(1230 * scale), round(1430 * scale)
-        top, bottom = 0, image_height
+        top, bottom = round(235 * scale), image_height
         if anchor is not None:
             expected_y = anchor[1] + 20 * 1080 * scale / 1006 + 44 * scale
             top = max(0, round(expected_y - 60 * scale))
@@ -1292,8 +1420,9 @@ class AssistRecognizer:
             return None
         paths = {view: f"battle/{server.upper()}/{view}_skill.png" for view in ("main", "append")}
         matches = self._recognition.match_templates(screenshot, [
-            {"template_path": path, "threshold": 0.7,
-             "roi": [left, top, right - left, bottom - top], "scales": [scale]}
+            {"template_path": path, "threshold": 0.8,
+             "roi": [left, top, right - left, bottom - top], "scales": [scale],
+             "use_alpha_mask": False}
             for path in paths.values()
         ])
         matched = [match for match in matches if match.matched]
@@ -1369,7 +1498,9 @@ class AssistRecognizer:
         self,
         screenshot: bytes,
         threshold: float,
-        *, server: str = "CH",
+        *,
+        server: str = "CH",
+        roi: tuple[int, int, int, int] | None = None,
     ) -> list[tuple[int, Any]]:
         matches: list[tuple[int, Any]] = []
         for level, template_path, mask_path in self._skill_level_templates(server):
@@ -1379,6 +1510,7 @@ class AssistRecognizer:
                     screenshot,
                     template_path,
                     threshold=threshold,
+                    roi=roi,
                     scales=ASSIST_EQUIP_SCALES,
                     mask_path=mask_path,
                     max_results=50,

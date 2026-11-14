@@ -530,7 +530,7 @@ class RecognitionService:
         if len(template_source.shape) == 3 and template_source.shape[2] == 4:
             alpha = template_source[:, :, 3]
             template_image = template_source[:, :, :3]
-            if int(alpha.min()) < 255:
+            if int(alpha.min()) <= 128:
                 template_mask = alpha
         elif len(template_source.shape) == 2:
             template_image = cv.cvtColor(template_source, cv.COLOR_GRAY2BGR)

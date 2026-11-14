@@ -170,7 +170,9 @@ def test_batch_centered_alpha_matching_rejects_color_only_similarity(tmp_path: P
 
     resources = _resource_service(tmp_path)
     template = Image.new("RGBA", (20, 20), (190, 170, 150, 250))
-    ImageDraw.Draw(template).rectangle((3, 5, 8, 15), fill=(120, 110, 100, 250))
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((0, 0, 19, 1), fill=(0, 0, 0, 0))
+    draw.rectangle((3, 5, 8, 15), fill=(120, 110, 100, 250))
     template.save(resources.assets_dir / "text.png")
     screenshot = Image.new("RGB", (60, 50), (150, 140, 120))
     default, centered = RecognitionService(resources).match_templates(
@@ -181,6 +183,36 @@ def test_batch_centered_alpha_matching_rejects_color_only_similarity(tmp_path: P
     )
     assert default.matched is True
     assert centered.matched is False
+
+
+def test_antialiased_border_alpha_does_not_enable_ccorr_mask(tmp_path: Path):
+    pytest.importorskip("cv2")
+    from webapp.services.recognition import RecognitionService
+
+    resources = _resource_service(tmp_path)
+    template = Image.new("RGBA", (24, 24), (110, 105, 95, 255))
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((0, 0, 23, 23), outline=(110, 105, 95, 220))
+    draw.rectangle((5, 5, 18, 18), fill=(195, 185, 165, 255))
+    template.save(resources.assets_dir / "button.png")
+
+    solid_bg = Image.new("RGB", (60, 50), (130, 125, 115))
+    false_match = RecognitionService(resources).match_template(
+        _png_bytes(solid_bg),
+        "button.png",
+        threshold=0.85,
+    )
+    assert false_match.matched is False
+
+    real_scene = solid_bg.copy()
+    real_scene.paste(template.convert("RGB"), (18, 12))
+    real_match = RecognitionService(resources).match_template(
+        _png_bytes(real_scene),
+        "button.png",
+        threshold=0.95,
+    )
+    assert real_match.matched is True
+    assert real_match.top_left == [18, 12]
 
 
 def test_match_template_uses_explicit_mask_path(tmp_path: Path):

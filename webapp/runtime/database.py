@@ -302,6 +302,40 @@ class JobDatabase:
             ).fetchall()
         return [_event_from_row(row) for row in rows]
 
+    def list_recent_events(
+        self,
+        job_id: str,
+        *,
+        limit: int = 5,
+        exclude_types: set[str] | frozenset[str] | tuple[str, ...] = (),
+    ) -> list[JobEvent]:
+        """Return up to `limit` newest events for `job_id` in chronological order."""
+        bounded_limit = max(1, min(limit, 1000))
+        excluded = tuple(sorted({str(item) for item in exclude_types if item}))
+        with self._connect() as connection:
+            if excluded:
+                placeholders = ",".join("?" for _ in excluded)
+                rows = connection.execute(
+                    f"""
+                    SELECT * FROM job_events
+                    WHERE job_id = ? AND event_type NOT IN ({placeholders})
+                    ORDER BY event_id DESC
+                    LIMIT ?
+                    """,
+                    (job_id, *excluded, bounded_limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM job_events
+                    WHERE job_id = ?
+                    ORDER BY event_id DESC
+                    LIMIT ?
+                    """,
+                    (job_id, bounded_limit),
+                ).fetchall()
+        return [_event_from_row(row) for row in reversed(rows)]
+
     def recover_incomplete_jobs(self) -> int:
         active_statuses = (
             JobStatus.QUEUED.value,

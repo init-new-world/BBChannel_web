@@ -31,19 +31,13 @@ def _drop_template() -> Image.Image:
     return image
 
 
-def _run_completion(
-    tmp_path: Path,
-    frames: list[tuple[Image.Image, dict | None]],
+def _create_completion_assets(
+    assets: Path,
+    data: Path,
     *,
-    config: dict | None = None,
-    payload: dict | None = None,
-    wait_timeout: float = 3,
-    story_candidates: list[list[dict[str, object]]] | None = None,
     drop_template: Image.Image | None = None,
-):
-    assets = tmp_path / "assets"
-    data = tmp_path / "data"
-    session = tmp_path / "replays" / "completion"
+    config: dict | None = None,
+) -> None:
     battle_assets = assets / "battle" / "CH"
     interlude_assets = assets / "battle" / "Interlude" / "CH"
     main_story_assets = assets / "battle" / "MainStory" / "CH"
@@ -54,7 +48,6 @@ def _run_completion(
     main_story_assets.mkdir(parents=True)
     drop_assets.mkdir(parents=True)
     settings.mkdir(parents=True)
-    session.mkdir(parents=True)
 
     next_button = _pattern((100, 40), (80, 65, 150))
     run_again = _pattern((120, 50), (35, 120, 170))
@@ -113,6 +106,29 @@ def _run_completion(
         main_story_assets / "nextOneMask.png"
     )
     drop_item.save(drop_assets / "item.png")
+    (data / "servant_info_CH.json").write_text("{}", encoding="utf-8")
+    (settings / "completion.json").write_text(
+        json.dumps({"server": "CH", **(config or {})}),
+        encoding="utf-8",
+    )
+
+
+def _run_completion(
+    tmp_path: Path,
+    frames: list[tuple[Image.Image, dict | None]],
+    *,
+    config: dict | None = None,
+    payload: dict | None = None,
+    wait_timeout: float = 3,
+    story_candidates: list[list[dict[str, object]]] | None = None,
+    drop_template: Image.Image | None = None,
+):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    session = tmp_path / "replays" / "completion"
+    session.mkdir(parents=True)
+    _create_completion_assets(assets, data, drop_template=drop_template, config=config)
+
     manifest_frames = []
     for index, (frame, expected) in enumerate(frames):
         filename = f"{index}.png"
@@ -125,11 +141,6 @@ def _run_completion(
         json.dumps(
             {"version": 1, "device_id": "completion", "frames": manifest_frames}
         ),
-        encoding="utf-8",
-    )
-    (data / "servant_info_CH.json").write_text("{}", encoding="utf-8")
-    (settings / "completion.json").write_text(
-        json.dumps({"server": "CH", **(config or {})}),
         encoding="utf-8",
     )
 
@@ -720,7 +731,8 @@ def test_completion_finishes_on_menu_screen_without_repeat(tmp_path: Path):
     result = _run_completion(
         tmp_path,
         [(frame, None)],
-        payload={"repeat": False},
+        payload={"repeat": False, "timeout_seconds": 10},
+        wait_timeout=10,
     )
 
     assert result.status == JobStatus.SUCCEEDED, result.error
@@ -783,6 +795,78 @@ def test_completion_stops_on_team_restriction_during_quest_reentry(
     assert result.result["stopped"] is True
     assert result.result["reason"] == "team_restriction"
     assert result.result["actions"] == ["reenter_quest"]
+
+
+def test_completion_timeout_excludes_paused_duration(tmp_path: Path):
+    pytest.importorskip("cv2")
+    import threading
+    import time
+    from webapp.automation.completion import create_completion_handler
+
+    base = Image.new("RGB", (1280, 720), (18, 24, 32))
+    next_frame = base.copy()
+    next_frame.paste(_pattern((100, 40), (80, 65, 150)), (600, 630))
+    done_frame = base.copy()
+    done_frame.paste(_pattern((120, 50), (35, 120, 170)), (910, 590))
+
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    _create_completion_assets(assets, data)
+
+    pause_entered = threading.Event()
+    resume_allowed = threading.Event()
+    snapshot_calls = {"count": 0}
+
+    def _to_bytes(image: Image.Image) -> bytes:
+        from io import BytesIO
+        buf = BytesIO()
+        image.save(buf, format="PNG")
+        return buf.getvalue()
+
+    frame_bytes = [
+        _to_bytes(next_frame),
+        _to_bytes(done_frame),
+    ]
+
+    class _FakeDevices:
+        def snapshot(self) -> bytes:
+            idx = snapshot_calls["count"]
+            snapshot_calls["count"] += 1
+            return frame_bytes[min(idx, len(frame_bytes) - 1)]
+
+        def tap(self, x: int, y: int):
+            pause_entered.set()
+            resume_allowed.wait(timeout=3)
+            from webapp.core.models import OperationResult
+            return OperationResult(ok=True, action="tap", message=f"{x},{y}")
+
+    resources = ResourceService(assets, data)
+    recognition = RecognitionService(resources)
+    script_data = ScriptDataService(data)
+    handler = create_completion_handler(script_data, _FakeDevices(), recognition, resources)
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        manager.register(BATTLE_COMPLETE_JOB_KIND, handler)
+        record = manager.start(
+            BATTLE_COMPLETE_JOB_KIND,
+            {
+                "setting_name": "completion",
+                "repeat": False,
+                "timeout_seconds": 1.2,
+                "poll_interval": 0.01,
+                "action_wait_seconds": 0.0,
+            },
+        )
+        assert pause_entered.wait(timeout=5)
+        manager.pause(record.job_id)
+        resume_allowed.set()
+        time.sleep(1.35)
+        manager.resume(record.job_id)
+        finished = manager.wait(record.job_id, timeout=5)
+
+    assert finished.status == JobStatus.SUCCEEDED, finished.error
+    assert finished.result["complete"] is True
+    assert finished.result["actions"] == ["next"]
 
 
 

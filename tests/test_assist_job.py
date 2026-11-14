@@ -1317,3 +1317,119 @@ def test_assist_handler_cycles_sort_order_and_uses_shorter_scroll_step_for_serva
         for _kind, _message, data in events
     )
 
+
+def test_assist_handler_dismisses_refresh_cooldown_and_waits_for_connecting():
+    state = {"screen": "empty", "refresh_taps": 0, "connecting_polls": 0}
+    taps = []
+    events = []
+
+    class Operation:
+        def to_dict(self):
+            return {"ok": True}
+
+    class Device:
+        def snapshot(self):
+            if state["screen"] == "connecting":
+                state["connecting_polls"] += 1
+                if state["connecting_polls"] >= 2:
+                    state["screen"] = "candidate"
+                    return b"candidate"
+            return state["screen"].encode()
+
+        def tap(self, x, y):
+            taps.append((x, y))
+            if state["screen"] == "empty":
+                state["refresh_taps"] += 1
+                state["screen"] = (
+                    "cooldown" if state["refresh_taps"] == 1 else "refresh_confirmation"
+                )
+            elif state["screen"] == "cooldown":
+                state["screen"] = "empty"
+            elif state["screen"] == "refresh_confirmation":
+                state["screen"] = "connecting"
+            elif state["screen"] == "candidate":
+                state["screen"] = "team"
+            return Operation()
+
+        def swipe(self, *_args):
+            raise AssertionError("connecting screen must not trigger assist scroll")
+
+    class Match:
+        size = (120, 60)
+        top_left = (580, 390)
+
+        def __init__(self, matched, center=(640, 420)):
+            self.matched = matched
+            self.center = center
+
+    class Recognizer:
+        def match_reconnect(self, _screenshot, _server):
+            return Match(False)
+
+        def match_connecting(self, screenshot, _server):
+            return Match(screenshot == b"connecting")
+
+        def match_no_assist(self, screenshot, _server):
+            return Match(screenshot == b"empty")
+
+        def match_refresh_button(self, screenshot, _server):
+            return Match(screenshot == b"empty", (1130, 65))
+
+        def match_refresh_confirmation(self, screenshot, _server):
+            return Match(screenshot == b"refresh_confirmation", (615, 410))
+
+        def match_refresh_close(self, screenshot, _server):
+            return Match(screenshot == b"cooldown", (640, 560))
+
+        def match_not_available(self, _screenshot, _server):
+            return Match(False)
+
+        def recognize(self, screenshot, _assist, *, server):
+            assert screenshot != b"connecting"
+            candidates = (
+                [{"anchor": [70, 225], "scale": 1.0, "checks": {}}]
+                if screenshot == b"candidate"
+                else []
+            )
+            return {
+                "candidate_count": len(candidates),
+                "servant_name": "Support",
+                "candidates": candidates,
+            }
+
+    class ScriptData:
+        def get_setting_plan(self, _name):
+            return {
+                "server": "CH",
+                "assist": {"all_not_skip": True, "scroll_limit": 0.96},
+                "run": {"random_time": 0, "random_touch": False},
+            }
+
+    class Context:
+        def checkpoint(self, *_args, **_options):
+            pass
+
+        def emit(self, kind, message, *, data=None):
+            events.append((kind, message, data or {}))
+
+        def sleep(self, _seconds):
+            pass
+
+    result = create_assist_handler(ScriptData(), Device(), Recognizer())(
+        Context(),
+        {
+            "setting_name": "demo",
+            "tap_wait_seconds": 0,
+            "refresh_wait_seconds": 0.1,
+        },
+    )
+
+    assert taps == [(1130, 65), (640, 560), (1130, 65), (615, 410), (340, 165)]
+    assert result["refreshes"] == 1
+    assert result["scrolls"] == 0
+    assert any(
+        data.get("role") == "assist_refresh_cooldown"
+        for _kind, _message, data in events
+    )
+
+

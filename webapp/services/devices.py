@@ -401,6 +401,9 @@ class DeviceService:
         connected = [endpoint for endpoint in endpoints if endpoint is not None]
         if not connected:
             raise AppError(ErrorCode.DEVICE_NOT_CONNECTED, "No device is connected.")
+        hooks = self._action_hooks.get()
+        if hooks is not None:
+            hooks[1]({"action": "restart_game", "logical": package_name, "mapped": package_name})
 
         attempted: set[str] = set()
         for endpoint in connected:

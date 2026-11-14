@@ -26,6 +26,10 @@ ASSIST_SKILL_TOGGLE_POINT = (847, 130)
 ASSIST_SORT_ORDER_POINT = (1153, 128)
 MAX_ASSIST_CLASS_ATTEMPTS = 3
 MAX_ASSIST_SORT_ATTEMPTS = 3
+MAX_ASSIST_REFRESH_COOLDOWN_RETRIES = 6
+ASSIST_REFRESH_COOLDOWN_WAIT_SECONDS = 2.5
+MAX_ASSIST_CONNECTING_WAITS = 16
+ASSIST_CONNECTING_POLL_SECONDS = 0.5
 ASSIST_CLASS_INDEX = {
     "Saber": 1,
     "Archer": 2,
@@ -96,7 +100,7 @@ def create_assist_handler(
             or not 0 <= max_scrolls <= 100
         ):
             raise ValueError("max_scrolls must be between 0 and 100.")
-        max_refreshes = payload.get("max_refreshes", 1)
+        max_refreshes = payload.get("max_refreshes", 20)
         if (
             isinstance(max_refreshes, bool)
             or not isinstance(max_refreshes, int)
@@ -211,7 +215,7 @@ def create_assist_handler(
                         "device_action", "Switched assist skill display.",
                         data={"role": "assist_skill_view", "target": view, "operation": operation.to_dict()},
                     )
-                context.sleep(randomized_wait_seconds(max(0.1, tap_wait_seconds), random_time))
+                context.sleep(randomized_wait_seconds(max(0.5, tap_wait_seconds), random_time))
                 screenshot = snapshot_without_reconnect()
             raise RuntimeError(f"Assist {view} skill view could not be confirmed.")
 
@@ -418,10 +422,31 @@ def create_assist_handler(
         scroll_limit_hits = 0
         grand_boundary_hits = 0
         friend_boundary_hits = 0
+        connecting_waits = 0
         while True:
             progress = min((scrolls + 1) / (max_scrolls + 2), 0.7)
             context.checkpoint("recognize_assist", progress=progress)
             screenshot = snapshot_without_reconnect()
+            connecting = _optional_assist_match(
+                assist_recognizer,
+                "match_connecting",
+                screenshot,
+                plan["server"],
+            )
+            if (
+                connecting is not None
+                and connecting.matched
+                and connecting_waits < MAX_ASSIST_CONNECTING_WAITS
+            ):
+                connecting_waits += 1
+                poll_wait = (
+                    ASSIST_CONNECTING_POLL_SECONDS
+                    if refresh_wait_seconds > 0
+                    else 0.0
+                )
+                context.sleep(randomized_wait_seconds(poll_wait, random_time))
+                continue
+            connecting_waits = 0
             empty_match = _optional_assist_match(
                 assist_recognizer, "match_no_assist", screenshot, plan["server"],
             ) if check_append else None
@@ -436,15 +461,28 @@ def create_assist_handler(
                     server=plan["server"],
                 )
             if check_append and recognition["candidates"]:
+                main_screenshot = screenshot
                 identities = [
                     assist_recognizer.candidate_identity(screenshot, candidate)
                     for candidate in recognition["candidates"]
                 ]
+                same_row = getattr(assist_recognizer, "same_candidate_row", None)
+
+                def _matches_row(
+                    before_candidate: dict[str, Any],
+                    before_identity: str,
+                    after_screenshot: bytes,
+                    after_candidate: dict[str, Any],
+                ) -> bool:
+                    if callable(same_row):
+                        return bool(same_row(main_screenshot, before_candidate, after_screenshot, after_candidate))
+                    return assist_recognizer.candidate_identity(after_screenshot, after_candidate) == before_identity
+
                 screenshot = ensure_skill_view("append", screenshot)
                 accepted = []
                 for candidate, identity in zip(recognition["candidates"], identities, strict=True):
                     context.checkpoint("recognize_append_skills", progress=progress)
-                    if assist_recognizer.candidate_identity(screenshot, candidate) != identity:
+                    if not _matches_row(candidate, identity, screenshot, candidate):
                         context.emit("recognition", "Support row changed during skill display transition.",
                                      data={"role": "assist_identity_changed", "anchor": candidate["anchor"]})
                         continue
@@ -461,9 +499,8 @@ def create_assist_handler(
                 restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
                 candidates = []
                 for candidate in restored["candidates"]:
-                    identity = assist_recognizer.candidate_identity(screenshot, candidate)
                     previous = next((result for original, result, original_identity in accepted if
-                        identity == original_identity
+                        _matches_row(original, original_identity, screenshot, candidate)
                         and original.get("template_path") == candidate.get("template_path")
                         and all(abs(before - after) <= 6 for before, after in zip(
                             original["anchor"], candidate["anchor"], strict=True,
@@ -682,23 +719,59 @@ def create_assist_handler(
             if refreshes >= max_refreshes:
                 raise RuntimeError("No matching assist candidate was found.")
 
-            context.checkpoint("refresh_assist", progress=progress)
-            refresh_button = assist_recognizer.match_refresh_button(
-                snapshot_without_reconnect(),
-                plan["server"],
-            )
-            if not refresh_button.matched:
-                raise RuntimeError("Assist list refresh button was not recognized.")
-            device_service.tap(
-                *match_touch_point(refresh_button, enabled=random_touch)
-            )
-            context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
-            refresh_confirmation = assist_recognizer.match_refresh_confirmation(
-                snapshot_without_reconnect(),
-                plan["server"],
-            )
-            if not refresh_confirmation.matched:
-                raise RuntimeError("Assist list refresh confirmation was not recognized.")
+            refresh_confirmation = None
+            for cooldown_attempt in range(MAX_ASSIST_REFRESH_COOLDOWN_RETRIES + 1):
+                context.checkpoint("refresh_assist", progress=progress)
+                refresh_button = assist_recognizer.match_refresh_button(
+                    snapshot_without_reconnect(),
+                    plan["server"],
+                )
+                if not refresh_button.matched:
+                    raise RuntimeError("Assist list refresh button was not recognized.")
+                device_service.tap(
+                    *match_touch_point(refresh_button, enabled=random_touch)
+                )
+                context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
+                confirm_screen = snapshot_without_reconnect()
+                refresh_confirmation = assist_recognizer.match_refresh_confirmation(
+                    confirm_screen,
+                    plan["server"],
+                )
+                if refresh_confirmation.matched:
+                    break
+                refresh_close = _optional_assist_match(
+                    assist_recognizer,
+                    "match_refresh_close",
+                    confirm_screen,
+                    plan["server"],
+                )
+                if (
+                    refresh_close is None
+                    or not refresh_close.matched
+                    or cooldown_attempt >= MAX_ASSIST_REFRESH_COOLDOWN_RETRIES
+                ):
+                    raise RuntimeError(
+                        "Assist list refresh confirmation was not recognized."
+                    )
+                close_operation = device_service.tap(
+                    *match_touch_point(refresh_close, enabled=random_touch)
+                )
+                context.emit(
+                    "device_action",
+                    "Closed assist refresh cooldown prompt.",
+                    data={
+                        "role": "assist_refresh_cooldown",
+                        "attempt": cooldown_attempt + 1,
+                        "operation": close_operation.to_dict(),
+                    },
+                )
+                cooldown_wait = (
+                    max(ASSIST_REFRESH_COOLDOWN_WAIT_SECONDS, refresh_wait_seconds)
+                    if refresh_wait_seconds > 0
+                    else 0.0
+                )
+                context.sleep(randomized_wait_seconds(cooldown_wait, random_time))
+            assert refresh_confirmation is not None
             device_service.tap(
                 *match_touch_point(refresh_confirmation, enabled=random_touch)
             )

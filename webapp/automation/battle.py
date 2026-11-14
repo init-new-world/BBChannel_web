@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Any
 
 from webapp.automation.interaction import (
+    active_monotonic,
     configured_random_time,
     match_touch_point,
     randomized_touch_point,
@@ -675,7 +676,18 @@ def _distinct_toggle_matches(candidates):
         if any(_match_iou(candidate[1], existing[1]) > 0.3 for existing in selected):
             continue
         selected.append(candidate)
-    return sorted(selected, key=lambda item: (item[1].center[1], item[1].center[0]))
+    if not selected:
+        return []
+    min_x = min(item[1].center[0] for item in selected)
+    col_width = max(max(item[1].size[0] for item in selected) * 2, 1)
+    return sorted(
+        selected,
+        key=lambda item: (
+            (item[1].center[0] - min_x) // col_width,
+            item[1].center[1],
+            item[1].center[0],
+        ),
+    )
 
 
 def _match_iou(first, second) -> float:
@@ -1025,7 +1037,7 @@ def _wait_for_battle_transition(
         }
         for path in [attack_path, *phase_paths, *finish_paths]
     ]
-    started = monotonic()
+    started = active_monotonic(context, clock=monotonic)
     attempts = 0
     while True:
         screenshot = device_service.snapshot()
@@ -1036,7 +1048,7 @@ def _wait_for_battle_transition(
             screenshot,
             server,
             reconnect_timing,
-        ) and monotonic() - started < timeout_seconds:
+        ) and active_monotonic(context, clock=monotonic) - started < timeout_seconds:
             continue
         matches = recognition.match_templates(screenshot, candidates)
         attempts += 1
@@ -1074,7 +1086,7 @@ def _wait_for_battle_transition(
         )
         if result is not None:
             return result
-        if monotonic() - started >= timeout_seconds:
+        if active_monotonic(context, clock=monotonic) - started >= timeout_seconds:
             raise TimeoutError(
                 f"Battle transition was not recognized within {timeout_seconds:.2f} seconds."
             )
@@ -2547,7 +2559,7 @@ def _failed_np_selection(
     server: str, selected_nps: set[int], threshold: float,
     wait_seconds: float, poll_interval: float,
 ) -> set[int]:
-    started = monotonic()
+    started = active_monotonic(context, clock=monotonic)
     while True:
         screenshot = device_service.snapshot()
         back = _match_optional_battle_template(
@@ -2555,7 +2567,7 @@ def _failed_np_selection(
         )
         if back is None or not back.matched:
             return set()
-        if monotonic() - started >= wait_seconds:
+        if active_monotonic(context, clock=monotonic) - started >= wait_seconds:
             blocks = recognize_card_blocks(recognition, screenshot, server, threshold=threshold)
             return set(blocks["nps"]) if selected_nps.intersection(blocks["nps"]) else set()
         context.sleep(max(poll_interval, 0.01))
@@ -3235,7 +3247,7 @@ def _wait_for_battle_ready(
     servant_positions: list[dict[str, Any] | None] | None = None,
     last_skill_number: int | None = None,
 ) -> bytes:
-    started = monotonic()
+    started = active_monotonic(context, clock=monotonic)
     attempts = 0
     while True:
         screenshot = device_service.snapshot()
@@ -3247,7 +3259,7 @@ def _wait_for_battle_ready(
             screenshot,
             server,
             reconnect_timing,
-        ) and monotonic() - started < timeout_seconds:
+        ) and active_monotonic(context, clock=monotonic) - started < timeout_seconds:
             continue
         match = recognition.match_template(
             screenshot,
@@ -3283,10 +3295,10 @@ def _wait_for_battle_ready(
                 servant_positions=servant_positions,
                 last_skill_number=last_skill_number,
             )
-            and monotonic() - started < timeout_seconds
+            and active_monotonic(context, clock=monotonic) - started < timeout_seconds
         ):
             continue
-        if monotonic() - started >= timeout_seconds:
+        if active_monotonic(context, clock=monotonic) - started >= timeout_seconds:
             raise TimeoutError(
                 f"Battle controls did not become ready within {timeout_seconds:.2f} seconds."
             )
@@ -3421,7 +3433,7 @@ def _wait_for_command_cards(
     reconnect_timing: float | _TapTiming | None = None,
     settle_seconds: float = 0.0,
 ) -> bytes:
-    started = monotonic()
+    started = active_monotonic(context, clock=monotonic)
     attempts = 0
     settled = settle_seconds <= 0
     candidates = [
@@ -3446,7 +3458,7 @@ def _wait_for_command_cards(
             screenshot,
             server,
             reconnect_timing,
-        ) and monotonic() - started < timeout_seconds:
+        ) and active_monotonic(context, clock=monotonic) - started < timeout_seconds:
             continue
         matches = recognition.match_templates(screenshot, candidates)
         attempts += 1
@@ -3470,7 +3482,7 @@ def _wait_for_command_cards(
             continue
         if matched:
             return screenshot
-        if monotonic() - started >= timeout_seconds:
+        if active_monotonic(context, clock=monotonic) - started >= timeout_seconds:
             raise TimeoutError(
                 f"Command cards did not become ready within {timeout_seconds:.2f} seconds."
             )

@@ -186,3 +186,48 @@ def test_debug_step_log_mode_writes_bundle_without_pausing(tmp_path: Path):
             record = json.loads(lines[0])
             assert record["paused"] is False
             assert Path(record["annotated_screenshot"]).is_file()
+
+
+def test_debug_step_recent_events_returns_newest_after_50_events(tmp_path: Path):
+    pytest.importorskip("cv2")
+    scene_png, tpl_png = _make_scene_and_template()
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    assets.mkdir()
+    data.mkdir()
+    (assets / "target.png").write_bytes(tpl_png)
+
+    backend = _FakeDebugBackend(scene_png)
+    devices = DeviceService([backend], EventLog(), frame_normalizer=FrameNormalizer())
+    devices.connect("fake", "dev-debug")
+
+    with JobManager(JobDatabase(tmp_path / "runtime.db")) as manager:
+        def flood_and_tap(context, payload):
+            for index in range(60):
+                context.emit("recognition", f"event-{index}")
+            match = RecognitionServiceRef.value.match_template(devices.snapshot(), "target.png", threshold=0.8)
+            assert match.matched
+            devices.tap(*match.center)
+            return {"ok": True}
+
+        from webapp.services.recognition import RecognitionService
+        from webapp.services.resources import ResourceService
+        from webapp.automation.debug_step import with_debug_step
+
+        recognition = RecognitionService(ResourceService(assets, data))
+
+        class RecognitionServiceRef:
+            value = recognition
+
+        manager.register(
+            "test.flood-debug",
+            with_debug_step(flood_and_tap, manager, devices, recognition, tmp_path / "debug"),
+        )
+        record = manager.start("test.flood-debug", {"debug_step": "log"})
+        finished = manager.wait(record.job_id, timeout=3)
+
+    assert finished.status == JobStatus.SUCCEEDED, finished.error
+    latest = json.loads((tmp_path / "debug" / record.job_id / "latest.json").read_text(encoding="utf-8"))
+    assert [item["message"] for item in latest["recent_events"]] == [
+        f"event-{i}" for i in range(55, 60)
+    ]

@@ -37,6 +37,8 @@ class RunControl:
         self._cancelled = threading.Event()
         self._pause_condition = threading.Condition()
         self._paused = False
+        self._paused_at: float | None = None
+        self._paused_seconds = 0.0
 
     @property
     def cancelled(self) -> bool:
@@ -44,12 +46,27 @@ class RunControl:
 
     def pause(self) -> None:
         with self._pause_condition:
-            self._paused = True
+            if not self._paused:
+                self._paused = True
+                self._paused_at = time.monotonic()
 
     def resume(self) -> None:
         with self._pause_condition:
+            if self._paused and self._paused_at is not None:
+                self._paused_seconds += max(0.0, time.monotonic() - self._paused_at)
             self._paused = False
+            self._paused_at = None
             self._pause_condition.notify_all()
+
+    @property
+    def paused_seconds(self) -> float:
+        with self._pause_condition:
+            extra = (
+                max(0.0, time.monotonic() - self._paused_at)
+                if self._paused and self._paused_at is not None
+                else 0.0
+            )
+            return self._paused_seconds + extra
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -74,6 +91,10 @@ class RunContext:
     @property
     def cancelled(self) -> bool:
         return self._control.cancelled
+
+    @property
+    def paused_seconds(self) -> float:
+        return self._control.paused_seconds
 
     def checkpoint(
         self,
@@ -105,10 +126,10 @@ class RunContext:
         )
 
     def sleep(self, seconds: float) -> None:
-        deadline = time.monotonic() + max(0.0, seconds)
+        deadline = (time.monotonic() - self._control.paused_seconds) + max(0.0, seconds)
         while True:
             self._control.checkpoint()
-            remaining = deadline - time.monotonic()
+            remaining = deadline - (time.monotonic() - self._control.paused_seconds)
             if remaining <= 0:
                 return
             self._control._cancelled.wait(timeout=min(remaining, 0.1))

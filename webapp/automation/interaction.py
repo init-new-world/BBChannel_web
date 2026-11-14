@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -72,6 +73,19 @@ def randomized_wait_seconds(
 ) -> float:
     choose = random_value or random.random
     return float(base_seconds) + configured_random_time(random_time) * choose()
+
+
+def active_monotonic(
+    context: Any | None = None,
+    *,
+    clock: Callable[[], float] | None = None,
+) -> float:
+    """Return monotonic time minus accumulated pause duration for `context`."""
+    now = (clock or time.monotonic)()
+    paused = getattr(context, "paused_seconds", 0.0) if context is not None else 0.0
+    if isinstance(paused, bool) or not isinstance(paused, (int, float)):
+        return now
+    return now - max(0.0, float(paused))
 
 
 def _screen_bounds(lower: int, upper: int, *, maximum: int) -> tuple[int, int]:
