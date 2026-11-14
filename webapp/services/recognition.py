@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from numbers import Integral
 from typing import Any
 
@@ -23,6 +25,17 @@ except ImportError:  # pragma: no cover - exercised by dependency-absent tests
 class RecognitionService:
     def __init__(self, resources: ResourceService) -> None:
         self._resources = resources
+        self._match_observer: ContextVar[Callable[[MatchResult], None] | None] = ContextVar(
+            "recognition_match_observer", default=None,
+        )
+
+    @contextmanager
+    def observe_matches(self, observer: Callable[[MatchResult], None]) -> Iterator[None]:
+        token = self._match_observer.set(observer)
+        try:
+            yield
+        finally:
+            self._match_observer.reset(token)
 
     def match_template(
         self,
@@ -346,7 +359,7 @@ class RecognitionService:
         confidence, max_location, matched_width, matched_height, best_scale = best
         top_left = [roi_x + int(max_location[0]), roi_y + int(max_location[1])]
         result_roi = normalized_roi if roi is not None else None
-        return MatchResult(
+        result = MatchResult(
             template_path=template_path,
             matched=confidence >= threshold,
             confidence=confidence,
@@ -357,6 +370,10 @@ class RecognitionService:
             scale=best_scale,
             roi=result_roi,
         )
+        observer = self._match_observer.get()
+        if observer is not None:
+            observer(result)
+        return result
 
     def _match_all_decoded(
         self,
@@ -447,7 +464,12 @@ class RecognitionService:
             selected.append(candidate)
             if len(selected) >= max(max_results, 1):
                 break
-        return sorted(selected, key=lambda result: (result.top_left[1], result.top_left[0]))
+        ordered = sorted(selected, key=lambda result: (result.top_left[1], result.top_left[0]))
+        observer = self._match_observer.get()
+        if observer is not None:
+            for item in ordered:
+                observer(item)
+        return ordered
 
     def _crop_template(self, image, mask, crop, template_path: str):
         if crop is None:

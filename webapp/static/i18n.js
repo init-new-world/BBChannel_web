@@ -650,6 +650,8 @@ const zh = {
   "Screen rotation": "脚本画面旋转",
   "Lock screen orientation for this script when running": "运行该脚本时自动应用固定画面旋转角度",
   "Completion alert": "完成提示音",
+  "Step debug": "单步断点调试",
+  "Pause before each tap or swipe and save annotated screenshot + log": "每次点击或滑动前自动暂停并输出标注截图与识别日志",
   "Play sound notification when a job finishes or stops": "任务结束或停止时播放提示音",
   "Play completion sound preview": "试听完成提示音",
   "Test": "试听",

@@ -86,64 +86,70 @@ def create_ws_router(
             }
 
         async def sender() -> None:
-            while True:
-                payload = await outbound.get()
-                await websocket.send_json(payload)
+            try:
+                while True:
+                    payload = await outbound.get()
+                    await websocket.send_json(payload)
+            except (WebSocketDisconnect, RuntimeError):
+                return
 
         async def receiver() -> None:
             nonlocal subscribed_job_id
-            while True:
-                raw = await websocket.receive_text()
-                try:
-                    message = json.loads(raw)
-                except ValueError:
-                    enqueue({"type": "error", "code": "INVALID_JSON", "message": "Invalid JSON message."})
-                    continue
-                if not isinstance(message, dict):
-                    continue
-                msg_type = message.get("type")
-                if msg_type == "ping":
-                    enqueue({"type": "pong"})
-                elif msg_type == "refresh":
-                    enqueue(build_snapshot())
-                elif msg_type == "unsubscribe_job":
-                    subscribed_job_id = None
-                    enqueue({"type": "job_unsubscribed"})
-                elif msg_type == "subscribe_job":
-                    requested = str(message.get("job_id") or "").strip()
-                    req_after = message.get("after_id", 0)
-                    if isinstance(req_after, bool) or not isinstance(req_after, int) or req_after < 0:
-                        req_after = 0
-                    if not requested:
+            try:
+                while True:
+                    raw = await websocket.receive_text()
+                    try:
+                        message = json.loads(raw)
+                    except ValueError:
+                        enqueue({"type": "error", "code": "INVALID_JSON", "message": "Invalid JSON message."})
+                        continue
+                    if not isinstance(message, dict):
+                        continue
+                    msg_type = message.get("type")
+                    if msg_type == "ping":
+                        enqueue({"type": "pong"})
+                    elif msg_type == "refresh":
+                        enqueue(build_snapshot())
+                    elif msg_type == "unsubscribe_job":
                         subscribed_job_id = None
                         enqueue({"type": "job_unsubscribed"})
-                        continue
-                    try:
-                        record = job_manager.get(requested)
-                        replay = [
-                            item.to_dict()
-                            for item in job_manager.database.list_events(
-                                requested,
-                                after_id=req_after,
-                                limit=500,
+                    elif msg_type == "subscribe_job":
+                        requested = str(message.get("job_id") or "").strip()
+                        req_after = message.get("after_id", 0)
+                        if isinstance(req_after, bool) or not isinstance(req_after, int) or req_after < 0:
+                            req_after = 0
+                        if not requested:
+                            subscribed_job_id = None
+                            enqueue({"type": "job_unsubscribed"})
+                            continue
+                        try:
+                            record = job_manager.get(requested)
+                            replay = [
+                                item.to_dict()
+                                for item in job_manager.database.list_events(
+                                    requested,
+                                    after_id=req_after,
+                                    limit=500,
+                                )
+                            ]
+                            subscribed_job_id = requested
+                            enqueue(
+                                {
+                                    "type": "job_subscribed",
+                                    "job": record.to_dict(),
+                                    "events": replay,
+                                }
                             )
-                        ]
-                        subscribed_job_id = requested
-                        enqueue(
-                            {
-                                "type": "job_subscribed",
-                                "job": record.to_dict(),
-                                "events": replay,
-                            }
-                        )
-                    except KeyError:
-                        enqueue(
-                            {
-                                "type": "error",
-                                "code": "JOB_NOT_FOUND",
-                                "job_id": requested,
-                            }
-                        )
+                        except KeyError:
+                            enqueue(
+                                {
+                                    "type": "error",
+                                    "code": "JOB_NOT_FOUND",
+                                    "job_id": requested,
+                                }
+                            )
+            except (WebSocketDisconnect, RuntimeError):
+                return
 
         send_task: asyncio.Task[None] | None = None
         recv_task: asyncio.Task[None] | None = None
@@ -203,66 +209,74 @@ def create_ws_router(
             return any(not job.status.terminal for job in job_manager.list(50))
 
         async def streamer() -> None:
-            while not stop_event.is_set():
-                if has_active_job():
-                    await send_json_locked({"type": "paused", "reason": "job_running"})
-                    stop_event.set()
-                    await close_locked()
-                    return
-                wake_event.clear()
-                try:
-                    frame = await asyncio.to_thread(device_service.snapshot)
-                except AppError as exc:
-                    await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
-                    stop_event.set()
-                    await close_locked()
-                    return
-                if stop_event.is_set():
-                    return
-                await send_bytes_locked(frame)
-                try:
-                    await asyncio.wait_for(wake_event.wait(), timeout=interval_seconds)
-                except TimeoutError:
-                    pass
+            try:
+                while not stop_event.is_set():
+                    if has_active_job():
+                        await send_json_locked({"type": "paused", "reason": "job_running"})
+                        stop_event.set()
+                        await close_locked()
+                        return
+                    wake_event.clear()
+                    try:
+                        frame = await asyncio.to_thread(device_service.snapshot)
+                    except AppError as exc:
+                        await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
+                        stop_event.set()
+                        await close_locked()
+                        return
+                    if stop_event.is_set():
+                        return
+                    await send_bytes_locked(frame)
+                    try:
+                        await asyncio.wait_for(wake_event.wait(), timeout=interval_seconds)
+                    except TimeoutError:
+                        pass
+            except (WebSocketDisconnect, RuntimeError):
+                stop_event.set()
+                return
 
         async def receiver() -> None:
             nonlocal interval_seconds
-            while not stop_event.is_set():
-                raw = await websocket.receive_text()
-                try:
-                    message = json.loads(raw)
-                except ValueError:
-                    await send_json_locked(
-                        {"type": "error", "error": {"code": "invalid_json", "message": "Invalid JSON message."}}
-                    )
-                    continue
-                if not isinstance(message, dict):
-                    continue
-                msg_type = message.get("type")
-                if msg_type == "ping":
-                    await send_json_locked({"type": "pong"})
-                elif msg_type == "refresh":
-                    wake_event.set()
-                elif msg_type == "set_interval":
-                    next_ms = message.get("interval_ms")
-                    if not isinstance(next_ms, bool) and isinstance(next_ms, (int, float)):
-                        clamped = max(80, min(int(next_ms), 10000))
-                        interval_seconds = clamped / 1000.0
-                        wake_event.set()
-                elif msg_type == "tap":
-                    x = message.get("x")
-                    y = message.get("y")
-                    if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, int) or not isinstance(y, int):
+            try:
+                while not stop_event.is_set():
+                    raw = await websocket.receive_text()
+                    try:
+                        message = json.loads(raw)
+                    except ValueError:
                         await send_json_locked(
-                            {"type": "tap_error", "error": {"code": "invalid_tap", "message": "x and y must be integers."}}
+                            {"type": "error", "error": {"code": "invalid_json", "message": "Invalid JSON message."}}
                         )
                         continue
-                    try:
-                        op = await asyncio.to_thread(device_service.tap, x, y)
-                        await send_json_locked({"type": "tap_result", "result": op.to_dict()})
+                    if not isinstance(message, dict):
+                        continue
+                    msg_type = message.get("type")
+                    if msg_type == "ping":
+                        await send_json_locked({"type": "pong"})
+                    elif msg_type == "refresh":
                         wake_event.set()
-                    except AppError as exc:
-                        await send_json_locked({"type": "tap_error", "error": exc.to_response()["error"]})
+                    elif msg_type == "set_interval":
+                        next_ms = message.get("interval_ms")
+                        if not isinstance(next_ms, bool) and isinstance(next_ms, (int, float)):
+                            clamped = max(80, min(int(next_ms), 10000))
+                            interval_seconds = clamped / 1000.0
+                            wake_event.set()
+                    elif msg_type == "tap":
+                        x = message.get("x")
+                        y = message.get("y")
+                        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, int) or not isinstance(y, int):
+                            await send_json_locked(
+                                {"type": "tap_error", "error": {"code": "invalid_tap", "message": "x and y must be integers."}}
+                            )
+                            continue
+                        try:
+                            op = await asyncio.to_thread(device_service.tap, x, y)
+                            await send_json_locked({"type": "tap_result", "result": op.to_dict()})
+                            wake_event.set()
+                        except AppError as exc:
+                            await send_json_locked({"type": "tap_error", "error": exc.to_response()["error"]})
+            except (WebSocketDisconnect, RuntimeError):
+                stop_event.set()
+                return
 
         stream_task = asyncio.create_task(streamer())
         recv_task = asyncio.create_task(receiver())

@@ -18,7 +18,7 @@ python -m webapp
 
 Open `http://127.0.0.1:8000` in a browser.
 
-The default server binds only to loopback. Keep it local: device-control and automation endpoints are not intended for unauthenticated public access. Job state is stored in `runtime/bbchannel.db`; set `BBCHANNEL_RUNTIME_DB` to use another SQLite database.
+The default server binds only to loopback. Keep it local: device-control and automation endpoints are not intended for unauthenticated public access. Job state is stored in `runtime/bbchannel.db`; set `BBCHANNEL_RUNTIME_DB` to use another SQLite database. Pass `"debug_step": true` in a job payload (or toggle **Step debug** in the UI / set `BBCHANNEL_DEBUG_STEP=1`) to pause before every tap or swipe and write `latest.json`, `steps.jsonl`, and annotated PNG screenshots under `runtime/debug/<job_id>/` (`"debug_step": "log"` logs bundles without pausing).
 
 ## ADB Discovery
 

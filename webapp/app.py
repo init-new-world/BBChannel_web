@@ -62,6 +62,7 @@ from webapp.automation import (
     register_recovery_job,
     register_stage_job,
 )
+from webapp.automation.debug_step import with_debug_step
 from webapp.automation.operation_timing import with_script_operation_timing
 from webapp.core.errors import AppError, ErrorCode
 from webapp.devices.adb import AdbBackend
@@ -602,9 +603,19 @@ def create_app(
         apply_screen_rotation=device_service.set_screen_rotation,
     )
 
+    db_path = getattr(job_manager.database, "path", None)
+    debug_root = Path(db_path).parent / "debug" if db_path is not None else PROJECT_ROOT / "runtime" / "debug"
     for kind in job_manager.registered_kinds():
-        if job_manager.requires_device(kind) and not kind.startswith("diagnostic."):
-            job_manager.wrap_handler(kind, lambda handler: with_script_operation_timing(handler, script_data, device_service))
+        if job_manager.requires_device(kind):
+            if not kind.startswith("diagnostic."):
+                job_manager.wrap_handler(
+                    kind,
+                    lambda handler: with_script_operation_timing(handler, script_data, device_service),
+                )
+            job_manager.wrap_handler(
+                kind,
+                lambda handler: with_debug_step(handler, job_manager, device_service, recognition, debug_root),
+            )
 
     def active_device_key() -> str | None:
         return device_service.session_key()

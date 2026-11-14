@@ -367,4 +367,6 @@ def test_operator_console_references_api_controls():
     assert "/api/ws/events" in script
     assert "/api/ws/screen" in script
     assert "new WebSocket" in script
+    assert 'id="debug-step-mode"' in index
+    assert "debug_step: true" in script
 

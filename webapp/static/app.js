@@ -360,6 +360,7 @@ const els = {
   pauseJob: document.querySelector("#pause-job"),
   resumeJob: document.querySelector("#resume-job"),
   cancelJob: document.querySelector("#cancel-job"),
+  debugStepMode: document.querySelector("#debug-step-mode"),
   audioAlertEnabled: document.querySelector("#audio-alert-enabled"),
   testAudioAlert: document.querySelector("#test-audio-alert"),
   audioAlertTone: document.querySelector("#audio-alert-tone"),
@@ -4114,10 +4115,13 @@ async function runExpballSell() {
 }
 
 async function enqueueJob(kind, payload) {
+  const effectivePayload = els.debugStepMode?.checked
+    ? { ...payload, debug_step: true }
+    : payload;
   try {
     const response = await api("/api/jobs", {
       method: "POST",
-      body: JSON.stringify({ kind, payload }),
+      body: JSON.stringify({ kind, payload: effectivePayload }),
     });
     const job = response.job;
     trackJobTransitions([job], false);

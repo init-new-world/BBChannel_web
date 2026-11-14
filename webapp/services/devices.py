@@ -46,6 +46,25 @@ class DeviceService:
         self._operation_timing: ContextVar[tuple[Callable[[float], None], object, object] | None] = ContextVar(
             "device_operation_timing", default=None,
         )
+        self._action_hooks: ContextVar[tuple[Callable[[bytes], None], Callable[[dict[str, object]], None]] | None] = (
+            ContextVar("device_action_hooks", default=None)
+        )
+
+    @contextmanager
+    def action_hooks(
+        self,
+        *,
+        on_snapshot: Callable[[bytes], None],
+        before_action: Callable[[dict[str, object]], None],
+    ) -> Iterator[None]:
+        token = self._action_hooks.set((on_snapshot, before_action))
+        try:
+            yield
+        finally:
+            self._action_hooks.reset(token)
+
+    def action_hooks_active(self) -> bool:
+        return self._action_hooks.get() is not None
 
     @contextmanager
     def operation_timing(
@@ -290,6 +309,9 @@ class DeviceService:
                 "geometry": self.screen_geometry(),
             },
         )
+        hooks = self._action_hooks.get()
+        if hooks is not None:
+            hooks[0](data)
         return data
 
     def screen_is_stuck(self, minimum_seconds: float) -> bool:
@@ -301,6 +323,9 @@ class DeviceService:
             timing[0](timing[1])
         backend, endpoint = self._require_control()
         mapped_x, mapped_y = self._map_point(x, y)
+        hooks = self._action_hooks.get()
+        if hooks is not None:
+            hooks[1]({"action": "tap", "logical": [x, y], "mapped": [mapped_x, mapped_y]})
         with self._lock_for(endpoint):
             try:
                 result = backend.tap(endpoint.device_id, mapped_x, mapped_y)
@@ -328,6 +353,16 @@ class DeviceService:
         backend, endpoint = self._require_control()
         mapped_start = self._map_point(x1, y1)
         mapped_end = self._map_point(x2, y2)
+        hooks = self._action_hooks.get()
+        if hooks is not None:
+            hooks[1](
+                {
+                    "action": "swipe",
+                    "logical": [[x1, y1], [x2, y2]],
+                    "mapped": [list(mapped_start), list(mapped_end)],
+                    "duration_ms": duration_ms,
+                }
+            )
         with self._lock_for(endpoint):
             try:
                 result = backend.swipe(
