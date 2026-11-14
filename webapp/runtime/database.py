@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any, Iterable
 
 from webapp.runtime.models import JobEvent, JobRecord, JobStatus
@@ -50,7 +52,67 @@ class JobDatabase:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._subscriber_lock = RLock()
+        self._job_subscribers: list[Callable[[JobRecord], None]] = []
+        self._event_subscribers: list[Callable[[JobEvent], None]] = []
         self._migrate()
+
+    def _ensure_subscribers(self) -> RLock:
+        lock = getattr(self, "_subscriber_lock", None)
+        if lock is None:
+            lock = RLock()
+            self._subscriber_lock = lock
+            self._job_subscribers = []
+            self._event_subscribers = []
+        return lock
+
+    def subscribe_jobs(self, callback: Callable[[JobRecord], None]) -> Callable[[], None]:
+        lock = self._ensure_subscribers()
+        with lock:
+            self._job_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            with lock:
+                try:
+                    self._job_subscribers.remove(callback)
+                except ValueError:
+                    pass
+
+        return unsubscribe
+
+    def subscribe_events(self, callback: Callable[[JobEvent], None]) -> Callable[[], None]:
+        lock = self._ensure_subscribers()
+        with lock:
+            self._event_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            with lock:
+                try:
+                    self._event_subscribers.remove(callback)
+                except ValueError:
+                    pass
+
+        return unsubscribe
+
+    def _notify_job(self, record: JobRecord) -> None:
+        lock = self._ensure_subscribers()
+        with lock:
+            subscribers = list(self._job_subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber(record)
+            except Exception:
+                pass
+
+    def _notify_event(self, event: JobEvent) -> None:
+        lock = self._ensure_subscribers()
+        with lock:
+            subscribers = list(self._event_subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber(event)
+            except Exception:
+                pass
 
     def schema_version(self) -> int:
         with self._connect() as connection:
@@ -85,7 +147,9 @@ class JobDatabase:
                     now,
                 ),
             )
-        return self.get_job(job_id)
+        record = self.get_job(job_id)
+        self._notify_job(record)
+        return record
 
     def get_job(self, job_id: str) -> JobRecord:
         with self._connect() as connection:
@@ -158,7 +222,9 @@ class JobDatabase:
             )
             if cursor.rowcount != 1:
                 raise KeyError(job_id)
-        return self.get_job(job_id)
+        record = self.get_job(job_id)
+        self._notify_job(record)
+        return record
 
     def update_progress(
         self,
@@ -178,7 +244,9 @@ class JobDatabase:
             )
             if cursor.rowcount != 1:
                 raise KeyError(job_id)
-        return self.get_job(job_id)
+        record = self.get_job(job_id)
+        self._notify_job(record)
+        return record
 
     def append_event(
         self,
@@ -200,7 +268,9 @@ class JobDatabase:
                 (job_id, event_type, level, message, _dump_json(data or {}), now),
             )
             event_id = int(cursor.lastrowid)
-        return self.get_event(event_id)
+        event = self.get_event(event_id)
+        self._notify_event(event)
+        return event
 
     def get_event(self, event_id: int) -> JobEvent:
         with self._connect() as connection:

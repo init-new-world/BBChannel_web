@@ -49,6 +49,10 @@ const state = {
   screenRotation: null,
   autoRefreshScreenTimer: null,
   autoRefreshScreenInFlight: false,
+  screenSocket: null,
+  screenReconnectTimer: null,
+  screenFrameDecodeInFlight: false,
+  pendingScreenBlob: null,
   screenshotNaturalSize: null,
   latestMatch: null,
   selectedSettingPlan: null,
@@ -56,10 +60,14 @@ const state = {
   selectedStrategy: null,
   presetEditor: null,
   presetOpenSequence: 0,
+  eventsList: [],
+  eventsSocket: null,
+  eventsReconnectTimer: null,
   jobs: [],
   activeJob: null,
   jobEvents: [],
   jobEventSource: null,
+  jobTransitionsPrimed: false,
   lastJobStatusById: new Map(),
   announcedTerminalJobIds: new Set(),
   audioAlert: { enabled: false, tone: "chime" },
@@ -482,14 +490,20 @@ async function init() {
     loadTemplates(),
     loadEquipTemplates(),
     loadAssistTags(),
-    loadEvents(),
+    loadEvents(true),
     loadJobs(),
   ]);
   await loadConnectionState();
   updateControls();
+  connectEventsSocket();
 }
 
 function bindEvents() {
+  window.addEventListener("pagehide", () => {
+    closeEventsSocket();
+    stopAutoRefreshScreen();
+    closeJobEventSource();
+  });
   els.languageSelect.addEventListener("change", () => setLocale(els.languageSelect.value));
   document.addEventListener("bbchannel:localechange", () => {
     renderSettingPlan(state.selectedSettingPlan);
@@ -497,6 +511,7 @@ function bindEvents() {
     renderStrategyDetail(state.selectedStrategy);
     renderJob(state.activeJob);
     renderJobEvents();
+    renderEventsList(state.eventsList);
     renderAudioAlertState();
     if (!state.connected) els.connectionState.textContent = t("Disconnected");
     els.screenMeta.textContent = formatScreenMeta();
@@ -612,7 +627,7 @@ function bindEvents() {
     syncAutoRefreshScreen(true);
     updateControls();
   });
-  els.refreshEvents.addEventListener("click", loadEvents);
+  els.refreshEvents.addEventListener("click", () => loadEvents(true));
   els.screenshot.addEventListener("load", onScreenshotLoaded);
   els.screenStage.addEventListener("click", populateTapFromClick);
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
@@ -3173,6 +3188,11 @@ async function loadScreenRotation() {
   }
 }
 
+function buildWsUrl(path) {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}${path}`;
+}
+
 async function rotateScreen(requestBody) {
   try {
     const payload = await api("/api/screen/rotation", {
@@ -3181,7 +3201,9 @@ async function rotateScreen(requestBody) {
     });
     state.screenRotation = payload.rotation ?? null;
     els.screenMeta.textContent = formatScreenMeta();
-    if (state.connected) {
+    if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+      state.screenSocket.send(JSON.stringify({ type: "refresh" }));
+    } else if (state.connected) {
       await captureScreenshot({ quiet: true });
     }
     await loadEvents();
@@ -3216,10 +3238,137 @@ async function refreshLiveScreenFrame() {
   }
 }
 
+function queueScreenFrameBlob(blob) {
+  state.pendingScreenBlob = blob;
+  if (state.screenFrameDecodeInFlight) {
+    return;
+  }
+  void drainPendingScreenBlobs();
+}
+
+async function drainPendingScreenBlobs() {
+  if (state.screenFrameDecodeInFlight) {
+    return;
+  }
+  state.screenFrameDecodeInFlight = true;
+  try {
+    while (state.pendingScreenBlob) {
+      const nextBlob = state.pendingScreenBlob;
+      state.pendingScreenBlob = null;
+      if (!state.connected || !els.autoRefreshScreen?.checked) {
+        break;
+      }
+      const dataUrl = await blobToDataUrl(nextBlob);
+      if (state.connected && els.autoRefreshScreen?.checked) {
+        setScreenshot(dataUrl);
+      }
+    }
+  } catch {
+    // Ignore transient frame decode failures.
+  } finally {
+    state.screenFrameDecodeInFlight = false;
+  }
+}
+
+function connectScreenSocket(triggerImmediate = false) {
+  if (state.screenSocket) {
+    if (state.screenSocket.readyState === WebSocket.OPEN && triggerImmediate) {
+      try {
+        state.screenSocket.send(JSON.stringify({ type: "refresh" }));
+      } catch {
+        // Ignore transient send failures.
+      }
+    }
+    if (
+      state.screenSocket.readyState === WebSocket.CONNECTING
+      || state.screenSocket.readyState === WebSocket.OPEN
+    ) {
+      return;
+    }
+  }
+  if (state.screenReconnectTimer) {
+    window.clearTimeout(state.screenReconnectTimer);
+    state.screenReconnectTimer = null;
+  }
+  let socket;
+  try {
+    socket = new WebSocket(buildWsUrl("/api/ws/screen?interval_ms=500"));
+  } catch {
+    return;
+  }
+  socket.binaryType = "blob";
+  state.screenSocket = socket;
+  socket.addEventListener("message", (message) => {
+    if (state.screenSocket !== socket) {
+      return;
+    }
+    if (message.data instanceof Blob) {
+      queueScreenFrameBlob(message.data);
+      return;
+    }
+    if (message.data instanceof ArrayBuffer) {
+      queueScreenFrameBlob(new Blob([message.data], { type: "image/png" }));
+      return;
+    }
+    if (typeof message.data === "string") {
+      try {
+        const payload = JSON.parse(message.data);
+        if (payload.type === "error") {
+          if (els.autoRefreshScreen) els.autoRefreshScreen.checked = false;
+          stopAutoRefreshScreen();
+          const error = new Error(payload.error?.message || "Live screen stream failed.");
+          error.payload = { error: payload.error };
+          showError(error);
+          updateControls();
+        } else if (payload.type === "paused") {
+          stopAutoRefreshScreen();
+        } else if (payload.type === "tap_error") {
+          const error = new Error(payload.error?.message || "Tap failed.");
+          error.payload = { error: payload.error };
+          showError(error);
+        }
+      } catch {
+        // Ignore malformed text frames.
+      }
+    }
+  });
+  socket.addEventListener("close", () => {
+    if (state.screenSocket !== socket) {
+      return;
+    }
+    state.screenSocket = null;
+    const stillShouldRun = Boolean(
+      state.connected
+      && els.autoRefreshScreen?.checked
+      && !state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status)),
+    );
+    if (stillShouldRun && !state.screenReconnectTimer) {
+      state.screenReconnectTimer = window.setTimeout(() => {
+        state.screenReconnectTimer = null;
+        syncAutoRefreshScreen(false);
+      }, 1000);
+    }
+  });
+}
+
 function stopAutoRefreshScreen() {
   if (state.autoRefreshScreenTimer) {
     window.clearInterval(state.autoRefreshScreenTimer);
     state.autoRefreshScreenTimer = null;
+  }
+  if (state.screenReconnectTimer) {
+    window.clearTimeout(state.screenReconnectTimer);
+    state.screenReconnectTimer = null;
+  }
+  state.pendingScreenBlob = null;
+  if (state.screenSocket) {
+    const socket = state.screenSocket;
+    state.screenSocket = null;
+    try {
+      socket.close();
+    } catch {
+      // Ignore close errors.
+    }
   }
 }
 
@@ -3228,6 +3377,10 @@ function syncAutoRefreshScreen(triggerImmediate = false) {
   const shouldRun = Boolean(state.connected && els.autoRefreshScreen?.checked && !hasRunningJob);
   if (!shouldRun) {
     stopAutoRefreshScreen();
+    return;
+  }
+  if (typeof WebSocket === "function") {
+    connectScreenSocket(triggerImmediate);
     return;
   }
   if (!state.autoRefreshScreenTimer) {
@@ -3320,6 +3473,14 @@ async function matchTemplate() {
 }
 
 async function sendTapCoordinates(x, y) {
+  if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+    try {
+      state.screenSocket.send(JSON.stringify({ type: "tap", x, y }));
+      return;
+    } catch {
+      // Fall back to HTTP tap if socket send fails.
+    }
+  }
   try {
     await api("/api/tap", {
       method: "POST",
@@ -3347,6 +3508,13 @@ async function sendSwipe() {
         duration_ms: readNumber(els.swipeDuration),
       }),
     });
+    if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+      try {
+        state.screenSocket.send(JSON.stringify({ type: "refresh" }));
+      } catch {
+        // Ignore transient send failures.
+      }
+    }
     await loadEvents();
   } catch (error) {
     showError(error);
@@ -3968,6 +4136,7 @@ async function loadJobs(preferredJobId = "") {
     const payload = await api("/api/jobs?limit=50");
     state.jobs = payload.jobs || [];
     trackJobTransitions(state.jobs, false);
+    state.jobTransitionsPrimed = true;
     const selectedJobId = preferredJobId || state.activeJob?.job_id || state.jobs[0]?.job_id || "";
     renderJobHistory(selectedJobId);
     if (selectedJobId) {
@@ -3999,9 +4168,39 @@ function renderJobHistory(selectedJobId = "") {
   els.jobHistory.value = selectedJobId;
 }
 
+function subscribeActiveJobStream(jobId, afterId, forceReopenEventSource = false) {
+  if (state.eventsSocket && state.eventsSocket.readyState === WebSocket.OPEN) {
+    closeJobEventSource();
+    try {
+      state.eventsSocket.send(JSON.stringify({
+        type: "subscribe_job",
+        job_id: jobId,
+        after_id: afterId,
+      }));
+      return;
+    } catch {
+      // Fall through to EventSource fallback if send fails.
+    }
+  }
+  if (forceReopenEventSource || !state.jobEventSource) {
+    openJobEventStream(jobId, afterId);
+  }
+}
+
+function unsubscribeActiveJobStream() {
+  closeJobEventSource();
+  if (state.eventsSocket && state.eventsSocket.readyState === WebSocket.OPEN) {
+    try {
+      state.eventsSocket.send(JSON.stringify({ type: "unsubscribe_job" }));
+    } catch {
+      // Ignore transient send errors.
+    }
+  }
+}
+
 async function selectJob(jobId) {
   if (!jobId) {
-    closeJobEventSource();
+    unsubscribeActiveJobStream();
     state.activeJob = null;
     state.jobEvents = [];
     renderJob(null);
@@ -4024,11 +4223,9 @@ async function selectJob(jobId) {
     renderJobEvents();
     if (!TERMINAL_JOB_STATES.has(state.activeJob.status)) {
       const lastEventId = state.jobEvents.at(-1)?.event_id || 0;
-      if (previousJobId !== jobId || !state.jobEventSource) {
-        openJobEventStream(jobId, lastEventId);
-      }
+      subscribeActiveJobStream(jobId, lastEventId, previousJobId !== jobId);
     } else {
-      closeJobEventSource();
+      unsubscribeActiveJobStream();
     }
   } catch (error) {
     showError(error);
@@ -4049,7 +4246,7 @@ async function refreshActiveJob(jobId) {
     renderJobHistory(jobId);
     renderJob(state.activeJob);
     if (TERMINAL_JOB_STATES.has(state.activeJob.status)) {
-      closeJobEventSource();
+      unsubscribeActiveJobStream();
     }
     updateControls();
   } catch (error) {
@@ -4071,8 +4268,8 @@ async function controlJob(action) {
     mergeJob(state.activeJob);
     renderJobHistory(jobId);
     renderJob(state.activeJob);
-    if (!TERMINAL_JOB_STATES.has(state.activeJob.status) && !state.jobEventSource) {
-      openJobEventStream(jobId, state.jobEvents.at(-1)?.event_id || 0);
+    if (!TERMINAL_JOB_STATES.has(state.activeJob.status)) {
+      subscribeActiveJobStream(jobId, state.jobEvents.at(-1)?.event_id || 0, false);
     }
   } catch (error) {
     showError(error);
@@ -4650,15 +4847,190 @@ function renderJobEvent(event) {
   return row;
 }
 
-async function loadEvents() {
+function renderEventsList(events) {
+  state.eventsList = Array.isArray(events) ? events.slice(-80) : [];
+  els.logCount.textContent = `${state.eventsList.length} ${t(state.eventsList.length === 1 ? "event" : "events")}`;
+  els.eventLog.replaceChildren(...state.eventsList.map(renderEvent));
+  els.eventLog.scrollTop = els.eventLog.scrollHeight;
+}
+
+async function loadEvents(forceHttp = false) {
+  if (
+    forceHttp !== true
+    && state.eventsSocket
+    && state.eventsSocket.readyState === WebSocket.OPEN
+  ) {
+    return;
+  }
   try {
     const payload = await api("/api/events?limit=80");
-    const events = payload.events || [];
-    els.logCount.textContent = `${events.length} ${t(events.length === 1 ? "event" : "events")}`;
-    els.eventLog.replaceChildren(...events.map(renderEvent));
-    els.eventLog.scrollTop = els.eventLog.scrollHeight;
+    renderEventsList(payload.events || []);
   } catch {
     els.logCount.textContent = t("0 events");
+  }
+}
+
+function mergeJobEvents(incoming) {
+  if (!Array.isArray(incoming) || !incoming.length) {
+    return false;
+  }
+  let added = false;
+  for (const event of incoming) {
+    if (!state.jobEvents.some((candidate) => candidate.event_id === event.event_id)) {
+      state.jobEvents.push(event);
+      added = true;
+    }
+  }
+  return added;
+}
+
+function connectEventsSocket() {
+  if (typeof WebSocket !== "function") {
+    return;
+  }
+  if (state.eventsReconnectTimer) {
+    window.clearTimeout(state.eventsReconnectTimer);
+    state.eventsReconnectTimer = null;
+  }
+  if (
+    state.eventsSocket
+    && (
+      state.eventsSocket.readyState === WebSocket.CONNECTING
+      || state.eventsSocket.readyState === WebSocket.OPEN
+    )
+  ) {
+    return;
+  }
+  const params = new URLSearchParams({
+    events_limit: "80",
+    jobs_limit: "50",
+  });
+  if (state.activeJob?.job_id && !TERMINAL_JOB_STATES.has(state.activeJob.status)) {
+    params.set("job_id", state.activeJob.job_id);
+    params.set("after_id", String(state.jobEvents.at(-1)?.event_id || 0));
+  }
+  let socket;
+  try {
+    socket = new WebSocket(buildWsUrl(`/api/ws/events?${params.toString()}`));
+  } catch {
+    return;
+  }
+  state.eventsSocket = socket;
+  socket.addEventListener("open", () => {
+    if (state.eventsSocket !== socket) {
+      return;
+    }
+    if (state.activeJob?.job_id && !TERMINAL_JOB_STATES.has(state.activeJob.status)) {
+      closeJobEventSource();
+      socket.send(JSON.stringify({
+        type: "subscribe_job",
+        job_id: state.activeJob.job_id,
+        after_id: state.jobEvents.at(-1)?.event_id || 0,
+      }));
+    }
+  });
+  socket.addEventListener("message", (message) => {
+    if (state.eventsSocket !== socket || typeof message.data !== "string") {
+      return;
+    }
+    try {
+      const payload = JSON.parse(message.data);
+      if (payload.type === "snapshot") {
+        renderEventsList(payload.events || []);
+        if (Array.isArray(payload.jobs)) {
+          state.jobs = payload.jobs;
+          trackJobTransitions(state.jobs, state.jobTransitionsPrimed);
+          state.jobTransitionsPrimed = true;
+          const selectedId = state.activeJob?.job_id || "";
+          renderJobHistory(selectedId);
+          if (selectedId) {
+            const matched = state.jobs.find((job) => job.job_id === selectedId);
+            if (matched) {
+              state.activeJob = matched;
+              renderJob(state.activeJob);
+            }
+          }
+        }
+        if (
+          payload.job_id
+          && payload.job_id === state.activeJob?.job_id
+          && mergeJobEvents(payload.job_events)
+        ) {
+          renderJobEvents();
+        }
+        updateControls();
+      } else if (payload.type === "event" && payload.event) {
+        renderEventsList([...state.eventsList, payload.event]);
+      } else if (payload.type === "job_updated" && payload.job) {
+        trackJobTransitions([payload.job], true);
+        mergeJob(payload.job);
+        if (state.activeJob?.job_id === payload.job.job_id) {
+          state.activeJob = payload.job;
+          renderJob(state.activeJob);
+          if (TERMINAL_JOB_STATES.has(payload.job.status)) {
+            closeJobEventSource();
+          }
+        }
+        renderJobHistory(state.activeJob?.job_id || "");
+        updateControls();
+      } else if (payload.type === "job_subscribed" && payload.job) {
+        trackJobTransitions([payload.job], state.lastJobStatusById.has(payload.job.job_id));
+        mergeJob(payload.job);
+        if (state.activeJob?.job_id === payload.job.job_id) {
+          state.activeJob = payload.job;
+          renderJob(state.activeJob);
+          if (mergeJobEvents(payload.events)) {
+            renderJobEvents();
+          }
+        }
+        renderJobHistory(state.activeJob?.job_id || "");
+        updateControls();
+      } else if (payload.type === "job_event" && payload.event) {
+        if (
+          payload.job_id === state.activeJob?.job_id
+          && mergeJobEvents([payload.event])
+        ) {
+          renderJobEvents();
+        }
+      }
+    } catch {
+      // Ignore malformed event payloads.
+    }
+  });
+  socket.addEventListener("close", () => {
+    if (state.eventsSocket !== socket) {
+      return;
+    }
+    state.eventsSocket = null;
+    if (
+      state.activeJob?.job_id
+      && !TERMINAL_JOB_STATES.has(state.activeJob.status)
+      && !state.jobEventSource
+    ) {
+      openJobEventStream(state.activeJob.job_id, state.jobEvents.at(-1)?.event_id || 0);
+    }
+    if (!state.eventsReconnectTimer) {
+      state.eventsReconnectTimer = window.setTimeout(() => {
+        state.eventsReconnectTimer = null;
+        connectEventsSocket();
+      }, 1500);
+    }
+  });
+}
+
+function closeEventsSocket() {
+  if (state.eventsReconnectTimer) {
+    window.clearTimeout(state.eventsReconnectTimer);
+    state.eventsReconnectTimer = null;
+  }
+  if (state.eventsSocket) {
+    const socket = state.eventsSocket;
+    state.eventsSocket = null;
+    try {
+      socket.close();
+    } catch {
+      // Ignore close errors.
+    }
   }
 }
 

@@ -364,4 +364,7 @@ def test_operator_console_references_api_controls():
     assert 'id="add-turn-condition-preset"' in index
     assert 'id="clear-turn-conditions"' in index
     assert "createPresetTurnConditionsEditor" in script
+    assert "/api/ws/events" in script
+    assert "/api/ws/screen" in script
+    assert "new WebSocket" in script
 

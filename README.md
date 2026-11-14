@@ -8,7 +8,7 @@ This project is a local Web interface for the BBchannel automation stack. It inc
 python -m pip install -r requirements.txt
 ```
 
-FastAPI and Uvicorn are required to run the local web server. OpenCV and NumPy are required for template matching. Bundled Windows ADB binaries (`33.0.2`, `airtest_adb`, `leidian_adb`, and `nox_adb`) are embedded under `bin/adb/`; `AdbBackend` checks `BBCHANNEL_ADB_PATH` first, then `bin/adb/` (and native POSIX `adb` on non-Windows hosts before `.exe` bundles), falling back to the parent `adb/` directory or `PATH`.
+FastAPI, Uvicorn, and `wsproto` are required to run the local web server and its real-time WebSocket streams (`WS /api/ws/events` for live event logs, job transitions, and subscribed job events with `EventSource` fallback, plus `WS /api/ws/screen` for binary PNG live screen preview frames and interactive click-to-tap). OpenCV and NumPy are required for template matching. Bundled Windows ADB binaries (`33.0.2`, `airtest_adb`, `leidian_adb`, and `nox_adb`) are embedded under `bin/adb/`; `AdbBackend` checks `BBCHANNEL_ADB_PATH` first, then `bin/adb/` (and native POSIX `adb` on non-Windows hosts before `.exe` bundles), falling back to the parent `adb/` directory or `PATH`.
 
 ## Run
 

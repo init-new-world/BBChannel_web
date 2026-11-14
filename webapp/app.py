@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
-from webapp.api import create_job_router
+from webapp.api import create_job_router, create_ws_router
 from webapp.automation import (
     compile_battle_program,
     create_assist_handler,
@@ -1113,6 +1113,7 @@ def create_app(
         return {"events": event_log.recent(limit)}
 
     app.include_router(create_job_router(job_manager, active_device_key))
+    app.include_router(create_ws_router(event_log, device_service, job_manager))
 
     static_dir = Path(__file__).with_name("static")
     if static_dir.exists():
