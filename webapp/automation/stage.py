@@ -103,10 +103,14 @@ def create_stage_handler(
                         == f"battle/MainStory/{server}/nextOne.png"
                         else None
                     )
+                    is_phase = template_path.endswith(
+                        ("/phase_1.png", "/phase_2.png", "/phase_3.png")
+                    )
                     result = recognition.match_template(
                         screenshot,
                         template_path,
                         threshold=0.85,
+                        roi=(867, 0, 44, 48) if is_phase else None,
                         scales=(1.0, 0.75, 2 / 3, 0.5),
                         mask_path=mask_path,
                     )

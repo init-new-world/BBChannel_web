@@ -1024,6 +1024,7 @@ def _wait_for_battle_transition(
     server = server.upper()
     attack_path = f"battle/{server}/attack.png"
     phase_paths = [f"battle/{server}/phase_{round_number}.png" for round_number in range(1, 4)]
+    phase_path_set = set(phase_paths)
     finish_paths = [
         f"battle/{server}/battleFinish.png",
         f"battle/{server}/battleFinish1.png",
@@ -1034,6 +1035,7 @@ def _wait_for_battle_transition(
             "template_path": path,
             "threshold": threshold,
             "scales": (1.0, 0.75, 2 / 3, 0.5),
+            **({"roi": (867, 0, 44, 48)} if path in phase_path_set else {}),
         }
         for path in [attack_path, *phase_paths, *finish_paths]
     ]

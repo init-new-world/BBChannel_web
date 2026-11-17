@@ -106,3 +106,19 @@ def test_extra_condition_field_mapping_and_invalid_condition_payload():
     assert inspected["canClear"] is True
     cleared = _run("edit-cond", source, field="round2_extraStrategy", edit={"type": "clear"})
     assert "round2_extraCondition" not in json.loads(cleared["result"])
+
+
+def test_null_condition_field_from_original_bbchannel_is_treated_as_empty_and_editable():
+    source = '{"round1_turns":2,"round1_turn0_condition":null,"round1_turn1_condition":null}'
+    inspected = _run("inspect-cond", source, field="round1_turn0_strategy")["result"]
+    assert inspected == {
+        "field": "round1_turn0_condition",
+        "entries": [],
+        "error": None,
+        "canClear": False,
+    }
+    added = _run("edit-cond", source, field="round1_turn0_strategy", edit={"type": "append-preset", "preset": _preset()})
+    assert added["error"] is None
+    parsed = json.loads(added["result"])
+    assert len(parsed["round1_turn0_condition"]) == 1
+    assert parsed["round1_turn1_condition"] is None

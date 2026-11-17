@@ -63,7 +63,7 @@ def create_battle_entry_handler(
         server = str(plan["server"]).upper()
         template_roles: tuple[tuple[str, str, float, tuple[int, int, int, int] | None], ...] = (
             ("battle_ready", f"battle/{server}/attack.png", 0.85, None),
-            ("battle_ready", f"battle/{server}/phase_1.png", 0.95, None),
+            ("battle_ready", f"battle/{server}/phase_1.png", 0.95, (867, 0, 44, 48)),
             ("apple_decide", f"battle/{server}/apple_decide.png", 0.85, None),
             ("apple_close", f"battle/{server}/apple_close.png", 0.85, None),
             ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png", 0.85, None),

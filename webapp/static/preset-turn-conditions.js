@@ -2,9 +2,9 @@ import { t } from "./i18n.js";
 import { changeConditionSource, inspectConditionSource } from "./turn-conditions-source.js";
 
 const CARD_TYPE_LABELS = {
-  0: "Fixed card",
+  0: "NP card",
   1: "Specific cards",
-  2: "NP card",
+  2: "Any Face",
 };
 
 function describeCard(card) {

@@ -1102,5 +1102,110 @@ def test_setting_plan_validates_and_exposes_turn_and_extra_conditions(tmp_path: 
     assert any(item["field"] == "round1_extraCondition" for item in invalid_cond["warnings"])
 
 
+def test_strategy_turns_ignore_leftover_simple_np_selection_and_preserve_lead_card_order(tmp_path: Path):
+    from webapp.automation.program import compile_battle_program
+    from webapp.automation.strategy import select_command_cards
+
+    data_dir = tmp_path / "data"
+    _write_json(data_dir / "servant_info_CH.json", {"希耶尔": {"SN": "2300900", "class": "MoonCancer", "other_name": []}})
+    strategy_entry = {
+        "card1": {"type": 1, "cards": ["2B"], "criticalStar": 0, "more_or_less": True},
+        "card2": {"type": 0, "cards": [2], "criticalStar": 0, "more_or_less": True},
+        "card3": {"type": 1, "cards": ["2B"], "criticalStar": 0, "more_or_less": True},
+        "breakpoint": [False, False],
+        "colorFirst": False,
+    }
+    _write_json(
+        data_dir / "settings" / "ciel.json",
+        {
+            "server": "CH",
+            "servant_1_name": "希耶尔",
+            "round1_turns": 1,
+            "round1_turn0_np": [2],
+            "round1_turn0_strategy": [strategy_entry],
+        },
+    )
+    service = ScriptDataService(data_dir)
+    program = compile_battle_program(service.get_setting_plan("ciel"))
+    step = program["rounds"][0]["turns"][0]["command_phase"]["steps"][1]
+    assert step["role"] == "command_card_strategy"
+    assert step["preselected_nps"] == []
+
+    cards = [
+        {"slot": 1, "code": "2B", "servant_position": 2, "color": "B", "stars": 0, "available": True, "special_keys": []},
+        {"slot": 2, "code": "1A", "servant_position": 1, "color": "A", "stars": 0, "available": True, "special_keys": []},
+        {"slot": 3, "code": "2B", "servant_position": 2, "color": "B", "stars": 0, "available": True, "special_keys": []},
+        {"slot": 4, "code": "3Q", "servant_position": 3, "color": "Q", "stars": 0, "available": True, "special_keys": []},
+        {"slot": 5, "code": "1B", "servant_position": 1, "color": "B", "stars": 0, "available": True, "special_keys": []},
+    ]
+    selected = select_command_cards(step["strategies"], cards, preselected_nps=step["preselected_nps"])
+    assert selected == [
+        {"type": "face", "slot": 1, "code": "2B", "stars": 0},
+        {"type": "np", "servant": 2},
+        {"type": "face", "slot": 3, "code": "2B", "stars": 0},
+    ]
+
+
+def test_grand_assist_equip_slots_merge_appended_ui_elements_and_report_missing_templates(tmp_path: Path):
+    from webapp.services.resources import ResourceService
+
+    assets_dir = tmp_path / "assets"
+    data_dir = tmp_path / "data"
+    (assets_dir / "assist" / "assist_equip").mkdir(parents=True)
+    (assets_dir / "assist" / "assist_equip" / "迦勒底午茶时光.png").write_bytes(b"png")
+    _write_json(data_dir / "servant_info_CH.json", {"伊什塔尔": {"SN": "202000", "class": "Archer", "other_name": []}})
+    _write_json(
+        data_dir / "settings" / "grand_archer.json",
+        {
+            "server": "CH",
+            "assistMode": "冠位助战",
+            "assistIdx": 1,
+            "servant_1_name": "伊什塔尔",
+            "assistEquip": [[], None, [], "迦勒底午茶时光", "不存在的礼装"],
+            "round1_turns": 1,
+        },
+    )
+    resources = ResourceService(assets_dir, data_dir)
+    service = ScriptDataService(data_dir, resources=resources)
+    plan = service.get_setting_plan("grand_archer")
+    assert plan["assist"]["equip_slots"] == {
+        "normal": ["迦勒底午茶时光", "不存在的礼装"],
+        "kizuna": [],
+        "houshuu": [],
+    }
+    report = service.get_setting_pre_run_report("grand_archer")["assist_report"]
+    assert report["equip_slots"][0] == ["迦勒底午茶时光", "不存在的礼装"]
+    assert report["missing_equip_templates"] == ["不存在的礼装"]
+    assert report["equip_warning"] == "缺少助战礼装模板：不存在的礼装"
+
+
+def test_all_real_settings_and_strategies_in_repo_validate_and_compile_cleanly():
+    from webapp.automation.program import compile_battle_program
+    from webapp.services.resources import ResourceService
+
+    project_root = Path(__file__).resolve().parents[1]
+    resources = ResourceService(project_root / "assets", project_root / "data")
+    service = ScriptDataService(project_root / "data", resources=resources)
+
+    settings = service.list_settings()
+    assert len(settings) >= 21
+    for item in settings:
+        name = item["name"]
+        detail = service.get_setting(name)
+        assert detail["validation"]["ok"] is True, f"{name}: {detail['validation']}"
+        plan = service.get_setting_plan(name)
+        program = compile_battle_program(plan)
+        assert program["execution"]["battle"]["ready"] is True, f"{name}: {program['execution']}"
+        report = service.get_setting_pre_run_report(name)
+        assert report["assist_report"]["missing_equip_templates"] == [], f"{name}: {report['assist_report']}"
+
+    strategies = service.list_strategies()
+    assert len(strategies) >= 5
+    for item in strategies:
+        detail = service.get_strategy(item["name"])
+        assert detail["validation"]["ok"] is True, f"{item['name']}: {detail['validation']}"
+
+
+
 
 

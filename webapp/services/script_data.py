@@ -340,7 +340,7 @@ class ScriptDataService:
                 if not raw_equip:
                     equip_slots = [[], [], []]
                 elif isinstance(raw_equip[0], list) or (
-                    len(raw_equip) == 3
+                    len(raw_equip) >= 3
                     and any(isinstance(item, list) or item is None for item in raw_equip)
                 ):
                     equip_slots = [
@@ -349,6 +349,10 @@ class ScriptDataService:
                         )
                         for idx in range(3)
                     ]
+                    for extra in raw_equip[3:]:
+                        for name in self._assist_equip_names(extra):
+                            if name not in equip_slots[0]:
+                                equip_slots[0].append(name)
                 else:
                     equip_slots = [self._assist_equip_names(raw_equip), [], []]
             else:
@@ -359,6 +363,24 @@ class ScriptDataService:
         ]
         equip_specified = mode not in {"仅从者", "不识别"} and any(
             slot_names for slot_names in equip_slots
+        )
+        missing_equip_templates: list[str] = []
+        if equip_specified and self._resources is not None:
+            assets_dir = self._resources.assets_dir
+            for slot_names in equip_slots:
+                for equip_name in slot_names:
+                    if equip_name in missing_equip_templates:
+                        continue
+                    active_file = assets_dir / "assist" / "assist_equip" / f"{equip_name}.png"
+                    archive_file = (
+                        assets_dir / "equipmaker" / "assist_equip_store" / f"{equip_name}.png"
+                    )
+                    if not active_file.is_file() and not archive_file.is_file():
+                        missing_equip_templates.append(equip_name)
+        equip_warning = (
+            f"缺少助战礼装模板：{'、'.join(missing_equip_templates)}"
+            if missing_equip_templates
+            else None
         )
 
         friend_only = bool(config.get("onlyFriendAssist", 0))
@@ -448,6 +470,8 @@ class ScriptDataService:
                 "equip_slots": equip_slots,
                 "equip_slots_display": equip_slots_display,
                 "equip_specified": equip_specified,
+                "missing_equip_templates": missing_equip_templates,
+                "equip_warning": equip_warning,
                 "friend_only": friend_only,
                 "friend_only_effective": friend_only_effective,
                 "friend_only_warning": friend_only_warning,
@@ -1253,12 +1277,17 @@ class ScriptDataService:
             len(value) == 3
             or any(isinstance(item, list) or item is None for item in value)
         ):
-            return {
+            slots = {
                 slot: cls._assist_equip_names(
                     value[index] if index < len(value) else None
                 )
                 for index, slot in enumerate(("normal", "kizuna", "houshuu"))
             }
+            for extra in value[3:]:
+                for name in cls._assist_equip_names(extra):
+                    if name not in slots["normal"]:
+                        slots["normal"].append(name)
+            return slots
         return {
             "normal": cls._assist_equip_names(value),
             "kizuna": [],

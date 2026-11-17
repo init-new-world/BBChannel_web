@@ -1372,3 +1372,63 @@ def test_assist_recognizer_match_sort_order_recognizes_level_or_load_order(tmp_p
     assert all(spec["roi"] == [1093, 93, 120, 67] for spec in seen_specs)
 
 
+def test_assist_recognizer_skips_limit_break_when_no_equip_configured_and_supports_archived_or_appended_equips(
+    tmp_path: Path,
+):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "servantface").mkdir(parents=True)
+    (assets / "assist" / "assist_equip").mkdir(parents=True)
+    (assets / "equipmaker" / "assist_equip_store").mkdir(parents=True)
+    data.mkdir()
+
+    (assets / "servantface" / "Ishtar_1.png").write_bytes(b"servant")
+    (assets / "equipmaker" / "assist_equip_store" / "ArchivedCE.png").write_bytes(b"equip")
+
+    limit_break_queries = []
+
+    class RecognitionStub:
+        def match_template_all(self, _screenshot, template_path, **_options):
+            if template_path == "assist/满破标记.png":
+                limit_break_queries.append(template_path)
+                return []
+            if template_path == "servantface/Ishtar_1.png":
+                return [_match_result(template_path, [170, 240])]
+            if template_path == "equipmaker/assist_equip_store/ArchivedCE.png":
+                return [_match_result(template_path, [180, 240 - 34])]
+            return []
+
+    resources = ResourceService(assets, data)
+    recognizer = AssistRecognizer(resources, RecognitionStub())
+
+    # Case 1: Grand Archer style — fullEquip=True but assistEquip=[[], None, []] (no CE specified).
+    result_no_ce = recognizer.recognize(
+        b"frame",
+        {
+            "mode": "冠位助战",
+            "servant_name": "伊什塔尔",
+            "servant_canonical_name": "Ishtar",
+            "equip_names": [],
+            "equip_slots": {"normal": [], "kizuna": [], "houshuu": []},
+            "full_limit_break": True,
+        },
+    )
+    assert result_no_ce["candidate_count"] == 1
+    assert limit_break_queries == []
+
+    # Case 2: 3-slot assistEquip with an appended 4th element whose template is in assist_equip_store.
+    result_appended = recognizer.recognize(
+        b"frame",
+        {
+            "mode": "冠位助战",
+            "servant_name": "伊什塔尔",
+            "servant_canonical_name": "Ishtar",
+            "assistEquip": [[], None, [], "ArchivedCE"],
+            "full_limit_break": False,
+        },
+    )
+    assert result_appended["candidate_count"] == 1
+    assert result_appended["candidates"][0]["checks"]["equip_name"] == "ArchivedCE"
+
+
+

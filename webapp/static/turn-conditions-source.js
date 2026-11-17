@@ -89,7 +89,7 @@ function readConditionEntry(source, target) {
 
 export function inspectConditionSource(source, target) {
   const entry = readConditionEntry(source, target);
-  if (entry.value === undefined) {
+  if (entry.value == null) {
     return { field: entry.field, entries: [], error: null, canClear: false };
   }
   if (!Array.isArray(entry.value) || entry.value.some((item) => !isValidConditionStrategyPayload(item))) {
@@ -114,12 +114,12 @@ export function changeConditionSource(source, target, edit) {
   if (edit.type === "clear") {
     return entry.remove();
   }
-  const existingNodes = entry.node
+  const existingNodes = entry.node && entry.value !== null
     ? (entry.node.type === "array"
         ? entry.node.children.map((child) => source.slice(child.offset, child.offset + child.length))
         : (() => { throw new Error("Invalid condition strategy."); })())
     : [];
-  const current = entry.value === undefined ? [] : entry.value;
+  const current = entry.value == null ? [] : entry.value;
   if (!Array.isArray(current) || current.some((item) => !isValidConditionStrategyPayload(item))) {
     throw new Error("Invalid condition strategy.");
   }

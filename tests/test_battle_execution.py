@@ -2481,3 +2481,68 @@ def test_wait_for_battle_ready_closes_command_card_back_screen(tmp_path: Path):
     ]
     assert popups == ["command_card_back"]
 
+
+def test_wait_for_battle_transition_restricts_phase_templates_to_wave_numerator_roi(
+    tmp_path: Path,
+):
+    from webapp.automation.battle import _wait_for_battle_transition
+
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    data.mkdir()
+
+    def make_digit(seed: int) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        return rng.integers(30, 230, size=(23, 19, 3), dtype=np.uint8)
+
+    attack = make_digit(1)
+    phase1 = make_digit(2)
+    phase2 = make_digit(3)
+    phase3 = make_digit(4)
+    finish = make_digit(5)
+    _write_image(assets / "battle" / "CH" / "attack.png", attack)
+    _write_image(assets / "battle" / "CH" / "phase_1.png", phase1)
+    _write_image(assets / "battle" / "CH" / "phase_2.png", phase2)
+    _write_image(assets / "battle" / "CH" / "phase_3.png", phase3)
+    _write_image(assets / "battle" / "CH" / "battleFinish.png", finish)
+    _write_image(assets / "battle" / "CH" / "battleFinish1.png", finish)
+    _write_image(assets / "battle" / "CH" / "fight_end.png", finish)
+
+    # Grand Archer Wave 1 Turn 2: numerator at [882, 14] is 1, denominator at [914, 14] is 2,
+    # and turn counter at [927, 50] is 2 ("2回合").
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    frame[560:583, 1100:1119] = attack
+    frame[14:37, 882:901] = phase1
+    frame[14:37, 914:933] = phase2
+    frame[50:73, 927:946] = phase2
+    frame_path = tmp_path / "frame.png"
+    _write_image(frame_path, frame)
+    frame_bytes = frame_path.read_bytes()
+
+    resources = ResourceService(assets, data)
+    recognition = RecognitionService(resources)
+
+    class Device:
+        def snapshot(self):
+            return frame_bytes
+
+    class Context:
+        def emit(self, *_args, **_kwargs):
+            pass
+
+        def sleep(self, _seconds):
+            pass
+
+    transition = _wait_for_battle_transition(
+        Context(),
+        Device(),
+        recognition,
+        "CH",
+        0.85,
+        1.0,
+        0.0,
+    )
+    assert transition == {"state": "battle", "round": 1}
+
+

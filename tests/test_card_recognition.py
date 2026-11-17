@@ -350,3 +350,77 @@ def test_command_card_recognizer_classifies_weak_and_resist_affinities(tmp_path:
     assert result["cards"][2]["affinity_confidence"] >= 0.99
 
 
+def test_command_card_recognizer_falls_back_to_commands_jp_for_missing_or_costume_sprites(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "battle" / "CH").mkdir(parents=True)
+    data.mkdir()
+
+    colors = {
+        "Buster": _pattern((34, 20), (210, 40, 40), 4),
+        "Arts": _pattern((34, 20), (40, 80, 220), 8),
+        "Quick": _pattern((34, 20), (40, 190, 80), 12),
+    }
+    for name, template in colors.items():
+        template.save(assets / "battle" / "CH" / f"{name}.png")
+    for name, color, marker in (("freeze", (220, 200, 30), 4), ("bjfy", (150, 40, 210), 11)):
+        _pattern((20, 30), color, marker).save(assets / "battle" / "CH" / f"{name}.png")
+    star_directory = assets / "battle" / "public" / "starNum"
+    star_directory.mkdir(parents=True)
+    for number in range(10):
+        template = Image.new("L", (40, 39), 0)
+        ImageDraw.Draw(template).rectangle((5, 5, 34, 33), fill=20 + number * 15)
+        template.save(star_directory / f"n{number}.png")
+        mask = Image.new("L", template.size, 0)
+        ImageDraw.Draw(mask).rectangle((5, 5, 34, 33), fill=255)
+        mask.save(star_directory / f"n{number}mask.png")
+
+    # Servant 1 ("205400", Summer Tiamat) exists ONLY in commands_JP.
+    # Servant 2 ("100100") has card_servant_1.png in commands_CH, plus costume card_servant_11.png only in commands_JP.
+    jp_only_dir = assets / "commands_JP" / "205400"
+    jp_only_dir.mkdir(parents=True)
+    tiamat_sprite = _pattern((48, 48), (60, 140, 210), 6)
+    tiamat_sprite.save(jp_only_dir / "card_servant_1.png")
+
+    ch_partial_dir = assets / "commands_CH" / "100100"
+    jp_partial_dir = assets / "commands_JP" / "100100"
+    ch_partial_dir.mkdir(parents=True)
+    jp_partial_dir.mkdir(parents=True)
+    ch_base = _pattern((48, 48), (200, 70, 90), 11)
+    jp_costume = _pattern((48, 48), (110, 200, 90), 16)
+    ch_base.save(ch_partial_dir / "card_servant_1.png")
+    _pattern((48, 48), (90, 90, 90), 3).save(jp_partial_dir / "card_servant_1.png")
+    jp_costume.save(jp_partial_dir / "card_servant_11.png")
+
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    slots = [
+        (tiamat_sprite, "Arts"),
+        (jp_costume, "Buster"),
+        (ch_base, "Quick"),
+        (tiamat_sprite, "Quick"),
+        (jp_costume, "Arts"),
+    ]
+    for idx, (portrait, color_name) in enumerate(slots):
+        x = idx * 256
+        screenshot.paste(colors[color_name], (x + 20, 420), colors[color_name])
+        screenshot.paste(portrait, (x + 100, 500), portrait)
+
+    resources = ResourceService(assets, data)
+    result = CommandCardRecognizer(resources, RecognitionService(resources)).recognize(
+        _png_bytes(screenshot),
+        "CH",
+        [
+            {"slot": 0, "name": "Summer Tiamat", "active": True, "sn": "205400"},
+            {"slot": 1, "name": "Mash", "active": True, "sn": "100100"},
+        ],
+        threshold=0.85,
+    )
+
+    assert result["complete"] is True
+    assert [card["code"] for card in result["cards"]] == ["1A", "2B", "2Q", "1Q", "2A"]
+
+
+

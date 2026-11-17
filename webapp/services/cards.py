@@ -135,13 +135,23 @@ class CommandCardRecognizer:
                 }
             if not servant.get("sn"):
                 continue
-            prefix = f"commands_{normalized_server}/{servant['sn']}"
-            page = self._resources.template_index(prefix=prefix, limit=1000)
-            for entry in page["entries"]:
-                template_path = str(entry["path"])
-                filename = template_path.rsplit("/", 1)[-1]
-                if filename.startswith("card_servant_") and filename != "card_servant_np.png":
-                    servant_templates.append((position, servant, template_path))
+            by_filename: dict[str, str] = {}
+            prefixes = [f"commands_{normalized_server}/{servant['sn']}"]
+            if normalized_server != "JP":
+                prefixes.append(f"commands_JP/{servant['sn']}")
+            for prefix in prefixes:
+                page = self._resources.template_index(prefix=prefix, limit=1000)
+                for entry in page["entries"]:
+                    template_path = str(entry["path"])
+                    filename = template_path.rsplit("/", 1)[-1]
+                    if (
+                        filename.startswith("card_servant_")
+                        and filename != "card_servant_np.png"
+                        and filename not in by_filename
+                    ):
+                        by_filename[filename] = template_path
+            for template_path in by_filename.values():
+                servant_templates.append((position, servant, template_path))
 
         duplicate_assist_servant = False
         if assist_entry is not None:

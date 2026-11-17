@@ -135,12 +135,14 @@ class AssistRecognizer:
                 "candidates": [],
                 "candidate_count": 0,
             }
+        configured_equip_names = self._collect_equip_names(assist, grand_equip_slots)
+        has_explicit_equip_config = any(
+            key in assist for key in ("equip_names", "equip_slots", "assistEquip")
+        )
         equip_templates = (
             {}
             if only_servant
-            else self._equip_templates(
-                self._collect_equip_names(assist, grand_equip_slots)
-            )
+            else self._equip_templates(configured_equip_names)
         )
         equip_matches = {
             equip_name: [
@@ -156,7 +158,11 @@ class AssistRecognizer:
             ]
             for equip_name, template_paths in equip_templates.items()
         }
-        check_limit_break = bool(assist.get("full_limit_break")) and not only_servant
+        check_limit_break = (
+            bool(assist.get("full_limit_break"))
+            and not only_servant
+            and (bool(configured_equip_names) or not has_explicit_equip_config)
+        )
         limit_break_roi = (
             (300, 140, 130, frame_size[1] - 140)
             if check_limit_break
@@ -695,6 +701,10 @@ class AssistRecognizer:
                 )
                 for index, slot in enumerate(GRAND_EQUIP_SLOT_NAMES)
             }
+            for extra in raw_assist_equip[len(GRAND_EQUIP_SLOT_NAMES) :]:
+                for name in extract_names(extra):
+                    if name not in slots["normal"]:
+                        slots["normal"].append(name)
             return slots if any(slots.values()) else None
         return None
 
@@ -1197,20 +1207,34 @@ class AssistRecognizer:
     def _equip_templates(self, equip_names: Any) -> dict[str, list[str]]:
         if not isinstance(equip_names, list):
             return {}
-        entries = self._resources.template_index(
+        active_entries = self._resources.template_index(
             prefix="assist/assist_equip",
             limit=1000,
         )["entries"]
+        archive_entries: list[dict[str, Any]] | None = None
         templates: dict[str, list[str]] = {}
         for equip_name in equip_names:
             if not isinstance(equip_name, str) or not equip_name:
                 continue
-            templates[equip_name] = [
+            matched_paths = [
                 str(entry["path"])
-                for entry in entries
+                for entry in active_entries
                 if str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]
                 == equip_name
             ]
+            if not matched_paths:
+                if archive_entries is None:
+                    archive_entries = self._resources.template_index(
+                        prefix="equipmaker/assist_equip_store",
+                        limit=1000,
+                    )["entries"]
+                matched_paths = [
+                    str(entry["path"])
+                    for entry in archive_entries
+                    if str(entry["path"]).rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                    == equip_name
+                ]
+            templates[equip_name] = matched_paths
         return templates
 
     def _candidate_tag_matches(

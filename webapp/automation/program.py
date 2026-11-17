@@ -464,7 +464,7 @@ def _compile_command_phase(
                     "type": "strategy",
                     "role": "command_card_strategy",
                     "strategies": strategies,
-                    "preselected_nps": turn.get("nps", []),
+                    "preselected_nps": [],
                     "selection_count": 3,
                 },
             ],
