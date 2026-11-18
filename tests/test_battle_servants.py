@@ -364,7 +364,7 @@ def test_battle_execute_plan_recovers_unrecognized_command_cards_via_frontline_s
             self.taps.append((x, y))
             if (x, y) == (1150, 600):
                 self.in_cards = True
-            elif (x, y) == (1250, 683):
+            elif (x, y) == (1201, 683):
                 self.in_cards = False
 
             class _Op:
@@ -413,7 +413,7 @@ def test_battle_execute_plan_recovers_unrecognized_command_cards_via_frontline_s
     # Attack -> Back (recovery) -> Attack (recovery) -> Card 3 (3B) -> Card 1 (1A) -> Card 2 (2Q)
     assert device.taps == [
         (1150, 600),
-        (1250, 683),
+        (1201, 683),
         (1150, 600),
         (650, 500),
         (150, 500),
@@ -1017,6 +1017,6 @@ def test_resolve_free_skill_target_probes_weak_affinity_cards_when_no_buffs_reco
     # Weak cards belong to servants 3 and 2 -> min(weaks) == 2
     assert target == 2
     assert probe_taps == 2
-    assert taps == [(1150, 600), (1250, 683)]
+    assert taps == [(1150, 600), (1201, 683)]
 
 

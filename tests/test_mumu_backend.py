@@ -383,3 +383,90 @@ def test_ctypes_api_rejects_unreasonable_frame_allocation(tmp_path: Path):
         api.capture_display(42, 0)
 
     assert "frame size" in str(exc_info.value)
+
+
+def test_mumu_bridge_enables_high_speed_ipc_from_linux_over_tcp(tmp_path: Path):
+    import json
+    import socketserver
+    import struct
+    import threading
+
+    native = FakeNativeApi(
+        frame=MumuNativeFrame(
+            width=16,
+            height=9,
+            pixels=bytes([10, 80, 200, 255]) * (16 * 9),
+            bottom_up=True,
+        )
+    )
+
+    def recv_exact(conn, size: int) -> bytes | None:
+        buf = bytearray()
+        while len(buf) < size:
+            chunk = conn.recv(size - len(buf))
+            if not chunk:
+                return None
+            buf.extend(chunk)
+        return bytes(buf)
+
+    class BridgeHandler(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            while True:
+                hdr = recv_exact(self.request, 4)
+                if hdr is None:
+                    return
+                (length,) = struct.unpack("<I", hdr)
+                req = json.loads(recv_exact(self.request, length).decode("utf-8"))
+                op = req["op"]
+                blob = b""
+                if op == "ping":
+                    resp = {"ok": True, "ready": True}
+                elif op == "diagnostics":
+                    resp = {"ok": True, "diagnostics": native.diagnostics()}
+                elif op == "connect":
+                    resp = {"ok": True, "handle": native.connect(Path(req["install_path"]), req["instance_index"])}
+                elif op == "disconnect":
+                    native.disconnect(req["handle"])
+                    resp = {"ok": True}
+                elif op == "capture_display":
+                    f = native.capture_display(req["handle"], req["display_id"])
+                    blob = f.pixels
+                    resp = {"ok": True, "width": f.width, "height": f.height, "bottom_up": f.bottom_up, "blob_len": len(blob)}
+                elif op == "touch_down":
+                    native.touch_down(req["handle"], req["display_id"], req["x"], req["y"])
+                    resp = {"ok": True}
+                elif op == "touch_up":
+                    native.touch_up(req["handle"], req["display_id"])
+                    resp = {"ok": True}
+                else:
+                    resp = {"ok": False, "code": -1, "error": op}
+                resp.setdefault("blob_len", len(blob))
+                enc = json.dumps(resp).encode("utf-8")
+                self.request.sendall(struct.pack("<I", len(enc)) + enc + blob)
+
+    class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    with Server(("127.0.0.1", 0), BridgeHandler) as srv:
+        port = srv.server_address[1]
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        backend = MumuBackend(
+            platform_name="Linux",
+            install_paths=[tmp_path],
+            bridge_endpoint=f"127.0.0.1:{port}",
+        )
+        try:
+            assert backend.capability().available is True
+            png = backend.snapshot("mumu:0")
+            with Image.open(BytesIO(png)) as image:
+                assert image.size == (16, 9)
+                assert image.getpixel((0, 0)) == (10, 80, 200)
+            tap_res = backend.tap("mumu:0", 5, 3)
+            assert tap_res.ok is True
+            assert native.touch_down_calls == [(100, 0, 6, 5)]
+            assert native.touch_up_calls == [(100, 0)]
+        finally:
+            backend.close()
+            srv.shutdown()

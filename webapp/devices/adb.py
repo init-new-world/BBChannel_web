@@ -8,8 +8,12 @@ import shutil
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import http.client
 from ipaddress import ip_address
 from pathlib import Path
+from queue import Empty, Queue
+import struct
+from threading import Lock, Thread
 from time import monotonic, sleep as system_sleep
 
 from webapp.core.errors import AppError, ErrorCode
@@ -331,6 +335,282 @@ def _parse_device_details(parts: list[str]) -> dict[str, str]:
     return details
 
 
+class _PersistentAdbShell:
+    """Keeps one `adb -s <id> shell` open and uses C++ Binder `cmd input`."""
+
+    def __init__(self, adb_path: Path, device_id: str, timeout_seconds: float = 5.0) -> None:
+        self.adb_path = adb_path
+        self.device_id = device_id
+        self.timeout_seconds = max(timeout_seconds, 1.0)
+        self._lock = Lock()
+        self._proc: subprocess.Popen[str] | None = None
+        self._lines: Queue[str | None] = Queue()
+
+    def _ensure_open(self) -> subprocess.Popen[str]:
+        if self._proc is not None and self._proc.poll() is None:
+            return self._proc
+        self._close_locked()
+        self._lines = Queue()
+        proc = subprocess.Popen(
+            [str(self.adb_path), "-s", self.device_id, "shell"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            encoding="utf-8",
+            errors="replace",
+        )
+        self._proc = proc
+        q = self._lines
+
+        def _reader() -> None:
+            try:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    q.put(line)
+            except Exception:
+                pass
+            finally:
+                q.put(None)
+
+        Thread(target=_reader, daemon=True, name=f"adb-shell-{self.device_id}").start()
+        return proc
+
+    def execute(self, command: str, token: str) -> bool:
+        marker = f"__BB_DONE_{token}__:"
+        with self._lock:
+            try:
+                proc = self._ensure_open()
+                assert proc.stdin is not None
+                while not self._lines.empty():
+                    try:
+                        self._lines.get_nowait()
+                    except Empty:
+                        break
+                proc.stdin.write(f"{command}; echo {marker}$?\n")
+                proc.stdin.flush()
+                deadline = monotonic() + self.timeout_seconds
+                while True:
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        self._close_locked()
+                        return False
+                    try:
+                        line = self._lines.get(timeout=remaining)
+                    except Empty:
+                        self._close_locked()
+                        return False
+                    if line is None:
+                        self._close_locked()
+                        return False
+                    idx = line.find(marker)
+                    if idx != -1:
+                        rc = line[idx + len(marker) :].strip()
+                        return rc == "0"
+            except Exception:
+                self._close_locked()
+                return False
+
+    def close(self) -> None:
+        with self._lock:
+            self._close_locked()
+
+    def _close_locked(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc is None:
+            return
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=0.5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def _default_droidcast_apk() -> Path | None:
+    root = Path(__file__).resolve().parents[2]
+    for candidate in (
+        root / "bin" / "DroidCast-debug-1.2.1.apk",
+        root.parent / "apks" / "DroidCast-debug-1.2.1.apk",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+class _DroidCastSession:
+    """Resident Airtest DroidCast HTTP capture stream (~20ms 720p GPU-scaled frames)."""
+
+    REMOTE_APK = "/data/local/tmp/bbchannel_droidcast.apk"
+    REMOTE_PORT = 53516
+    PRESCALED_MAGIC = b"BBDC720\x00"
+
+    def __init__(
+        self,
+        adb_path: Path,
+        device_id: str,
+        apk_path: Path,
+        raw_size: tuple[int, int],
+    ) -> None:
+        self.adb_path = adb_path
+        self.device_id = device_id
+        self.apk_path = apk_path
+        self.raw_width, self.raw_height = raw_size
+        self._lock = Lock()
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._local_port: int | None = None
+        self._conn: http.client.HTTPConnection | None = None
+        self._failed = False
+
+    def _start_locked(self) -> bool:
+        if self._failed:
+            return False
+        if self._local_port is not None and self._proc is not None and self._proc.poll() is None:
+            return True
+        self._cleanup_locked()
+        try:
+            subprocess.run(
+                [str(self.adb_path), "-s", self.device_id, "push", str(self.apk_path), self.REMOTE_APK],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10.0,
+                check=True,
+            )
+            subprocess.run(
+                [str(self.adb_path), "-s", self.device_id, "shell", "pkill -f com.rayworks.droidcast.Main || true"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3.0,
+                check=False,
+            )
+            self._proc = subprocess.Popen(
+                [
+                    str(self.adb_path),
+                    "-s",
+                    self.device_id,
+                    "shell",
+                    f"CLASSPATH={self.REMOTE_APK}",
+                    "app_process",
+                    "/",
+                    "com.rayworks.droidcast.Main",
+                    f"--port={self.REMOTE_PORT}",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            fwd = subprocess.run(
+                [str(self.adb_path), "-s", self.device_id, "forward", "tcp:0", f"tcp:{self.REMOTE_PORT}"],
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+                check=True,
+            )
+            self._local_port = int(fwd.stdout.strip())
+            for _ in range(10):
+                system_sleep(0.15)
+                body = self._fetch_once_locked()
+                if body is not None and body.startswith(b"\x89PNG\r\n\x1a\n") and len(body) > 24:
+                    w, h = struct.unpack_from(">II", body, 16)
+                    if (w, h) == (1280, 720):
+                        return True
+            self._failed = True
+            self._cleanup_locked()
+            return False
+        except Exception:
+            self._failed = True
+            self._cleanup_locked()
+            return False
+
+    def _fetch_once_locked(self) -> bytes | None:
+        if self._local_port is None:
+            return None
+        for attempt in range(2):
+            try:
+                if self._conn is None:
+                    self._conn = http.client.HTTPConnection("127.0.0.1", self._local_port, timeout=2.5)
+                self._conn.request("GET", "/screenshot?width=1280&height=720")
+                resp = self._conn.getresponse()
+                data = resp.read()
+                if resp.status == 200 and data:
+                    return data
+            except Exception:
+                if self._conn is not None:
+                    try:
+                        self._conn.close()
+                    except Exception:
+                        pass
+                    self._conn = None
+                if attempt == 1:
+                    return None
+        return None
+
+    def capture_prescaled_720p(self) -> bytes | None:
+        if self.raw_width <= self.raw_height or abs(self.raw_width / self.raw_height - 16 / 9) >= 0.02:
+            return None
+        with self._lock:
+            if not self._start_locked():
+                return None
+            png = self._fetch_once_locked()
+            if png is None or not png.startswith(b"\x89PNG\r\n\x1a\n"):
+                return None
+            return self.PRESCALED_MAGIC + struct.pack("<II", self.raw_width, self.raw_height) + png
+
+    def close(self) -> None:
+        with self._lock:
+            self._cleanup_locked()
+
+    def _cleanup_locked(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+        if self._local_port is not None:
+            try:
+                subprocess.run(
+                    [str(self.adb_path), "-s", self.device_id, "forward", "--remove", f"tcp:{self._local_port}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2.0,
+                    check=False,
+                )
+            except Exception:
+                pass
+            self._local_port = None
+        proc = self._proc
+        self._proc = None
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=0.5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+
+def _is_valid_raw_screencap(payload: bytes) -> bool:
+    if len(payload) < 16:
+        return False
+    width, height, pixel_format = struct.unpack_from("<III", payload, 0)
+    if not (1 <= width <= 16384 and 1 <= height <= 16384) or pixel_format not in {1, 2, 5}:
+        return False
+    header_size = len(payload) - (width * height * 4)
+    return header_size in {12, 16}
+
+
 class AdbBackend:
     name = "adb"
 
@@ -352,6 +632,13 @@ class AdbBackend:
         self.retry_config = retry_config or AdbRetryConfig.from_env()
         self._sleep = sleep
         self._last_discovery_at = 0.0
+        self._fast_capture = _env_bool(os.environ.get("BBCHANNEL_ADB_FAST_CAPTURE"), default=True)
+        self._droidcast_enabled = _env_bool(os.environ.get("BBCHANNEL_ADB_DROIDCAST"), default=True)
+        self._fast_input = _env_bool(os.environ.get("BBCHANNEL_ADB_FAST_INPUT"), default=True)
+        self._shells_lock = Lock()
+        self._shells: dict[str, _PersistentAdbShell] = {}
+        self._droidcast_sessions: dict[str, _DroidCastSession] = {}
+        self._shell_seq = 0
 
     def capability(self) -> Capability:
         if self.adb_path is None:
@@ -448,7 +735,81 @@ class AdbBackend:
         )
         return result.stdout
 
+    def snapshot_raw(self, device_id: str) -> bytes:
+        if self._run_command is not None or not self._fast_capture:
+            return self.snapshot(device_id)
+        with self._shells_lock:
+            dc_session = self._droidcast_sessions.get(device_id)
+        if dc_session is not None:
+            prescaled = dc_session.capture_prescaled_720p()
+            if prescaled is not None:
+                return prescaled
+        try:
+            result, _attempts = self._run_with_retry(
+                ["-s", device_id, "exec-out", "screencap"],
+                attempts=1,
+            )
+            if _is_valid_raw_screencap(result.stdout):
+                if (
+                    dc_session is None
+                    and self._droidcast_enabled
+                    and self.adb_path is not None
+                ):
+                    apk = _default_droidcast_apk()
+                    if apk is not None:
+                        raw_w, raw_h = struct.unpack_from("<II", result.stdout, 0)
+                        if raw_w > raw_h and abs(raw_w / raw_h - 16 / 9) < 0.02:
+                            with self._shells_lock:
+                                dc_session = self._droidcast_sessions.setdefault(
+                                    device_id,
+                                    _DroidCastSession(self.adb_path, device_id, apk, (raw_w, raw_h)),
+                                )
+                            prescaled = dc_session.capture_prescaled_720p()
+                            if prescaled is not None:
+                                return prescaled
+                return result.stdout
+        except AppError:
+            pass
+        return self.snapshot(device_id)
+
+    def _fast_shell_exec(self, device_id: str, command: str) -> bool:
+        if self._run_command is not None or not self._fast_input or self.adb_path is None:
+            return False
+        with self._shells_lock:
+            self._shell_seq += 1
+            token = str(self._shell_seq)
+            shell = self._shells.get(device_id)
+            if shell is None:
+                shell = _PersistentAdbShell(
+                    self.adb_path,
+                    device_id,
+                    timeout_seconds=min(float(self.timeout_seconds), 5.0),
+                )
+                self._shells[device_id] = shell
+        return shell.execute(command, token)
+
+    def close(self) -> None:
+        with self._shells_lock:
+            shells = list(self._shells.values())
+            self._shells.clear()
+            dc_sessions = list(self._droidcast_sessions.values())
+            self._droidcast_sessions.clear()
+        for shell in shells:
+            shell.close()
+        for dc in dc_sessions:
+            dc.close()
+
     def tap(self, device_id: str, x: int, y: int) -> OperationResult:
+        if self._fast_shell_exec(
+            device_id,
+            f"cmd input tap {int(x)} {int(y)} >/dev/null 2>&1 || input tap {int(x)} {int(y)}",
+        ):
+            return OperationResult(
+                ok=True,
+                action="tap",
+                message=f"Tapped {x},{y}",
+                data={"attempts": 1, "mode": "fast_shell"},
+            )
         _result, attempts = self._run_with_retry(
             ["-s", device_id, "shell", "input", "tap", str(x), str(y)],
             text=True,
@@ -470,6 +831,17 @@ class AdbBackend:
         y2: int,
         duration_ms: int,
     ) -> OperationResult:
+        if self._fast_shell_exec(
+            device_id,
+            f"cmd input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(duration_ms)} >/dev/null 2>&1 || "
+            f"input swipe {int(x1)} {int(y1)} {int(x2)} {int(y2)} {int(duration_ms)}",
+        ):
+            return OperationResult(
+                ok=True,
+                action="swipe",
+                message="Swipe sent",
+                data={"attempts": 1, "mode": "fast_shell"},
+            )
         _result, attempts = self._run_with_retry(
             [
                 "-s",

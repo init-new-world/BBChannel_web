@@ -267,3 +267,50 @@ def test_np_recovery_keeps_other_confirmed_np_blocks_for_strategy_retry(replay_f
     assert count == 9
     recovery = [data for kind, data in env.context.events if kind == "np_selection_recovery"]
     assert recovery[0]["unavailable_nps"] == [1, 2]
+
+
+def test_uncharged_np_detected_via_np_charge_triggers_recovery_without_block_markers(
+    replay_factory,
+):
+    env = replay_factory
+    ready = env.frame(command=False)
+    command = env.frame()
+    expectations = [(ready, ATTACK_POINT)]
+    expectations += [
+        (command, point)
+        for point in (NP_POINTS[0], FACE_CARD_POINTS[0], FACE_CARD_POINTS[1], COMMAND_CARD_BACK_POINT)
+    ]
+    expectations += [(ready, ATTACK_POINT)]
+    expectations += [(command, point) for point in FACE_CARD_POINTS[:3]]
+    expectations += [(ready, None)]
+    devices = env.create(expectations)
+
+    class UnchargedNpRecognizer:
+        def recognize(self, _screenshot, _server, *, present):
+            assert present == [True, True, True]
+            return {"values": [80, 110, 30], "complete": True}
+
+    steps = [
+        tap_step("attack", ATTACK_POINT),
+        tap_step("np_1", NP_POINTS[0]),
+        tap_step("face_card_1", FACE_CARD_POINTS[0]),
+        tap_step("face_card_2", FACE_CARD_POINTS[1]),
+    ]
+    count = battle._execute_command_phase(
+        env.context,
+        devices,
+        env.recognition,
+        None,
+        "CH",
+        [],
+        steps,
+        0.9,
+        3,
+        0.1,
+        0,
+        np_recognizer=UnchargedNpRecognizer(),
+    )
+    assert count == 9
+    recovery = [data for kind, data in env.context.events if kind == "np_selection_recovery"]
+    assert len(recovery) == 1
+    assert recovery[0]["unavailable_nps"] == [1]

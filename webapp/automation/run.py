@@ -80,7 +80,14 @@ def create_full_run_handler(
             run_options.get("interval_after_operation", run_options.get("interval_after_fight", 0.1)),
             "interval_after_operation",
         )
-        clear_ap = bool(run_options.get("clear_ap"))
+        clear_ap_override = payload.get("clear_ap")
+        if clear_ap_override is not None and not isinstance(clear_ap_override, bool):
+            raise ValueError("clear_ap must be a boolean.")
+        clear_ap = (
+            clear_ap_override
+            if clear_ap_override is not None
+            else bool(run_options.get("clear_ap"))
+        )
         first_battle_set = bool(run_options.get("first_battle_set"))
         game_crash_restart = bool(run_options.get("game_crash_restart"))
         stuck_restart = bool(run_options.get("stuck_restart"))

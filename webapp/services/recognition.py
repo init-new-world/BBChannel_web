@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from numbers import Integral
+from threading import Lock
 from typing import Any
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import MatchResult
+from webapp.devices.coordinates import cache_decoded_bgr_frame, get_cached_bgr_frame
 from webapp.services.resources import ResourceService
 
 try:
@@ -23,11 +26,17 @@ except ImportError:  # pragma: no cover - exercised by dependency-absent tests
 
 
 class RecognitionService:
+    _TEMPLATE_CACHE_LIMIT = 512
+    _SCALED_CACHE_LIMIT = 1024
+
     def __init__(self, resources: ResourceService) -> None:
         self._resources = resources
         self._match_observer: ContextVar[Callable[[MatchResult], None] | None] = ContextVar(
             "recognition_match_observer", default=None,
         )
+        self._cache_lock = Lock()
+        self._loaded_templates: OrderedDict[tuple[Any, ...], tuple[Any, Any, bool]] = OrderedDict()
+        self._scaled_templates: OrderedDict[tuple[Any, ...], tuple[Any, Any, Any, Any]] = OrderedDict()
 
     @contextmanager
     def observe_matches(self, observer: Callable[[MatchResult], None]) -> Iterator[None]:
@@ -257,6 +266,9 @@ class RecognitionService:
 
     def _decode_screenshot(self, screenshot: bytes, template_path: str | None):
         cv, numpy = self._require_opencv()
+        cached = get_cached_bgr_frame(screenshot)
+        if cached is not None:
+            return cached
         screenshot_image = cv.imdecode(
             numpy.frombuffer(screenshot, dtype=numpy.uint8),
             cv.IMREAD_COLOR,
@@ -267,6 +279,7 @@ class RecognitionService:
                 "Screenshot image could not be decoded.",
                 {"template_path": template_path} if template_path is not None else {},
             )
+        cache_decoded_bgr_frame(screenshot, screenshot_image)
         return screenshot_image
 
     def _match_decoded(
@@ -307,6 +320,11 @@ class RecognitionService:
             search_image = cv.cvtColor(search_image, cv.COLOR_BGR2GRAY)
             template_image = cv.cvtColor(template_image, cv.COLOR_BGR2GRAY)
         normalized_scales = self._normalize_scales(scales, template_path)
+        if (screenshot_width, screenshot_height) == (1280, 720) and len(normalized_scales) > 1:
+            normalized_scales = sorted(
+                normalized_scales,
+                key=lambda s: 0 if abs(s - (2 / 3)) < 1e-4 else 1,
+            )
 
         best: tuple[float, tuple[int, int], int, int, float] | None = None
         template_height, template_width = template_image.shape[:2]
@@ -344,6 +362,8 @@ class RecognitionService:
             )
             if best is None or candidate[0] > best[0]:
                 best = candidate
+            if candidate[0] >= max(threshold, 0.97):
+                break
 
         if best is None:
             raise AppError(
@@ -411,6 +431,11 @@ class RecognitionService:
             search_image = cv.cvtColor(search_image, cv.COLOR_BGR2GRAY)
             template_image = cv.cvtColor(template_image, cv.COLOR_BGR2GRAY)
         normalized_scales = self._normalize_scales(scales, template_path)
+        if (screenshot_width, screenshot_height) == (1280, 720) and len(normalized_scales) > 1:
+            normalized_scales = sorted(
+                normalized_scales,
+                key=lambda s: 0 if abs(s - (2 / 3)) < 1e-4 else 1,
+            )
         result_roi = normalized_roi if roi is not None else None
         candidates: list[MatchResult] = []
         template_height, template_width = template_image.shape[:2]
@@ -518,6 +543,31 @@ class RecognitionService:
     def _load_template(self, template_path: str, mask_path: str | None):
         cv, _ = self._require_opencv()
         template_file = self._resources.resolve_template(template_path)
+        mask_file = self._resources.resolve_template(mask_path) if mask_path is not None else None
+        try:
+            tpl_stat = template_file.stat()
+            mask_stat = mask_file.stat() if mask_file is not None else None
+        except OSError:
+            tpl_stat = None
+            mask_stat = None
+        cache_key = (
+            (
+                str(template_file),
+                str(mask_file) if mask_file is not None else None,
+                tpl_stat.st_mtime_ns,
+                tpl_stat.st_size,
+                mask_stat.st_mtime_ns if mask_stat is not None else None,
+                mask_stat.st_size if mask_stat is not None else None,
+            )
+            if tpl_stat is not None
+            else None
+        )
+        if cache_key is not None:
+            with self._cache_lock:
+                cached = self._loaded_templates.get(cache_key)
+                if cached is not None:
+                    self._loaded_templates.move_to_end(cache_key)
+                    return cached
         template_source = cv.imread(str(template_file), cv.IMREAD_UNCHANGED)
         if template_source is None:
             raise AppError(
@@ -529,16 +579,15 @@ class RecognitionService:
         explicit_mask = mask_path is not None
         if len(template_source.shape) == 3 and template_source.shape[2] == 4:
             alpha = template_source[:, :, 3]
-            template_image = template_source[:, :, :3]
+            template_image = template_source[:, :, :3].copy()
             if int(alpha.min()) <= 128:
-                template_mask = alpha
+                template_mask = alpha.copy()
         elif len(template_source.shape) == 2:
             template_image = cv.cvtColor(template_source, cv.COLOR_GRAY2BGR)
         else:
             template_image = template_source
 
-        if mask_path is not None:
-            mask_file = self._resources.resolve_template(mask_path)
+        if mask_file is not None:
             template_mask = cv.imread(str(mask_file), cv.IMREAD_GRAYSCALE)
             if template_mask is None:
                 raise AppError(
@@ -557,7 +606,17 @@ class RecognitionService:
                         "mask_size": [template_mask.shape[1], template_mask.shape[0]],
                     },
                 )
-        return template_image, template_mask, explicit_mask
+        template_image.setflags(write=False)
+        if template_mask is not None:
+            template_mask.setflags(write=False)
+        loaded = (template_image, template_mask, explicit_mask)
+        if cache_key is not None:
+            with self._cache_lock:
+                self._loaded_templates[cache_key] = loaded
+                self._loaded_templates.move_to_end(cache_key)
+                while len(self._loaded_templates) > self._TEMPLATE_CACHE_LIMIT:
+                    self._loaded_templates.popitem(last=False)
+        return loaded
 
     def _scale_template(
         self,
@@ -570,6 +629,26 @@ class RecognitionService:
         template_height, template_width = template_image.shape[:2]
         if width == template_width and height == template_height:
             return template_image, template_mask
+        scale_key = (
+            not template_image.flags.writeable
+            and (template_mask is None or not template_mask.flags.writeable)
+        )
+        cache_key = (
+            (
+                id(template_image),
+                id(template_mask) if template_mask is not None else 0,
+                width,
+                height,
+            )
+            if scale_key
+            else None
+        )
+        if cache_key is not None:
+            with self._cache_lock:
+                cached = self._scaled_templates.get(cache_key)
+                if cached is not None:
+                    self._scaled_templates.move_to_end(cache_key)
+                    return cached[2], cached[3]
         interpolation = (
             cv.INTER_AREA
             if width < template_width and height < template_height
@@ -589,6 +668,20 @@ class RecognitionService:
             if template_mask is not None
             else None
         )
+        if cache_key is not None:
+            scaled_template.setflags(write=False)
+            if scaled_mask is not None:
+                scaled_mask.setflags(write=False)
+            with self._cache_lock:
+                self._scaled_templates[cache_key] = (
+                    template_image,
+                    template_mask,
+                    scaled_template,
+                    scaled_mask,
+                )
+                self._scaled_templates.move_to_end(cache_key)
+                while len(self._scaled_templates) > self._SCALED_CACHE_LIMIT:
+                    self._scaled_templates.popitem(last=False)
         return scaled_template, scaled_mask
 
     def _template_matches(self, search_image, template_image, template_mask, explicit_mask: bool, *, require_contrast: bool = False):

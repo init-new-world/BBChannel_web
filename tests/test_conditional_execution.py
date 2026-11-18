@@ -35,7 +35,7 @@ class _FakeDevice:
         if (x, y) == (1150, 600):
             assert self.state == b"battle"
             self.state = b"cards"
-        elif (x, y) == (1250, 683):
+        elif (x, y) == (1201, 683):
             assert self.state == b"cards"
             self.state = b"battle"
         elif (x, y) in ((70, 590), (1217, 440)):
@@ -241,11 +241,11 @@ def test_registered_conditional_job_preserves_hand_check_timing(
         ("sleep", 0.037),
         ("snapshot", "cards"),
         ("recognize",),
-        ("tap", 1250, 683),
+        ("tap", 1201, 683),
         ("sleep", 0.013),
     ]
     if mode:
-        assert outcome.trace.index(("tap", 1250, 683)) < outcome.trace.index(
+        assert outcome.trace.index(("tap", 1201, 683)) < outcome.trace.index(
             ("tap", 70, 590)
         )
     else:
@@ -271,7 +271,7 @@ def test_registered_conditional_job_without_card_checks_skips_hand_inspection(
     assert outcome.result.result["tap_count"] == 5
     assert outcome.cards.calls == 0
     assert outcome.condition_events == []
-    assert ("tap", 1250, 683) not in outcome.trace
+    assert ("tap", 1201, 683) not in outcome.trace
     assert ("sleep", 0.037) in outcome.trace
 
 
@@ -502,7 +502,7 @@ def test_four_field_combined_np_and_card_condition_reuses_battle_snapshot(monkey
         ("sleep", 0.037),
         ("snapshot", "cards"),
         ("recognize",),
-        ("tap", 1250, 683),
+        ("tap", 1201, 683),
         ("sleep", 0.013),
     ]
 

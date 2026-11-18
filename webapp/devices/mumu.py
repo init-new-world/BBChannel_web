@@ -1,19 +1,31 @@
 from __future__ import annotations
 
 import ctypes
-import platform
-from collections.abc import Callable
-from dataclasses import dataclass
 from io import BytesIO
+import json
+import os
 from pathlib import Path
+import platform
+import socket
+import struct
 from threading import RLock
 from time import sleep as system_sleep
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 from PIL import Image
 
 from webapp.core.errors import AppError, ErrorCode
 from webapp.core.models import Capability, DeviceInfo, OperationResult
+
+try:
+    import cv2
+    import numpy as np
+except ImportError:  # pragma: no cover - optional fast path
+    cv2 = None  # type: ignore[assignment]
+    np = None  # type: ignore[assignment]
+
+
+from dataclasses import dataclass
 
 
 DLL_NAME = "external_renderer_ipc.dll"
@@ -266,6 +278,132 @@ class CtypesMumuNativeApi:
             raise MumuNativeCallError(function, result)
 
 
+class BridgeMumuNativeApi:
+    """TCP client talking to `bin/mumu_ipc_bridge.py` running on Windows host."""
+
+    def __init__(self, endpoint: str, timeout_seconds: float = 5.0) -> None:
+        host, sep, port_str = endpoint.strip().rpartition(":")
+        if not sep or not host:
+            raise ValueError(f"Invalid MuMu bridge endpoint: {endpoint!r}")
+        self.host = host
+        self.port = int(port_str)
+        self.timeout_seconds = timeout_seconds
+        self._lock = RLock()
+        self._sock: socket.socket | None = None
+        self._last_error: str | None = None
+
+    def _conn(self) -> socket.socket:
+        if self._sock is None:
+            sock = socket.create_connection((self.host, self.port), timeout=self.timeout_seconds)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self._sock = sock
+        return self._sock
+
+    def _reset(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    @staticmethod
+    def _recv_exact(sock: socket.socket, size: int) -> bytes:
+        chunks = bytearray()
+        while len(chunks) < size:
+            chunk = sock.recv(size - len(chunks))
+            if not chunk:
+                raise ConnectionError("MuMu bridge closed connection unexpectedly.")
+            chunks.extend(chunk)
+        return bytes(chunks)
+
+    def _request(self, payload: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+        body = json.dumps(payload).encode("utf-8")
+        packet = struct.pack("<I", len(body)) + body
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    sock = self._conn()
+                    sock.sendall(packet)
+                    (header_len,) = struct.unpack("<I", self._recv_exact(sock, 4))
+                    header = json.loads(self._recv_exact(sock, header_len).decode("utf-8"))
+                    blob_len = int(header.get("blob_len", 0))
+                    blob = self._recv_exact(sock, blob_len) if blob_len > 0 else b""
+                    if not header.get("ok", False):
+                        raise MumuNativeCallError(
+                            str(payload.get("op", "bridge")),
+                            header.get("code", -1),
+                            str(header.get("error", "MuMu bridge call failed.")),
+                        )
+                    self._last_error = None
+                    return header, blob
+                except MumuNativeCallError:
+                    raise
+                except Exception as exc:
+                    self._reset()
+                    self._last_error = str(exc)
+                    if attempt == 1:
+                        raise
+        raise RuntimeError("Unreachable")
+
+    def is_ready(self) -> bool:
+        try:
+            header, _ = self._request({"op": "ping"})
+            return bool(header.get("ready", False))
+        except Exception as exc:
+            self._last_error = str(exc)
+            return False
+
+    def diagnostics(self) -> dict[str, object]:
+        try:
+            header, _ = self._request({"op": "diagnostics"})
+            return dict(header.get("diagnostics") or {})
+        except Exception as exc:
+            return {
+                "library_loaded": False,
+                "exports_complete": False,
+                "invocation_ready": False,
+                "missing_exports": [],
+                "native_error": self._last_error or str(exc),
+                "bridge_endpoint": f"{self.host}:{self.port}",
+            }
+
+    def connect(self, install_path: Path, instance_index: int) -> int:
+        header, _ = self._request(
+            {
+                "op": "connect",
+                "install_path": str(install_path) if install_path else "",
+                "instance_index": instance_index,
+            }
+        )
+        return int(header["handle"])
+
+    def disconnect(self, handle: int) -> None:
+        try:
+            self._request({"op": "disconnect", "handle": handle})
+        except Exception:
+            self._reset()
+
+    def capture_display(self, handle: int, display_id: int) -> MumuNativeFrame:
+        header, blob = self._request(
+            {"op": "capture_display", "handle": handle, "display_id": display_id}
+        )
+        return MumuNativeFrame(
+            width=int(header["width"]),
+            height=int(header["height"]),
+            pixels=blob,
+            bottom_up=bool(header.get("bottom_up", True)),
+        )
+
+    def touch_down(self, handle: int, display_id: int, x: int, y: int) -> None:
+        self._request(
+            {"op": "touch_down", "handle": handle, "display_id": display_id, "x": x, "y": y}
+        )
+
+    def touch_up(self, handle: int, display_id: int) -> None:
+        self._request({"op": "touch_up", "handle": handle, "display_id": display_id})
+
+
 def default_mumu_install_paths() -> list[Path]:
     project_root = Path(__file__).resolve().parents[2]
     package_root = project_root.parent
@@ -298,14 +436,25 @@ class MumuBackend:
         display_id: int = 0,
         swipe_steps: int = 12,
         sleep: Callable[[float], None] = system_sleep,
+        bridge_endpoint: str | None = None,
     ) -> None:
         self.platform_name = platform_name or platform.system()
         self.install_paths = (
             default_mumu_install_paths() if install_paths is None else install_paths
         )
         self.install_path, self.dll_path = self._find_dll()
+        resolved_bridge = (
+            bridge_endpoint
+            if bridge_endpoint is not None
+            else (os.environ.get("BBCHANNEL_MUMU_BRIDGE") or "").strip() or None
+        )
+        self.bridge_endpoint = resolved_bridge
         if native_api is not None:
             self.native_api = native_api
+        elif resolved_bridge is not None:
+            self.native_api = BridgeMumuNativeApi(resolved_bridge)
+            if self.install_path is None:
+                self.install_path = Path(r"C:\Program Files\Netease\MuMu")
         elif self.dll_path is not None:
             self.native_api = CtypesMumuNativeApi(
                 self.dll_path,
@@ -322,6 +471,14 @@ class MumuBackend:
         self._session_lock = RLock()
 
     def capability(self) -> Capability:
+        if self.bridge_endpoint is not None:
+            if not self.native_api.is_ready():
+                return Capability(
+                    name=self.name,
+                    available=False,
+                    reason=f"MuMu IPC bridge at {self.bridge_endpoint} is not reachable.",
+                )
+            return Capability(name=self.name, available=True, reason=None)
         if self.platform_name != "Windows":
             return Capability(
                 name=self.name,
@@ -376,6 +533,28 @@ class MumuBackend:
         index = self._parse_device_id(device_id)
         try:
             frame = self._capture_frame(index, self._session(index))
+            return self._frame_to_png(frame)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                ErrorCode.SNAPSHOT_FAILED,
+                "MuMu direct screenshot failed.",
+                {"device_id": device_id, "error": str(exc)},
+            ) from exc
+
+    def snapshot_raw(self, device_id: str) -> bytes:
+        index = self._parse_device_id(device_id)
+        try:
+            frame = self._capture_frame(index, self._session(index))
+            if cv2 is not None and np is not None and frame.width * frame.height >= 64 * 64:
+                expected = frame.width * frame.height * 4
+                if len(frame.pixels) == expected:
+                    rgba = np.frombuffer(frame.pixels, dtype=np.uint8).reshape(
+                        (frame.height, frame.width, 4)
+                    )
+                    pixels = rgba[::-1, :, :].tobytes() if frame.bottom_up else frame.pixels
+                    return struct.pack("<IIII", frame.width, frame.height, 1, 0) + pixels
             return self._frame_to_png(frame)
         except AppError:
             raise
@@ -527,6 +706,16 @@ class MumuBackend:
             raise ValueError(
                 f"MuMu frame has {len(frame.pixels)} bytes; expected {expected_size}"
             )
+        if cv2 is not None and np is not None and frame.width * frame.height >= 64:
+            rgba = np.frombuffer(frame.pixels, dtype=np.uint8).reshape(
+                (frame.height, frame.width, 4)
+            )
+            if frame.bottom_up:
+                rgba = rgba[::-1, :, :]
+            bgr = cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+            ok, encoded = cv2.imencode(".png", bgr, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+            if ok:
+                return encoded.tobytes()
         image = Image.frombytes("RGBA", (frame.width, frame.height), frame.pixels)
         if frame.bottom_up:
             image = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)

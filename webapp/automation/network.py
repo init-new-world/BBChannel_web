@@ -4,6 +4,9 @@ from typing import Any
 
 from webapp.automation.interaction import match_touch_point, randomized_wait_seconds
 from webapp.core.errors import AppError, ErrorCode
+from webapp.services.recognition import RecognitionService
+
+RECONNECT_ROI_720P = (380, 280, 620, 360)
 
 
 def reconnect_if_present(
@@ -17,12 +20,21 @@ def reconnect_if_present(
     random_time: float,
     random_touch: bool,
 ) -> bool:
+    options: dict[str, Any] = {
+        "threshold": 0.85,
+        "scales": (1.0, 0.75, 2 / 3, 0.5),
+    }
+    if isinstance(recognition, RecognitionService):
+        try:
+            if recognition.image_size(screenshot) == (1280, 720):
+                options["roi"] = RECONNECT_ROI_720P
+        except AppError:
+            pass
     try:
         match = recognition.match_template(
             screenshot,
             f"battle/{server.upper()}/reconnect.png",
-            threshold=0.85,
-            scales=(1.0, 0.75, 2 / 3, 0.5),
+            **options,
         )
     except AppError as exc:
         if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:

@@ -163,7 +163,7 @@ def _assert_condition(outcome, *, mode, matched, evaluated, inspected=True):
     assert outcome.roles == expected_roles
     assert outcome.result.result["tap_count"] == len(expected_roles)
     if inspected and skill_roles:
-        assert outcome.trace.index(("tap", 1250, 683)) < outcome.trace.index(
+        assert outcome.trace.index(("tap", 1201, 683)) < outcome.trace.index(
             ("tap", 70, 590)
         )
 

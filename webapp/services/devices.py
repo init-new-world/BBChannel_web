@@ -285,7 +285,16 @@ class DeviceService:
         backend, endpoint = self._require_capture()
         with self._lock_for(endpoint):
             try:
-                data = backend.snapshot(endpoint.device_id)
+                raw_snapshot = (
+                    getattr(backend, "snapshot_raw", None)
+                    if self._frame_normalizer is not None
+                    else None
+                )
+                data = (
+                    raw_snapshot(endpoint.device_id)
+                    if callable(raw_snapshot)
+                    else backend.snapshot(endpoint.device_id)
+                )
                 if self._frame_normalizer is not None:
                     frame = self._frame_normalizer.normalize(data)
                     data = frame.png

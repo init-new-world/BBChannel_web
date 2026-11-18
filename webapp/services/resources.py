@@ -18,6 +18,7 @@ class ResourceService:
         self.data_dir = Path(data_dir).resolve()
         self._index_lock = RLock()
         self._template_entries: list[dict[str, object]] | None = None
+        self._resolved_templates: dict[str, Path] = {}
 
     def list_templates(self) -> list[str]:
         return [str(entry["path"]) for entry in self._index()]
@@ -86,6 +87,11 @@ class ResourceService:
             return len(self._template_entries)
 
     def resolve_template(self, template_path: str) -> Path:
+        cached = self._resolved_templates.get(template_path)
+        if cached is not None:
+            if cached.is_file():
+                return cached
+            self._resolved_templates.pop(template_path, None)
         candidate = (self.assets_dir / template_path).resolve()
         if not self._is_inside_assets(candidate) or not candidate.is_file():
             raise AppError(
@@ -99,6 +105,8 @@ class ResourceService:
                 f"Unsupported template type: {template_path}",
                 {"template_path": template_path},
             )
+        if len(self._resolved_templates) < 2048:
+            self._resolved_templates[template_path] = candidate
         return candidate
 
     def _is_inside_assets(self, path: Path) -> bool:

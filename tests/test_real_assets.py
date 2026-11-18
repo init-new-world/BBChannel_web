@@ -217,4 +217,4 @@ def test_real_card_status_templates_distinguish_text_from_portrait_art(server, s
                     0.8, 0,
                 )
                 assert count == 3
-                assert taps == [(500, 110), (150, 500), (375, 500)]
+                assert taps == [(430, 200), (150, 500), (375, 500)]

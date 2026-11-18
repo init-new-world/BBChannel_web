@@ -60,6 +60,9 @@ SKILL_NOT_AVAILABLE_CLOSE_SIZE = (197, 53)
 SERVANT_DETAIL_CLOSE_ROI = (1047, 20, 87, 80)
 COMMAND_CARD_BACK_ROI = (1100, 610, 180, 110)
 COMMAND_CARD_BACK_SIZE = (73, 53)
+ATTACK_BUTTON_ROI_720P = (960, 480, 320, 240)
+COMMAND_CARDS_ROI_720P = (0, 380, 1280, 290)
+BATTLE_TEMPLATE_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 NAMED_SKILL_COMMANDS = {
     "Kukulkan",
     "Barghest",
@@ -1030,11 +1033,12 @@ def _wait_for_battle_transition(
         f"battle/{server}/battleFinish1.png",
         f"battle/{server}/fight_end.png",
     ]
+    use_720p_rois = isinstance(recognition, RecognitionService)
     candidates = [
         {
             "template_path": path,
             "threshold": threshold,
-            "scales": (1.0, 0.75, 2 / 3, 0.5),
+            "scales": BATTLE_TEMPLATE_SCALES,
             **({"roi": (867, 0, 44, 48)} if path in phase_path_set else {}),
         }
         for path in [attack_path, *phase_paths, *finish_paths]
@@ -1052,7 +1056,19 @@ def _wait_for_battle_transition(
             reconnect_timing,
         ) and active_monotonic(context, clock=monotonic) - started < timeout_seconds:
             continue
-        matches = recognition.match_templates(screenshot, candidates)
+        effective_candidates = candidates
+        if use_720p_rois:
+            try:
+                if recognition.image_size(screenshot) == (1280, 720):
+                    effective_candidates = [
+                        {**candidate, "roi": ATTACK_BUTTON_ROI_720P}
+                        if candidate["template_path"] == attack_path
+                        else candidate
+                        for candidate in candidates
+                    ]
+            except AppError:
+                pass
+        matches = recognition.match_templates(screenshot, effective_candidates)
         attempts += 1
         by_path = {
             candidate["template_path"]: match
@@ -1595,6 +1611,7 @@ def create_battle_execute_plan_handler(
                 np_servants=np_servants,
                 unopened_skills=unopened_skills,
                 last_skill_number=last_skill_number,
+                np_recognizer=effective_np_recognizer,
             )
             last_skill_number = None
             action_count += sum(
@@ -2368,6 +2385,7 @@ def _execute_extra_turn(
         unopened_skills=unopened_skills,
         last_skill_number=last_skill_number,
         initial_battle_screenshot=cached_battle_screenshot,
+        np_recognizer=np_recognizer,
     )
     return tap_count
 
@@ -2391,6 +2409,7 @@ def _execute_command_phase(
     unopened_skills: list[set[int]] | None = None,
     last_skill_number: int | None = None,
     initial_battle_screenshot: bytes | None = None,
+    np_recognizer: NpChargeRecognizer | None = None,
 ) -> int:
     unavailable_nps: set[int] = set()
     tap_count = 0
@@ -2511,9 +2530,17 @@ def _execute_command_phase(
         selected_nps = {int(step["role"][3:]) for step in tap_steps if step.get("role", "").startswith("np_")}
         if not selected_nps:
             return tap_count
+        present_frontline = (
+            [position is not None for position in occupied_positions[:3]]
+            if isinstance(occupied_positions, list) and len(occupied_positions) >= 3
+            else [True, True, True]
+        )
         blocked = _failed_np_selection(
             context, device_service, recognition, server, selected_nps,
             threshold, 2.0, poll_interval,
+            battle_screenshot=battle_screenshot,
+            np_recognizer=np_recognizer,
+            present=present_frontline,
         )
         newly_blocked = blocked - unavailable_nps
         if not newly_blocked:
@@ -2560,6 +2587,10 @@ def _failed_np_selection(
     context: RunContext, device_service: DeviceService, recognition: RecognitionService,
     server: str, selected_nps: set[int], threshold: float,
     wait_seconds: float, poll_interval: float,
+    *,
+    battle_screenshot: bytes | None = None,
+    np_recognizer: NpChargeRecognizer | None = None,
+    present: list[bool] | None = None,
 ) -> set[int]:
     started = active_monotonic(context, clock=monotonic)
     while True:
@@ -2571,7 +2602,30 @@ def _failed_np_selection(
             return set()
         if active_monotonic(context, clock=monotonic) - started >= wait_seconds:
             blocks = recognize_card_blocks(recognition, screenshot, server, threshold=threshold)
-            return set(blocks["nps"]) if selected_nps.intersection(blocks["nps"]) else set()
+            if selected_nps.intersection(blocks["nps"]):
+                return set(blocks["nps"])
+            if battle_screenshot is not None:
+                checker = np_recognizer or NpChargeRecognizer(recognition)
+                flags = (
+                    present
+                    if isinstance(present, list) and len(present) == 3
+                    else [True, True, True]
+                )
+                try:
+                    charges = checker.recognize(battle_screenshot, server, present=flags)
+                except (AppError, ValueError):
+                    charges = None
+                if isinstance(charges, dict):
+                    values = charges.get("values")
+                    if isinstance(values, list) and len(values) == 3:
+                        return {
+                            position
+                            for position in selected_nps
+                            if isinstance(values[position - 1], int)
+                            and not isinstance(values[position - 1], bool)
+                            and values[position - 1] < 100
+                        }
+            return set()
         context.sleep(max(poll_interval, 0.01))
 
 
@@ -3263,11 +3317,20 @@ def _wait_for_battle_ready(
             reconnect_timing,
         ) and active_monotonic(context, clock=monotonic) - started < timeout_seconds:
             continue
+        attack_options: dict[str, Any] = {
+            "scales": BATTLE_TEMPLATE_SCALES,
+        }
+        if isinstance(recognition, RecognitionService):
+            try:
+                if recognition.image_size(screenshot) == (1280, 720):
+                    attack_options["roi"] = ATTACK_BUTTON_ROI_720P
+            except AppError:
+                pass
         match = recognition.match_template(
             screenshot,
             template_path,
             threshold,
-            scales=(1.0, 0.75, 2 / 3, 0.5),
+            **attack_options,
         )
         attempts += 1
         context.emit(
@@ -3438,11 +3501,12 @@ def _wait_for_command_cards(
     started = active_monotonic(context, clock=monotonic)
     attempts = 0
     settled = settle_seconds <= 0
+    use_720p_rois = isinstance(recognition, RecognitionService)
     candidates = [
         {
             "template_path": template_path,
             "threshold": threshold,
-            "scales": (1.0, 0.75, 2 / 3, 0.5),
+            "scales": BATTLE_TEMPLATE_SCALES,
         }
         for template_path in template_paths
     ]
@@ -3462,7 +3526,17 @@ def _wait_for_command_cards(
             reconnect_timing,
         ) and active_monotonic(context, clock=monotonic) - started < timeout_seconds:
             continue
-        matches = recognition.match_templates(screenshot, candidates)
+        effective_candidates = candidates
+        if use_720p_rois:
+            try:
+                if recognition.image_size(screenshot) == (1280, 720):
+                    effective_candidates = [
+                        {**candidate, "roi": COMMAND_CARDS_ROI_720P}
+                        for candidate in candidates
+                    ]
+            except AppError:
+                pass
+        matches = recognition.match_templates(screenshot, effective_candidates)
         attempts += 1
         context.emit(
             "recognition",

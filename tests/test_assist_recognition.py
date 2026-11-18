@@ -1431,4 +1431,66 @@ def test_assist_recognizer_skips_limit_break_when_no_equip_configured_and_suppor
     assert result_appended["candidates"][0]["checks"]["equip_name"] == "ArchivedCE"
 
 
+def test_assist_recognizer_matches_scaled_grand_level_120_digits_within_portrait_column(
+    tmp_path: Path,
+):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    servant_faces = assets / "servantface"
+    digit_assets = assets / "assist" / "full_skill"
+    servant_faces.mkdir(parents=True)
+    digit_assets.mkdir(parents=True)
+    data.mkdir()
+
+    portrait = Image.new("RGB", (60, 60), (35, 65, 95))
+    portrait_draw = ImageDraw.Draw(portrait)
+    portrait_draw.rectangle((7, 7, 52, 52), fill=(190, 80, 210))
+    portrait_draw.line((6, 53, 53, 6), fill=(60, 230, 170), width=4)
+    portrait.save(servant_faces / "Support_1.png")
+
+    digits = {}
+    for digit, color in {
+        0: (170, 55, 85),
+        1: (55, 145, 85),
+        2: (65, 85, 180),
+    }.items():
+        image = Image.new("RGB", (15, 20), color)
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((2, 2, 12, 17), outline=(245, 220, 70), width=2)
+        draw.line((3 + digit * 2, 16, 12, 3 + digit * 2), fill=(40, 220, 235), width=2)
+        image.save(digit_assets / f"num{digit}.png")
+        digits[digit] = image
+
+    # Normalized 1280x720 screenshot where digits are rendered at 0.8x scale of template
+    # and unrelated digits exist on the right side (x > 320).
+    screenshot = Image.new("RGB", (1280, 720), (18, 24, 32))
+    screenshot.paste(portrait, (70, 220))
+    for x, digit in zip((55, 69, 83, 108, 122, 136), (1, 2, 0, 1, 2, 0), strict=True):
+        scaled = digits[digit].resize((12, 16), Image.Resampling.BILINEAR)
+        screenshot.paste(scaled, (x, 180))
+    for offset in range(10):
+        screenshot.paste(digits[1].resize((12, 16)), (900 + offset * 15, 300))
+
+    resources = ResourceService(assets, data)
+    result = AssistRecognizer(
+        resources,
+        RecognitionService(resources),
+    ).recognize(
+        _png_bytes(screenshot),
+        {
+            "mode": "冠位助战",
+            "servant_name": "Support",
+            "servant_canonical_name": "Support",
+            "servant_level": 120,
+        },
+        threshold=0.85,
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["checks"]["servant_level"] == 120
+    assert result["candidates"][0]["checks"]["servant_level_cap"] == 120
+
+
+
 

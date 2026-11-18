@@ -573,10 +573,10 @@ def test_hakuno_reroll_casts_skill_until_card_need_matches(need):
     assert card_recognizer.calls == 2
     assert taps == [
         (1150, 600),
-        (1250, 683),
+        (1201, 683),
         (70, 590),
         (1150, 600),
-        (1250, 683),
+        (1201, 683),
     ]
     checks = [event for event in events if event[0] == "hakuno_card_check"]
     assert [event[2]["matched"] for event in checks] == [False, True]
@@ -691,12 +691,12 @@ def test_battle_jobs_run_dynamic_hakuno_reroll(
     assert cards.calls == 2
     assert taps[:7] == [
         (1150, 600),
-        (1250, 683),
+        (1201, 683),
         (70, 590),
         (1217, 440),
         (1217, 440),
         (1150, 600),
-        (1250, 683),
+        (1201, 683),
     ]
 
 
@@ -1291,7 +1291,7 @@ def test_card_condition_opens_command_cards_and_returns_to_battle():
 
     assert matched is True
     assert tap_count == 2
-    assert taps == [(1150, 600), (1250, 683)]
+    assert taps == [(1150, 600), (1201, 683)]
     assert events[-1][0] == "skill_condition"
 
 
@@ -1445,7 +1445,7 @@ def test_strategy_execution_avoids_chain_for_single_np():
     )
 
     assert tap_count == 3
-    assert taps == [(500, 110), (150, 500), (900, 500)]
+    assert taps == [(430, 200), (150, 500), (900, 500)]
 
 
 def test_execute_skills_job_recognizes_battle_and_taps_skill_target(tmp_path: Path):
@@ -1621,7 +1621,7 @@ def test_execute_battle_job_runs_skill_and_command_phase(
         (battle_frame, {"type": "tap", "x": 1217, "y": 440}),
         (battle_frame, {"type": "tap", "x": 1217, "y": 440}),
         (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
-        (command_frame, {"type": "tap", "x": 500, "y": 110}),
+        (command_frame, {"type": "tap", "x": 430, "y": 200}),
         (command_frame, {"type": "tap", "x": 150, "y": 500}),
         (command_frame, {"type": "tap", "x": 375, "y": 500}),
         (command_frame, None),
@@ -1794,7 +1794,7 @@ def test_execute_battle_job_recognizes_and_selects_strategy_cards(
 
     expectations = [
         (battle_frame, {"type": "tap", "x": 1150, "y": 600}),
-        (command_frame, {"type": "tap", "x": 500, "y": 110}),
+        (command_frame, {"type": "tap", "x": 430, "y": 200}),
         (command_frame, {"type": "tap", "x": 650, "y": 500}),
         (command_frame, {"type": "tap", "x": 150 if blocked else 1175, "y": 500}),
         (command_frame, None),
@@ -2473,7 +2473,7 @@ def test_wait_for_battle_ready_closes_command_card_back_screen(tmp_path: Path):
         events = manager.database.list_events(job.job_id)
 
     assert result.status == JobStatus.SUCCEEDED
-    assert taps == [(1250, 683), (70, 590)]
+    assert taps == [(1201, 683), (70, 590)]
     popups = [
         event.data["popup"]
         for event in events

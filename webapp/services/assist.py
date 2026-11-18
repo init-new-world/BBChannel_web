@@ -13,6 +13,7 @@ from webapp.services.resources import ResourceService
 
 ASSIST_FACE_SCALES = (1.25, 1.2, 1.0, 0.75, 2 / 3, 0.5)
 ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
+ASSIST_LEVEL_DIGIT_SCALES = (1.0, 0.8, 0.78, 0.75, 2 / 3, 0.5)
 ASSIST_LIMIT_BREAK_SCALES = (1.25, 1.1, 1.0, 0.9, 0.75, 2 / 3, 0.5)
 ASSIST_FACE_MASK_PATH = "assist/servant_face_mask.png"
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
@@ -202,10 +203,11 @@ class AssistRecognizer:
             and not isinstance(required_np_level, bool)
             and required_np_level > 1
         )
-        np_level_matches = (
-            self._np_level_matches(screenshot, server, threshold)
-            if check_np_level
-            else []
+        np_level_matches: list[tuple[int, Any]] | None = None
+        np_level_roi = (
+            (300, 140, 520, frame_size[1] - 140)
+            if frame_size is not None and frame_size[0] >= 1000 and frame_size[1] >= 600
+            else None
         )
         required_servant_level = assist.get("servant_level")
         check_servant_level = (
@@ -214,11 +216,12 @@ class AssistRecognizer:
             and not isinstance(required_servant_level, bool)
             and required_servant_level > 1
         )
-        servant_level_matches = (
-            self._servant_level_digit_matches(screenshot, server, threshold)
-            if check_servant_level
-            else []
+        servant_level_roi = (
+            (0, 140, 320, frame_size[1] - 140)
+            if frame_size is not None and frame_size[0] >= 1000 and frame_size[1] >= 600
+            else None
         )
+        servant_level_matches: list[tuple[int, Any]] | None = None
         required_skill_levels = assist.get("skill_levels")
         normalized_skill_levels = (
             required_skill_levels[:3]
@@ -361,7 +364,30 @@ class AssistRecognizer:
                         "friend_confidence": friend_match.confidence,
                     }
                 )
+            if mode in GRAND_ASSIST_MODES and bond_equip_type in GRAND_BOND_TEMPLATES:
+                bond_match = self._match_grand_bond_type(
+                    screenshot,
+                    candidate["anchor"],
+                    bond_equip_type,
+                    grand_only_equip=grand_only_equip,
+                )
+                if not bond_match.matched:
+                    continue
+                candidate["checks"].update(
+                    {
+                        "bond_equip_type": bond_equip_type,
+                        "bond_equip_template": bond_match.template_path,
+                        "bond_equip_confidence": bond_match.confidence,
+                    }
+                )
             if check_np_level:
+                if np_level_matches is None:
+                    np_level_matches = self._np_level_matches(
+                        screenshot,
+                        server,
+                        threshold,
+                        roi=np_level_roi,
+                    )
                 np_level_match = self._candidate_np_level_match(
                     candidate["anchor"],
                     np_level_matches,
@@ -377,6 +403,13 @@ class AssistRecognizer:
                     }
                 )
             if check_servant_level:
+                if servant_level_matches is None:
+                    servant_level_matches = self._servant_level_digit_matches(
+                        screenshot,
+                        server,
+                        threshold,
+                        roi=servant_level_roi,
+                    )
                 servant_level = self._candidate_servant_level(
                     candidate["bounds"],
                     servant_level_matches,
@@ -397,22 +430,6 @@ class AssistRecognizer:
                         "servant_level_confidences": [
                             match.confidence for _, match in servant_level["matches"]
                         ],
-                    }
-                )
-            if mode in GRAND_ASSIST_MODES and bond_equip_type in GRAND_BOND_TEMPLATES:
-                bond_match = self._match_grand_bond_type(
-                    screenshot,
-                    candidate["anchor"],
-                    bond_equip_type,
-                    grand_only_equip=grand_only_equip,
-                )
-                if not bond_match.matched:
-                    continue
-                candidate["checks"].update(
-                    {
-                        "bond_equip_type": bond_equip_type,
-                        "bond_equip_template": bond_match.template_path,
-                        "bond_equip_confidence": bond_match.confidence,
                     }
                 )
             if normalized_skill_levels and not only_equip:
@@ -1308,6 +1325,8 @@ class AssistRecognizer:
         screenshot: bytes,
         server: str,
         threshold: float,
+        *,
+        roi: tuple[int, int, int, int] | None = None,
     ) -> list[tuple[int, Any]]:
         entries = self._resources.template_index(
             prefix=f"assist/np_level_{server.upper()}",
@@ -1326,6 +1345,7 @@ class AssistRecognizer:
                     screenshot,
                     template_path,
                     threshold=threshold,
+                    roi=roi,
                     scales=ASSIST_EQUIP_SCALES,
                     max_results=20,
                 )
@@ -1547,6 +1567,8 @@ class AssistRecognizer:
         screenshot: bytes,
         server: str,
         threshold: float,
+        *,
+        roi: tuple[int, int, int, int] | None = None,
     ) -> list[tuple[int, Any]]:
         prefix = "assist/full_skill"
         if server.upper() == "CNTW":
@@ -1569,14 +1591,16 @@ class AssistRecognizer:
                 paths_by_stem.get(f"{stem}mask"),
             )
 
+        digit_threshold = threshold if threshold >= 0.95 else min(threshold, 0.80)
         return [
             (digit, match)
             for digit, (template_path, mask_path) in paths_by_digit.items()
             for match in self._recognition.match_template_all(
                 screenshot,
                 template_path,
-                threshold=threshold,
-                scales=ASSIST_EQUIP_SCALES,
+                threshold=digit_threshold,
+                roi=roi,
+                scales=ASSIST_LEVEL_DIGIT_SCALES,
                 mask_path=mask_path,
                 max_results=50,
             )

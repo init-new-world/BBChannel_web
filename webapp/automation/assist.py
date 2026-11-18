@@ -207,15 +207,17 @@ def create_assist_handler(
                     return screenshot
                 if attempt == 5:
                     break
+                wait_after_toggle = 0.5
                 if marker is not None:
                     operation = device_service.tap(*randomized_touch_point(
                         ASSIST_SKILL_TOGGLE_POINT, enabled=random_touch,
                     ))
+                    wait_after_toggle = 1.2
                     context.emit(
                         "device_action", "Switched assist skill display.",
                         data={"role": "assist_skill_view", "target": view, "operation": operation.to_dict()},
                     )
-                context.sleep(randomized_wait_seconds(max(0.5, tap_wait_seconds), random_time))
+                context.sleep(randomized_wait_seconds(max(wait_after_toggle, tap_wait_seconds), random_time))
                 screenshot = snapshot_without_reconnect()
             raise RuntimeError(f"Assist {view} skill view could not be confirmed.")
 
@@ -496,23 +498,40 @@ def create_assist_handler(
                     if result["matched"]:
                         accepted.append((candidate, result, identity))
                 screenshot = ensure_skill_view("main", screenshot)
-                restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
-                candidates = []
-                for candidate in restored["candidates"]:
-                    previous = next((result for original, result, original_identity in accepted if
-                        _matches_row(original, original_identity, screenshot, candidate)
-                        and original.get("template_path") == candidate.get("template_path")
-                        and all(abs(before - after) <= 6 for before, after in zip(
-                            original["anchor"], candidate["anchor"], strict=True,
-                        ))
-                    ), None)
-                    if previous is not None:
-                        candidates.append({**candidate, "checks": {
-                            **candidate.get("checks", {}),
-                            "append_skill_levels": previous["levels"],
-                            "append_skill_confidences": previous.get("confidences", []),
-                        }})
-                recognition = {**restored, "candidate_count": len(candidates), "candidates": candidates}
+                if not accepted:
+                    recognition = {
+                        **recognition,
+                        "candidate_count": 0,
+                        "candidates": [],
+                    }
+                else:
+                    restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
+                    candidates = []
+                    for candidate in restored["candidates"]:
+                        previous = next((result for original, result, original_identity in accepted if
+                            _matches_row(original, original_identity, screenshot, candidate)
+                            and original.get("template_path") == candidate.get("template_path")
+                            and all(abs(before - after) <= 6 for before, after in zip(
+                                original["anchor"], candidate["anchor"], strict=True,
+                            ))
+                        ), None)
+                        if previous is not None:
+                            candidates.append({**candidate, "checks": {
+                                **candidate.get("checks", {}),
+                                "append_skill_levels": previous["levels"],
+                                "append_skill_confidences": previous.get("confidences", []),
+                            }})
+                    if not candidates:
+                        context.emit(
+                            "recognition",
+                            "Restored main skill view did not retain accepted append candidates.",
+                            data={
+                                "role": "assist_append_restore_dropped",
+                                "accepted_anchors": [orig["anchor"] for orig, _, _ in accepted],
+                                "restored_anchors": [cand["anchor"] for cand in restored["candidates"]],
+                            },
+                        )
+                    recognition = {**restored, "candidate_count": len(candidates), "candidates": candidates}
             attempts += 1
             context.emit(
                 "recognition",
