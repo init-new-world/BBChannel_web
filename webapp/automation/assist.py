@@ -498,40 +498,23 @@ def create_assist_handler(
                     if result["matched"]:
                         accepted.append((candidate, result, identity))
                 screenshot = ensure_skill_view("main", screenshot)
-                if not accepted:
-                    recognition = {
-                        **recognition,
-                        "candidate_count": 0,
-                        "candidates": [],
-                    }
-                else:
-                    restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
-                    candidates = []
-                    for candidate in restored["candidates"]:
-                        previous = next((result for original, result, original_identity in accepted if
-                            _matches_row(original, original_identity, screenshot, candidate)
-                            and original.get("template_path") == candidate.get("template_path")
-                            and all(abs(before - after) <= 6 for before, after in zip(
-                                original["anchor"], candidate["anchor"], strict=True,
-                            ))
-                        ), None)
-                        if previous is not None:
-                            candidates.append({**candidate, "checks": {
-                                **candidate.get("checks", {}),
-                                "append_skill_levels": previous["levels"],
-                                "append_skill_confidences": previous.get("confidences", []),
-                            }})
-                    if not candidates:
-                        context.emit(
-                            "recognition",
-                            "Restored main skill view did not retain accepted append candidates.",
-                            data={
-                                "role": "assist_append_restore_dropped",
-                                "accepted_anchors": [orig["anchor"] for orig, _, _ in accepted],
-                                "restored_anchors": [cand["anchor"] for cand in restored["candidates"]],
-                            },
-                        )
-                    recognition = {**restored, "candidate_count": len(candidates), "candidates": candidates}
+                restored = assist_recognizer.recognize(screenshot, plan["assist"], server=plan["server"])
+                candidates = []
+                for candidate in restored["candidates"]:
+                    previous = next((result for original, result, original_identity in accepted if
+                        _matches_row(original, original_identity, screenshot, candidate)
+                        and original.get("template_path") == candidate.get("template_path")
+                        and all(abs(before - after) <= 6 for before, after in zip(
+                            original["anchor"], candidate["anchor"], strict=True,
+                        ))
+                    ), None)
+                    if previous is not None:
+                        candidates.append({**candidate, "checks": {
+                            **candidate.get("checks", {}),
+                            "append_skill_levels": previous["levels"],
+                            "append_skill_confidences": previous.get("confidences", []),
+                        }})
+                recognition = {**restored, "candidate_count": len(candidates), "candidates": candidates}
             attempts += 1
             context.emit(
                 "recognition",
@@ -632,15 +615,18 @@ def create_assist_handler(
                     "selected": selected,
                     "tap": selection_operation.to_dict(),
                 }
-            try:
-                no_assist = assist_recognizer.match_no_assist(
-                    screenshot,
-                    plan["server"],
-                )
-            except AppError as exc:
-                if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
-                    raise
-                no_assist = None
+            if empty_match is not None:
+                no_assist = empty_match
+            else:
+                try:
+                    no_assist = assist_recognizer.match_no_assist(
+                        screenshot,
+                        plan["server"],
+                    )
+                except AppError as exc:
+                    if exc.code != ErrorCode.TEMPLATE_NOT_FOUND:
+                        raise
+                    no_assist = None
             if no_assist is not None and no_assist.matched:
                 empty_lists += 1
                 scrolls_since_refresh = max_scrolls
@@ -741,10 +727,41 @@ def create_assist_handler(
             refresh_confirmation = None
             for cooldown_attempt in range(MAX_ASSIST_REFRESH_COOLDOWN_RETRIES + 1):
                 context.checkpoint("refresh_assist", progress=progress)
+                refresh_screen = snapshot_without_reconnect()
                 refresh_button = assist_recognizer.match_refresh_button(
-                    snapshot_without_reconnect(),
+                    refresh_screen,
                     plan["server"],
                 )
+                if not refresh_button.matched and (
+                    refreshes > 0
+                    or (
+                        isinstance(assist_recognizer, AssistRecognizer)
+                        and assist_recognizer.match_skill_view(
+                            refresh_screen,
+                            plan["server"],
+                        )
+                        is not None
+                    )
+                ):
+                    context.emit(
+                        "recognition",
+                        "Assist refresh button is on cooldown; waiting for it to become ready.",
+                        data={"role": "assist_refresh_button_cooldown", "refresh": refreshes + 1},
+                    )
+                    button_wait_seconds = 1.0 if refresh_wait_seconds > 0 else 0.0
+                    for _ in range(12):
+                        if button_wait_seconds > 0:
+                            context.sleep(
+                                randomized_wait_seconds(button_wait_seconds, random_time)
+                            )
+                        context.checkpoint("refresh_assist", progress=progress)
+                        refresh_screen = snapshot_without_reconnect()
+                        refresh_button = assist_recognizer.match_refresh_button(
+                            refresh_screen,
+                            plan["server"],
+                        )
+                        if refresh_button.matched:
+                            break
                 if not refresh_button.matched:
                     raise RuntimeError("Assist list refresh button was not recognized.")
                 device_service.tap(
@@ -802,6 +819,32 @@ def create_assist_handler(
                 data={"role": "assist_refresh", "refresh": refreshes},
             )
             context.sleep(randomized_wait_seconds(refresh_wait_seconds, random_time))
+            if isinstance(assist_recognizer, AssistRecognizer) and refresh_wait_seconds > 0:
+                for settle_attempt in range(10):
+                    context.checkpoint("refresh_assist", progress=progress)
+                    settled_screen = snapshot_without_reconnect()
+                    connecting = _optional_assist_match(
+                        assist_recognizer,
+                        "match_connecting",
+                        settled_screen,
+                        plan["server"],
+                    )
+                    if connecting is not None and connecting.matched:
+                        context.sleep(randomized_wait_seconds(0.5, random_time))
+                        continue
+                    no_assist_after = _optional_assist_match(
+                        assist_recognizer,
+                        "match_no_assist",
+                        settled_screen,
+                        plan["server"],
+                    )
+                    if (
+                        (no_assist_after is not None and no_assist_after.matched)
+                        or assist_recognizer.match_skill_view(settled_screen, plan["server"]) is not None
+                        or settle_attempt >= 4
+                    ):
+                        break
+                    context.sleep(randomized_wait_seconds(0.5, random_time))
 
     return handler
 

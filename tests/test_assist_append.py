@@ -267,3 +267,61 @@ def test_same_candidate_row_tolerates_right_strip_animation_and_rejects_changes(
     assert recognizer.same_candidate_row(_png(base), cand, _png(animated), cand)
     assert not recognizer.same_candidate_row(_png(base), cand, _png(replaced_player), cand)
     assert not recognizer.same_candidate_row(_png(base), cand, _png(base), shifted)
+
+
+def test_assist_handler_waits_for_refresh_button_cooldown_after_previous_refresh():
+    state = {"refresh_checks": 0, "refreshes": 0}
+    sleeps = []
+
+    class Device:
+        def snapshot(self):
+            return b"assist"
+
+        def tap(self, x, y):
+            if (x, y) == (910, 560):
+                state["refreshes"] += 1
+            return SimpleNamespace(to_dict=lambda: {"ok": True, "x": x, "y": y})
+
+    class Recognizer:
+        def match_reconnect(self, *_args):
+            return SimpleNamespace(matched=False)
+
+        match_not_available = match_reconnect
+        match_no_assist = match_reconnect
+
+        def recognize(self, *_args, **_kwargs):
+            if state["refreshes"] >= 2:
+                return {
+                    "candidate_count": 1,
+                    "servant_name": "Ishtar",
+                    "candidates": [{"anchor": [130, 400], "scale": 1.0, "checks": {}}],
+                }
+            return {"candidate_count": 0, "servant_name": "Ishtar", "candidates": []}
+
+        def match_refresh_button(self, *_args):
+            state["refresh_checks"] += 1
+            # On the second refresh cycle, simulate FGO's grayed-out countdown button for 2 polls.
+            if state["refreshes"] == 1 and state["refresh_checks"] in (2, 3):
+                return SimpleNamespace(matched=False, center=[900, 130], top_left=[870, 110], size=[60, 40])
+            return SimpleNamespace(matched=True, center=[900, 130], top_left=[870, 110], size=[60, 40])
+
+        def match_refresh_confirmation(self, *_args):
+            return SimpleNamespace(matched=True, center=[910, 560], top_left=[860, 540], size=[100, 40])
+
+    script_data = SimpleNamespace(get_setting_plan=lambda _name: {
+        "server": "CH",
+        "run": {},
+        "assist": {"mode": "仅从者", "all_not_skip": True},
+    })
+    context = SimpleNamespace(
+        checkpoint=lambda *_a, **_k: None,
+        emit=lambda *_a, **_k: None,
+        sleep=lambda s: sleeps.append(s),
+    )
+    result = create_assist_handler(script_data, Device(), Recognizer())(
+        context,
+        {"setting_name": "demo", "max_scrolls": 0, "max_refreshes": 3, "refresh_wait_seconds": 0.1},
+    )
+    assert result["refreshes"] == 2
+    assert state["refresh_checks"] == 4
+    assert 1.0 in sleeps

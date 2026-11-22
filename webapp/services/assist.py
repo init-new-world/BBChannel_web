@@ -109,6 +109,11 @@ class AssistRecognizer:
             if frame_size is not None and frame_size[0] >= 1000 and frame_size[1] >= 600
             else None
         )
+        face_scales = (
+            (1.25, 1.2, 1.0)
+            if grand_layout and frame_size == (1280, 720)
+            else ASSIST_FACE_SCALES
+        )
         matches = [
             match
             for template_path in templates
@@ -117,7 +122,7 @@ class AssistRecognizer:
                 template_path,
                 threshold=threshold,
                 roi=face_roi,
-                scales=ASSIST_FACE_SCALES,
+                scales=face_scales,
                 mask_path=(
                     ASSIST_FACE_MASK_PATH
                     if (self._resources.assets_dir / ASSIST_FACE_MASK_PATH).is_file()
@@ -381,17 +386,33 @@ class AssistRecognizer:
                     }
                 )
             if check_np_level:
-                if np_level_matches is None:
-                    np_level_matches = self._np_level_matches(
+                if frame_size == (1280, 720):
+                    row_top = max(140, candidate["anchor"][1] - 10)
+                    row_bottom = min(frame_size[1], candidate["anchor"][1] + 125)
+                    row_roi = (300, row_top, 520, max(row_bottom - row_top, 1))
+                    row_np_matches = self._np_level_matches(
                         screenshot,
                         server,
                         threshold,
-                        roi=np_level_roi,
+                        roi=row_roi,
+                        required_level=required_np_level,
                     )
-                np_level_match = self._candidate_np_level_match(
-                    candidate["anchor"],
-                    np_level_matches,
-                )
+                    np_level_match = self._candidate_np_level_match(
+                        candidate["anchor"],
+                        row_np_matches,
+                    )
+                else:
+                    if np_level_matches is None:
+                        np_level_matches = self._np_level_matches(
+                            screenshot,
+                            server,
+                            threshold,
+                            roi=np_level_roi,
+                        )
+                    np_level_match = self._candidate_np_level_match(
+                        candidate["anchor"],
+                        np_level_matches,
+                    )
                 if np_level_match is None or np_level_match[0] < required_np_level:
                     continue
                 np_level, match = np_level_match
@@ -1014,6 +1035,20 @@ class AssistRecognizer:
             "match": best,
         }
 
+    def _roi_for_720p(
+        self,
+        screenshot: bytes,
+        roi: tuple[int, int, int, int],
+    ) -> tuple[int, int, int, int] | None:
+        if not isinstance(self._recognition, RecognitionService):
+            return None
+        try:
+            if self._recognition.image_size(screenshot) == (1280, 720):
+                return roi
+        except Exception:
+            return None
+        return None
+
     def match_reconnect(
         self,
         screenshot: bytes,
@@ -1021,11 +1056,17 @@ class AssistRecognizer:
         *,
         threshold: float = 0.85,
     ):
+        options: dict[str, Any] = {
+            "threshold": threshold,
+            "scales": ASSIST_EQUIP_SCALES,
+        }
+        roi = self._roi_for_720p(screenshot, (380, 280, 620, 360))
+        if roi is not None:
+            options["roi"] = roi
         return self._recognition.match_template(
             screenshot,
             f"battle/{server.upper()}/reconnect.png",
-            threshold=threshold,
-            scales=ASSIST_EQUIP_SCALES,
+            **options,
         )
 
     def match_not_available(
@@ -1058,11 +1099,17 @@ class AssistRecognizer:
         *,
         threshold: float = 0.85,
     ):
+        options: dict[str, Any] = {
+            "threshold": threshold,
+            "scales": ASSIST_EQUIP_SCALES,
+        }
+        roi = self._roi_for_720p(screenshot, (180, 200, 920, 340))
+        if roi is not None:
+            options["roi"] = roi
         return self._recognition.match_template(
             screenshot,
             f"battle/{server.upper()}/no_assist.png",
-            threshold=threshold,
-            scales=ASSIST_EQUIP_SCALES,
+            **options,
         )
 
     def match_scrollbar(
@@ -1072,11 +1119,17 @@ class AssistRecognizer:
         *,
         threshold: float = 0.85,
     ):
+        options: dict[str, Any] = {
+            "threshold": threshold,
+            "scales": ASSIST_EQUIP_SCALES,
+        }
+        roi = self._roi_for_720p(screenshot, (1160, 130, 120, 590))
+        if roi is not None:
+            options["roi"] = roi
         return self._recognition.match_template(
             screenshot,
             f"battle/{server.upper()}/scrollbar.png",
-            threshold=threshold,
-            scales=ASSIST_EQUIP_SCALES,
+            **options,
         )
 
     def match_grand_marker(
@@ -1327,18 +1380,53 @@ class AssistRecognizer:
         threshold: float,
         *,
         roi: tuple[int, int, int, int] | None = None,
+        required_level: int | None = None,
     ) -> list[tuple[int, Any]]:
         entries = self._resources.template_index(
             prefix=f"assist/np_level_{server.upper()}",
             limit=100,
         )["entries"]
-        matches: list[tuple[int, Any]] = []
+        parsed: list[tuple[int, str]] = []
         for entry in entries:
             template_path = str(entry["path"])
             stem = template_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
             if not stem.startswith("level") or not stem[5:].isdigit():
                 continue
-            level = int(stem[5:])
+            parsed.append((int(stem[5:]), template_path))
+        if required_level is not None:
+            qualifying = [item for item in parsed if item[0] >= required_level]
+            non_qualifying = [item for item in parsed if item[0] < required_level]
+            qualifying_matches: list[tuple[int, Any]] = []
+            for level, template_path in qualifying:
+                qualifying_matches.extend(
+                    (level, match)
+                    for match in self._recognition.match_template_all(
+                        screenshot,
+                        template_path,
+                        threshold=threshold,
+                        roi=roi,
+                        scales=ASSIST_EQUIP_SCALES,
+                        max_results=20,
+                    )
+                )
+            if not qualifying_matches:
+                return []
+            matches = list(qualifying_matches)
+            for level, template_path in non_qualifying:
+                matches.extend(
+                    (level, match)
+                    for match in self._recognition.match_template_all(
+                        screenshot,
+                        template_path,
+                        threshold=threshold,
+                        roi=roi,
+                        scales=ASSIST_EQUIP_SCALES,
+                        max_results=20,
+                    )
+                )
+            return matches
+        matches: list[tuple[int, Any]] = []
+        for level, template_path in parsed:
             matches.extend(
                 (level, match)
                 for match in self._recognition.match_template_all(
