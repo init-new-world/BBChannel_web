@@ -258,6 +258,7 @@ class JobDatabase:
         data: dict[str, Any] | None = None,
     ) -> JobEvent:
         now = _utc_now()
+        event_data = dict(data) if data else {}
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -265,10 +266,18 @@ class JobDatabase:
                     job_id, event_type, level, message, data_json, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, event_type, level, message, _dump_json(data or {}), now),
+                (job_id, event_type, level, message, _dump_json(event_data), now),
             )
             event_id = int(cursor.lastrowid)
-        event = self.get_event(event_id)
+        event = JobEvent(
+            event_id=event_id,
+            job_id=job_id,
+            event_type=event_type,
+            level=level,
+            message=message,
+            data=event_data,
+            created_at=now,
+        )
         self._notify_event(event)
         return event
 
@@ -385,7 +394,7 @@ class JobDatabase:
         return len(rows)
 
     def _migrate(self) -> None:
-        with self._connect(create_schema_table=False) as connection:
+        with self._connect(configure_wal=True) as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -405,20 +414,14 @@ class JobDatabase:
                     (version, _utc_now()),
                 )
 
-    def _connect(self, *, create_schema_table: bool = True) -> sqlite3.Connection:
+    def _connect(self, *, configure_wal: bool = False) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
-        if create_schema_table:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS schema_migrations (
-                    version INTEGER PRIMARY KEY,
-                    applied_at TEXT NOT NULL
-                )
-                """
-            )
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA synchronous = NORMAL")
+        if configure_wal:
+            connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
 

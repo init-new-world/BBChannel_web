@@ -91,3 +91,24 @@ def test_frame_normalizer_unwraps_prescaled_720p_droidcast_frame():
     assert normalized.transform.logical_to_raw(640, 360) == (1280, 720)
     with Image.open(BytesIO(normalized.png)) as image:
         assert image.size == (1280, 720)
+
+
+def test_frame_normalizer_unwraps_prescaled_720p_droidcast_jpeg_frame():
+    from webapp.devices.adb import _decoded_image_size
+
+    buf = BytesIO()
+    Image.new("RGB", (1280, 720), (40, 110, 180)).save(buf, format="JPEG", quality=92)
+    jpeg_720 = buf.getvalue()
+    assert _decoded_image_size(jpeg_720) == (1280, 720)
+
+    payload = PRESCALED_720P_MAGIC + struct.pack("<II", 2560, 1440) + jpeg_720
+    normalized = FrameNormalizer().normalize(payload)
+
+    assert normalized.png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert normalized.transform.raw_width == 2560
+    assert normalized.transform.raw_height == 1440
+    with Image.open(BytesIO(normalized.png)) as image:
+        assert image.size == (1280, 720)
+    cached = get_cached_bgr_frame(normalized.png)
+    if cached is not None:
+        assert cached.shape == (720, 1280, 3)

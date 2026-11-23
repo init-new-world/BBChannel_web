@@ -279,6 +279,29 @@ def test_completion_stops_when_full_friendship_is_reached(tmp_path: Path):
     assert result.result["actions"] == []
 
 
+def test_completion_does_not_false_trigger_jblevel10_on_loot_screen_with_next_button(tmp_path: Path):
+    pytest.importorskip("cv2")
+    loot_frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    # Simulate a half-scale false-positive pattern inside the loot grid while Next is visible.
+    loot_frame.paste(_pattern((90, 45), (145, 75, 105)).resize((45, 22)), (508, 507))
+    loot_frame.paste(_pattern((100, 40), (80, 65, 150)), (1045, 613))
+    done_frame = Image.new("RGB", (1280, 720), (18, 24, 32))
+    done_frame.paste(_pattern((120, 50), (35, 120, 170)), (900, 600))
+
+    result = _run_completion(
+        tmp_path,
+        [
+            (loot_frame, {"type": "tap", "x": 1095, "y": 633}),
+            (done_frame, None),
+        ],
+        config={"fullFriendshipStop": 1},
+    )
+
+    assert result.status == JobStatus.SUCCEEDED
+    assert result.result["complete"] is True
+    assert result.result["actions"] == ["next"]
+
+
 def test_completion_stops_when_friendship_maximum_marker_is_reached(tmp_path: Path):
     pytest.importorskip("cv2")
     frame = Image.new("RGB", (1280, 720), (18, 24, 32))

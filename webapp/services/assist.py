@@ -150,6 +150,20 @@ class AssistRecognizer:
             if only_servant
             else self._equip_templates(configured_equip_names)
         )
+        equip_roi = (
+            (170, 140, 290, frame_size[1] - 140)
+            if grand_layout
+            and frame_size is not None
+            and frame_size[0] >= 1000
+            and frame_size[1] >= 600
+            else (
+                (0, 140, 460, frame_size[1] - 140)
+                if frame_size is not None
+                and frame_size[0] >= 1000
+                and frame_size[1] >= 600
+                else None
+            )
+        )
         equip_matches = {
             equip_name: [
                 match
@@ -158,6 +172,7 @@ class AssistRecognizer:
                     screenshot,
                     template_path,
                     threshold=threshold,
+                    roi=equip_roi,
                     scales=ASSIST_EQUIP_SCALES,
                     max_results=20,
                 )

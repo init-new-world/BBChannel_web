@@ -232,8 +232,8 @@ class FrameNormalizer:
             and image_bytes.startswith(PRESCALED_720P_MAGIC)
         ):
             raw_w, raw_h = struct.unpack_from("<II", image_bytes, 8)
-            png_payload = image_bytes[16:]
-            bgr720 = cv2.imdecode(np.frombuffer(png_payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+            payload = image_bytes[16:]
+            bgr720 = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
             if bgr720 is not None and (bgr720.shape[1], bgr720.shape[0]) == (BASE_WIDTH, BASE_HEIGHT):
                 transform = ScreenTransform.fit(
                     raw_w,
@@ -242,8 +242,19 @@ class FrameNormalizer:
                     base_width=self.base_width,
                     base_height=self.base_height,
                 )
-                cache_decoded_bgr_frame(png_payload, bgr720)
-                return NormalizedFrame(png_payload, transform)
+                if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+                    png_bytes = payload
+                else:
+                    ok, encoded = cv2.imencode(
+                        ".png",
+                        bgr720,
+                        [int(cv2.IMWRITE_PNG_COMPRESSION), 1],
+                    )
+                    if not ok:
+                        return None
+                    png_bytes = encoded.tobytes()
+                cache_decoded_bgr_frame(png_bytes, bgr720)
+                return NormalizedFrame(png_bytes, transform)
         bgr = try_decode_raw_screencap_bgr(image_bytes)
         is_raw = bgr is not None
         if bgr is None:

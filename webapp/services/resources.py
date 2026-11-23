@@ -18,6 +18,7 @@ class ResourceService:
         self.data_dir = Path(data_dir).resolve()
         self._index_lock = RLock()
         self._template_entries: list[dict[str, object]] | None = None
+        self._prefix_entries: dict[str, list[dict[str, object]]] = {}
         self._resolved_templates: dict[str, Path] = {}
 
     def list_templates(self) -> list[str]:
@@ -31,16 +32,11 @@ class ResourceService:
         offset: int = 0,
         limit: int = 200,
     ) -> dict[str, object]:
-        entries = self._index()
         normalized_prefix = (prefix or "").strip().strip("/")
         if normalized_prefix:
-            prefix_with_separator = f"{normalized_prefix}/"
-            entries = [
-                entry
-                for entry in entries
-                if entry["path"] == normalized_prefix
-                or str(entry["path"]).startswith(prefix_with_separator)
-            ]
+            entries = self._index_prefix(normalized_prefix)
+        else:
+            entries = self._index()
         normalized_query = (query or "").strip().casefold()
         if normalized_query:
             entries = [
@@ -83,6 +79,7 @@ class ResourceService:
 
     def refresh_template_index(self) -> int:
         with self._index_lock:
+            self._prefix_entries.clear()
             self._template_entries = self._build_index()
             return len(self._template_entries)
 
@@ -122,11 +119,46 @@ class ResourceService:
                 self._template_entries = self._build_index()
             return list(self._template_entries)
 
-    def _build_index(self) -> list[dict[str, object]]:
-        if not self.assets_dir.exists():
+    def _index_prefix(self, normalized_prefix: str) -> list[dict[str, object]]:
+        with self._index_lock:
+            if self._template_entries is not None:
+                prefix_with_separator = f"{normalized_prefix}/"
+                return [
+                    entry
+                    for entry in self._template_entries
+                    if entry["path"] == normalized_prefix
+                    or str(entry["path"]).startswith(prefix_with_separator)
+                ]
+            cached = self._prefix_entries.get(normalized_prefix)
+            if cached is not None:
+                return list(cached)
+            candidate = (self.assets_dir / normalized_prefix).resolve()
+            if not self._is_inside_assets(candidate) or not candidate.exists():
+                entries: list[dict[str, object]] = []
+            elif candidate.is_file():
+                extension = candidate.suffix.lower()
+                if extension in IMAGE_EXTENSIONS:
+                    relative_path = candidate.relative_to(self.assets_dir).as_posix()
+                    entries = [
+                        self._entry_for(
+                            relative_path,
+                            extension,
+                            candidate.stat().st_size,
+                        )
+                    ]
+                else:
+                    entries = []
+            else:
+                entries = self._build_index(candidate)
+            self._prefix_entries[normalized_prefix] = entries
+            return list(entries)
+
+    def _build_index(self, root: Path | None = None) -> list[dict[str, object]]:
+        scan_root = self.assets_dir if root is None else root
+        if not scan_root.exists():
             return []
         entries: list[dict[str, object]] = []
-        pending_directories = [self.assets_dir]
+        pending_directories = [scan_root]
         while pending_directories:
             directory = pending_directories.pop()
             with os.scandir(directory) as directory_entries:

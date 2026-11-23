@@ -95,39 +95,55 @@ def initialize_battle_settings(
     random_touch: bool = False,
 ) -> dict[str, Any]:
     server = server.upper()
-    screenshot = device_service.snapshot()
-    menu_button = recognition.match_template(
-        screenshot,
-        f"battle/{server}/fight_menu_button.png",
-        threshold=0.85,
-        scales=(1.0, 0.75, 2 / 3, 0.5),
-    )
-    if not menu_button.matched:
-        raise RuntimeError("Battle menu button was not recognized.")
-    device_service.tap(*match_touch_point(menu_button, enabled=random_touch))
-    actions = ["open_menu"]
-    context.sleep(
-        randomized_wait_seconds(
-            max(action_wait_seconds, BATTLE_MENU_TRANSITION_SECONDS),
-            random_time,
-        )
-    )
-
-    screenshot = device_service.snapshot()
-    candidates = []
-    for enabled, template_path in (
-        (True, f"battle/{server}/on.png"),
-        (False, f"battle/{server}/off.png"),
-    ):
-        for match in recognition.match_template_all(
+    actions: list[str] = []
+    toggles: list[tuple[bool, Any]] = []
+    screenshot = b""
+    max_open_attempts = 8
+    for attempt in range(max_open_attempts):
+        screenshot = device_service.snapshot()
+        menu_button = recognition.match_template(
             screenshot,
-            template_path,
+            f"battle/{server}/fight_menu_button.png",
             threshold=0.85,
             scales=(1.0, 0.75, 2 / 3, 0.5),
-            max_results=10,
+        )
+        if not menu_button.matched:
+            if attempt + 1 >= max_open_attempts:
+                raise RuntimeError("Battle menu button was not recognized.")
+            context.sleep(
+                randomized_wait_seconds(
+                    max(action_wait_seconds, BATTLE_MENU_TRANSITION_SECONDS),
+                    random_time,
+                )
+            )
+            continue
+        device_service.tap(*match_touch_point(menu_button, enabled=random_touch))
+        if not actions:
+            actions.append("open_menu")
+        context.sleep(
+            randomized_wait_seconds(
+                max(action_wait_seconds, BATTLE_MENU_TRANSITION_SECONDS),
+                random_time,
+            )
+        )
+
+        screenshot = device_service.snapshot()
+        candidates = []
+        for enabled, template_path in (
+            (True, f"battle/{server}/on.png"),
+            (False, f"battle/{server}/off.png"),
         ):
-            candidates.append((enabled, match))
-    toggles = _distinct_toggle_matches(candidates)
+            for match in recognition.match_template_all(
+                screenshot,
+                template_path,
+                threshold=0.85,
+                scales=(1.0, 0.75, 2 / 3, 0.5),
+                max_results=10,
+            ):
+                candidates.append((enabled, match))
+        toggles = _distinct_toggle_matches(candidates)
+        if len(toggles) == 3:
+            break
     if len(toggles) != 3:
         raise RuntimeError(
             f"Expected three battle settings toggles but recognized {len(toggles)}."
@@ -3191,6 +3207,8 @@ def _execute_steps(
             randomized_wait_seconds(timing.interval, timing.random_time),
             float(step.get("wait_after_seconds", 0.0)),
         )
+        if getattr(device_service, "operation_timing_active", lambda: False)():
+            wait_after = max(0.0, wait_after - 0.1)
         if wait_after:
             context.sleep(wait_after)
     return len(steps)

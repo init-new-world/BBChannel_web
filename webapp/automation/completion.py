@@ -45,6 +45,11 @@ QUEST_START_RWKS_ROI = (733, 533, 207, 60)
 LIST_UPDATE_BTN_ROI = (820, 100, 147, 60)
 APPLE_CLOSE_ROI = (600, 580, 80, 67)
 START_QUEST_ROI = (1067, 613, 200, 100)
+RUN_AGAIN_720P_ROI = (620, 480, 540, 220)
+NEXT_BUTTON_720P_ROI = (560, 460, 720, 260)
+FRIEND_APPLY_720P_ROI = (120, 460, 1060, 240)
+JB_LEVEL10_720P_ROI = (80, 320, 1120, 220)
+JB_MAX_720P_ROI = (80, 320, 1120, 220)
 TEAM_RESTRICTION_ROI = (573, 573, 137, 57)
 QUEST_UNAVAILABLE_ROI = (573, 533, 137, 60)
 
@@ -94,6 +99,7 @@ def create_completion_handler(
         cant_add_friend = False
         reentering_quest = False
 
+        real_recognition = isinstance(recognition, RecognitionService)
         while active_monotonic(context, clock=monotonic) - started <= timeout_seconds:
             elapsed = active_monotonic(context, clock=monotonic) - started
             context.checkpoint(
@@ -114,6 +120,12 @@ def create_completion_handler(
             ):
                 actions.append("reconnect")
                 continue
+            frame_is_720p = False
+            if real_recognition:
+                try:
+                    frame_is_720p = recognition.image_size(screenshot) == (1280, 720)
+                except Exception:
+                    frame_is_720p = False
             if drop_recognizer is not None:
                 drop_report = drop_recognizer.recognize(screenshot, check_cancelled=context.raise_if_cancelled)
                 drop_matches = drop_report["matches"]
@@ -197,44 +209,11 @@ def create_completion_handler(
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
 
-            if plan["run"]["full_friendship_stop"] and not ignore_full_friendship:
-                friendship_marker = _match_optional(
-                    recognition,
-                    screenshot,
-                    f"battle/{server}/jblevel10.png",
-                )
-                if friendship_marker is None or not friendship_marker.matched:
-                    friendship_marker = _match_optional(
-                        recognition,
-                        screenshot,
-                        f"battle/{server}/jbMax.png",
-                    )
-                    ignored_positions = plan["run"].get("ignored_friendship_slots", [])
-                    if friendship_marker is not None and friendship_marker.matched and ignored_positions:
-                        friendship_marker = _match_optional(
-                            recognition,
-                            _mask_ignored_friendship(screenshot, ignored_positions),
-                            f"battle/{server}/jbMax.png",
-                        )
-                if friendship_marker is not None and friendship_marker.matched:
-                    context.checkpoint(
-                        "complete",
-                        progress=1.0,
-                        message="Stopped after reaching full friendship.",
-                    )
-                    return {
-                        "setting_name": setting_name.strip(),
-                        "complete": False,
-                        "stopped": True,
-                        "reason": "full_friendship",
-                        "drop_count": drop_count,
-                        "actions": actions,
-                        "attempts": attempts,
-                    }
             run_again = _match_optional(
                 recognition,
                 screenshot,
                 f"battle/{server}/run_again.png",
+                roi=RUN_AGAIN_720P_ROI if frame_is_720p else None,
             )
             if run_again is not None and run_again.matched:
                 if repeat:
@@ -268,6 +247,7 @@ def create_completion_handler(
                 recognition,
                 screenshot,
                 f"battle/{server}/next.png",
+                roi=NEXT_BUTTON_720P_ROI if frame_is_720p else None,
             )
             if next_button is not None and next_button.matched:
                 operation = device_service.tap(
@@ -281,6 +261,47 @@ def create_completion_handler(
                 )
                 context.sleep(randomized_wait_seconds(action_wait_seconds, random_time))
                 continue
+
+            if plan["run"]["full_friendship_stop"] and not ignore_full_friendship:
+                friendship_marker = _match_optional(
+                    recognition,
+                    screenshot,
+                    f"battle/{server}/jblevel10.png",
+                    roi=JB_LEVEL10_720P_ROI if frame_is_720p else None,
+                    scales=(1.0, 2 / 3),
+                )
+                if friendship_marker is None or not friendship_marker.matched:
+                    friendship_marker = _match_optional(
+                        recognition,
+                        screenshot,
+                        f"battle/{server}/jbMax.png",
+                        roi=JB_MAX_720P_ROI if frame_is_720p else None,
+                        scales=(1.0, 2 / 3),
+                    )
+                    ignored_positions = plan["run"].get("ignored_friendship_slots", [])
+                    if friendship_marker is not None and friendship_marker.matched and ignored_positions:
+                        friendship_marker = _match_optional(
+                            recognition,
+                            _mask_ignored_friendship(screenshot, ignored_positions),
+                            f"battle/{server}/jbMax.png",
+                            roi=JB_MAX_720P_ROI if frame_is_720p else None,
+                            scales=(1.0, 2 / 3),
+                        )
+                if friendship_marker is not None and friendship_marker.matched:
+                    context.checkpoint(
+                        "complete",
+                        progress=1.0,
+                        message="Stopped after reaching full friendship.",
+                    )
+                    return {
+                        "setting_name": setting_name.strip(),
+                        "complete": False,
+                        "stopped": True,
+                        "reason": "full_friendship",
+                        "drop_count": drop_count,
+                        "actions": actions,
+                        "attempts": attempts,
+                    }
 
             friend_full = (
                 None
@@ -340,6 +361,7 @@ def create_completion_handler(
                 recognition,
                 screenshot,
                 f"battle/{server}/{friend_template}",
+                roi=FRIEND_APPLY_720P_ROI if frame_is_720p else None,
             )
             if friend_button is not None and friend_button.matched:
                 operation = device_service.tap(
@@ -457,7 +479,7 @@ def create_completion_handler(
                         "template_path": template_path,
                         "threshold": 0.85,
                         "roi": (0, 360, 1280, 360),
-                        "scales": (1.0, 0.75, 2 / 3, 0.5),
+                        "scales": (1.0, 2 / 3) if frame_is_720p else (1.0, 0.75, 2 / 3, 0.5),
                         **({"mask_path": mask_path} if mask_path else {}),
                     }
                     for template_path, _action, _reason, mask_path in story_specs
@@ -778,6 +800,7 @@ def _match_optional(
     *,
     threshold: float = 0.85,
     roi: tuple[int, int, int, int] | None = None,
+    scales: tuple[float, ...] = (1.0, 0.75, 2 / 3, 0.5),
 ):
     try:
         return recognition.match_template(
@@ -785,7 +808,7 @@ def _match_optional(
             template_path,
             threshold=threshold,
             roi=roi,
-            scales=(1.0, 0.75, 2 / 3, 0.5),
+            scales=scales,
         )
     except AppError as exc:
         if exc.code == ErrorCode.TEMPLATE_NOT_FOUND:

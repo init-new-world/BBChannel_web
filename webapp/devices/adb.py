@@ -447,12 +447,48 @@ def _default_droidcast_apk() -> Path | None:
     return None
 
 
+def _decoded_image_size(data: bytes) -> tuple[int, int] | None:
+    if len(data) >= 24 and data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return struct.unpack_from(">II", data, 16)
+    if len(data) >= 12 and data.startswith(b"\xff\xd8"):
+        pos = 2
+        length = len(data)
+        while pos + 4 <= length:
+            if data[pos] != 0xFF:
+                break
+            while pos < length and data[pos] == 0xFF:
+                pos += 1
+            if pos >= length:
+                break
+            marker = data[pos]
+            pos += 1
+            if marker in {0xD8, 0xD9, 0x01} or 0xD0 <= marker <= 0xD7:
+                continue
+            if pos + 2 > length:
+                break
+            segment_len = (data[pos] << 8) | data[pos + 1]
+            if segment_len < 2 or pos + segment_len > length:
+                break
+            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                if segment_len >= 7:
+                    height = (data[pos + 3] << 8) | data[pos + 4]
+                    width = (data[pos + 5] << 8) | data[pos + 6]
+                    return (width, height)
+                break
+            pos += segment_len
+    return None
+
+
 class _DroidCastSession:
-    """Resident Airtest DroidCast HTTP capture stream (~20ms 720p GPU-scaled frames)."""
+    """Resident Airtest DroidCast HTTP capture stream (~30ms 720p GPU-scaled frames)."""
 
     REMOTE_APK = "/data/local/tmp/bbchannel_droidcast.apk"
     REMOTE_PORT = 53516
     PRESCALED_MAGIC = b"BBDC720\x00"
+    ENDPOINT_CANDIDATES = (
+        "/screenshot?width=720&height=1280&format=jpeg",
+        "/screenshot?width=1280&height=720&format=jpeg",
+    )
 
     def __init__(
         self,
@@ -469,12 +505,18 @@ class _DroidCastSession:
         self._proc: subprocess.Popen[bytes] | None = None
         self._local_port: int | None = None
         self._conn: http.client.HTTPConnection | None = None
+        self._endpoint: str | None = None
         self._failed = False
 
     def _start_locked(self) -> bool:
         if self._failed:
             return False
-        if self._local_port is not None and self._proc is not None and self._proc.poll() is None:
+        if (
+            self._local_port is not None
+            and self._endpoint is not None
+            and self._proc is not None
+            and self._proc.poll() is None
+        ):
             return True
         self._cleanup_locked()
         try:
@@ -518,10 +560,10 @@ class _DroidCastSession:
             self._local_port = int(fwd.stdout.strip())
             for _ in range(10):
                 system_sleep(0.15)
-                body = self._fetch_once_locked()
-                if body is not None and body.startswith(b"\x89PNG\r\n\x1a\n") and len(body) > 24:
-                    w, h = struct.unpack_from(">II", body, 16)
-                    if (w, h) == (1280, 720):
+                for endpoint in self.ENDPOINT_CANDIDATES:
+                    body = self._fetch_once_locked(endpoint)
+                    if body is not None and _decoded_image_size(body) == (1280, 720):
+                        self._endpoint = endpoint
                         return True
             self._failed = True
             self._cleanup_locked()
@@ -531,14 +573,15 @@ class _DroidCastSession:
             self._cleanup_locked()
             return False
 
-    def _fetch_once_locked(self) -> bytes | None:
+    def _fetch_once_locked(self, endpoint: str | None = None) -> bytes | None:
         if self._local_port is None:
             return None
+        target = endpoint or self._endpoint or self.ENDPOINT_CANDIDATES[0]
         for attempt in range(2):
             try:
                 if self._conn is None:
                     self._conn = http.client.HTTPConnection("127.0.0.1", self._local_port, timeout=2.5)
-                self._conn.request("GET", "/screenshot?width=1280&height=720")
+                self._conn.request("GET", target)
                 resp = self._conn.getresponse()
                 data = resp.read()
                 if resp.status == 200 and data:
@@ -560,16 +603,17 @@ class _DroidCastSession:
         with self._lock:
             if not self._start_locked():
                 return None
-            png = self._fetch_once_locked()
-            if png is None or not png.startswith(b"\x89PNG\r\n\x1a\n"):
+            frame = self._fetch_once_locked()
+            if frame is None or _decoded_image_size(frame) != (1280, 720):
                 return None
-            return self.PRESCALED_MAGIC + struct.pack("<II", self.raw_width, self.raw_height) + png
+            return self.PRESCALED_MAGIC + struct.pack("<II", self.raw_width, self.raw_height) + frame
 
     def close(self) -> None:
         with self._lock:
             self._cleanup_locked()
 
     def _cleanup_locked(self) -> None:
+        self._endpoint = None
         if self._conn is not None:
             try:
                 self._conn.close()

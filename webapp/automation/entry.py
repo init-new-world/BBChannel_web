@@ -61,20 +61,27 @@ def create_battle_entry_handler(
         random_touch = bool(plan["run"].get("random_touch"))
         random_time = configured_random_time(plan["run"].get("random_time", 0))
         server = str(plan["server"]).upper()
-        template_roles: tuple[tuple[str, str, float, tuple[int, int, int, int] | None], ...] = (
-            ("battle_ready", f"battle/{server}/attack.png", 0.85, None),
-            ("battle_ready", f"battle/{server}/phase_1.png", 0.95, (867, 0, 44, 48)),
-            ("apple_decide", f"battle/{server}/apple_decide.png", 0.85, None),
-            ("apple_close", f"battle/{server}/apple_close.png", 0.85, None),
-            ("auto_formation", f"battle/CrawlTower/{server}/zdbc.png", 0.85, None),
-            ("team_decide", f"battle/{server}/teamDecide.png", 0.85, None),
-            ("start_task", f"battle/{server}/start_task.png", 0.8, None),
-            ("start_battle", f"battle/{server}/start_battle.png", 0.85, None),
+        auto_formation_role = (
+            "auto_formation",
+            f"battle/CrawlTower/{server}/zdbc.png",
+            0.85,
+            (400, 350, 520, 280),
+        )
+        template_roles: list[tuple[str, str, float, tuple[int, int, int, int] | None]] = [
+            ("battle_ready", f"battle/{server}/attack.png", 0.85, (960, 480, 320, 240)),
+            ("apple_decide", f"battle/{server}/apple_decide.png", 0.85, (500, 500, 550, 220)),
+            ("apple_close", f"battle/{server}/apple_close.png", 0.85, (500, 500, 550, 220)),
+            *([auto_formation_role] if crawl_tower else []),
+            ("team_decide", f"battle/{server}/teamDecide.png", 0.85, (500, 460, 780, 260)),
+            ("start_task", f"battle/{server}/start_task.png", 0.8, (960, 540, 320, 180)),
+            ("start_battle", f"battle/{server}/start_battle.png", 0.85, (960, 540, 320, 180)),
+            *([] if crawl_tower else [auto_formation_role]),
             ("story_skip_confirm", f"battle/{server}/listupdate.png", 0.85, STORY_SKIP_CONFIRM_ROI),
             ("story_skip", f"battle/{server}/needSkip.png", 0.8, STORY_SKIP_ROI),
             ("story_skip", f"battle/{server}/needSkip1.png", 0.8, STORY_SKIP_ALT_ROI),
             ("loading_tips", f"battle/{server}/tips.png", 0.85, None),
-        )
+        ]
+        real_recognition = isinstance(recognition, RecognitionService)
         started = monotonic()
         attempts = 0
         actions: list[str] = []
@@ -102,14 +109,35 @@ def create_battle_entry_handler(
             ):
                 actions.append("reconnect")
                 continue
+            frame_is_720p = False
+            if real_recognition:
+                try:
+                    frame_is_720p = recognition.image_size(screenshot) == (1280, 720)
+                except Exception:
+                    frame_is_720p = False
+            active_roles = template_roles
+            if any(action in {"start_task", "start_battle", "loading_tips"} for action in actions):
+                active_roles = [
+                    template_roles[0],
+                    template_roles[-1],
+                    *template_roles[1:-1],
+                ]
             matched_role = None
             matched_result = None
-            for role, template_path, role_threshold, role_roi in template_roles:
+            for role, template_path, role_threshold, role_roi in active_roles:
+                effective_roi = (
+                    role_roi
+                    if role_roi is None
+                    or role in {"story_skip_confirm", "story_skip"}
+                    or template_path.endswith("/phase_1.png")
+                    or frame_is_720p
+                    else None
+                )
                 try:
                     result = recognition.match_template(
                         screenshot,
                         template_path,
-                        roi=role_roi,
+                        roi=effective_roi,
                         threshold=role_threshold,
                         scales=(1.0, 0.75, 2 / 3, 0.5),
                     )

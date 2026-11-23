@@ -127,3 +127,22 @@ def test_template_index_only_changes_after_explicit_refresh(tmp_path: Path):
     assert service.template_index()["total"] == 0
     assert service.refresh_template_index() == 1
     assert service.template_index()["total"] == 1
+
+
+def test_template_index_prefix_scans_only_requested_subtree(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "assist").mkdir(parents=True)
+    (assets / "other").mkdir(parents=True)
+    (assets / "assist" / "a.png").write_bytes(b"a")
+    (assets / "other" / "b.png").write_bytes(b"b")
+    data.mkdir()
+    service = ResourceService(assets, data)
+
+    page = service.template_index(prefix="assist")
+
+    assert page["total"] == 1
+    assert [entry["path"] for entry in page["entries"]] == ["assist/a.png"]
+    assert service._template_entries is None
+    assert service.template_index(prefix="../outside")["total"] == 0
+    assert service.template_index(prefix="assist/a.png")["total"] == 1

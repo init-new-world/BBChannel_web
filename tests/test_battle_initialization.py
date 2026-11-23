@@ -251,3 +251,59 @@ def test_initialize_battle_settings_orders_two_column_grid_column_major():
     assert result["changed"] is True
     assert result["actions"] == ["open_menu", "toggle_3", "close_menu"]
     assert device.taps == [(1194, 207), (1126, 380), (1178, 108)]
+
+
+def test_initialize_battle_settings_retries_when_opening_animation_absorbs_first_menu_tap():
+    class DeviceStub:
+        def __init__(self):
+            self.frames = iter((b"anim", b"anim", b"battle", b"menu", b"menu"))
+            self.taps = []
+
+        def snapshot(self):
+            return next(self.frames)
+
+        def tap(self, x, y):
+            self.taps.append((x, y))
+
+    def match(template_path, center, *, matched=True, confidence=1.0):
+        return MatchResult(
+            template_path=template_path,
+            matched=matched,
+            confidence=confidence,
+            threshold=0.85,
+            top_left=[center[0] - 20, center[1] - 20],
+            size=[40, 40],
+            center=list(center),
+        )
+
+    class RecognitionStub:
+        def match_template(self, screenshot, template_path, **_options):
+            if screenshot in {b"anim", b"battle"} and template_path.endswith("fight_menu_button.png"):
+                return match(template_path, (1180, 205))
+            return match(template_path, (0, 0), matched=False, confidence=0.0)
+
+        def match_template_all(self, screenshot, template_path, **_options):
+            if screenshot != b"menu":
+                return []
+            if template_path.endswith("on.png"):
+                return [match(template_path, (900, 450))]
+            if template_path.endswith("off.png"):
+                return [
+                    match(template_path, (900, 380)),
+                    match(template_path, (900, 520)),
+                ]
+            return []
+
+    device = DeviceStub()
+    result = initialize_battle_settings(
+        _Context(),
+        device,
+        RecognitionStub(),
+        "CH",
+        action_wait_seconds=0,
+    )
+
+    assert result["states"] == [False, True, False]
+    assert result["changed"] is False
+    assert result["actions"] == ["open_menu", "close_menu"]
+    assert device.taps == [(1180, 205), (1180, 205), (1178, 108)]
