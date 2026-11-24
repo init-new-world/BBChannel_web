@@ -114,6 +114,51 @@ function extractWaveCount(config) {
   return Math.max(1, maxWave);
 }
 
+function hasWaveData(config, wave) {
+  const prefix = `round${wave}_`;
+  for (const [key, value] of Object.entries(config)) {
+    if (!key.startsWith(prefix)) continue;
+    const suffix = key.slice(prefix.length);
+    if (suffix === "turns") {
+      if (Number(value) > 1) return true;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > 0) return true;
+      continue;
+    }
+    if (typeof value === "string" && value.trim()) return true;
+    if (typeof value === "number" && value !== 0) return true;
+    if (typeof value === "boolean" && value) return true;
+    if (value && typeof value === "object" && Object.keys(value).length > 0) return true;
+  }
+  return false;
+}
+
+function removeWaveFromConfig(draft, targetWave) {
+  const shifted = [];
+  for (const key of Object.keys(draft)) {
+    const match = /^round(\d+)_(.+)$/.exec(key);
+    if (!match) continue;
+    const roundNum = Number(match[1]);
+    if (roundNum === targetWave) {
+      delete draft[key];
+    } else if (roundNum > targetWave) {
+      shifted.push([roundNum, match[2], draft[key]]);
+      delete draft[key];
+    }
+  }
+  shifted.sort((a, b) => a[0] - b[0]);
+  for (const [roundNum, suffix, value] of shifted) {
+    draft[`round${roundNum - 1}_${suffix}`] = value;
+  }
+  if (!Object.keys(draft).some((k) => k.startsWith("round1_"))) {
+    draft.round1_turns = 1;
+    draft.round1_turn0_skill = [];
+    draft.round1_turn0_np = [];
+  }
+}
+
 function buildSuggestedName(config) {
   const names = [];
   for (let i = 0; i < 3; i += 1) {
@@ -949,16 +994,50 @@ export function createPresetWizard({
     for (let w = 1; w <= waveCount; w += 1) {
       const wSkills = Array.isArray(config[`round${w}_turn0_skill`]) ? config[`round${w}_turn0_skill`].length : 0;
       const wNps = Array.isArray(config[`round${w}_turn0_np`]) ? config[`round${w}_turn0_np`].length : 0;
+      const tab = document.createElement("div");
+      tab.className = `wizard-wave-tab${wave === w ? " active" : ""}`;
+      tab.dataset.wave = String(w);
+
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = `chip-button${wave === w ? " active" : ""}`;
+      btn.className = "wizard-wave-select";
       btn.textContent = `${t("Wave {round}", { round: w })} (${wSkills}S/${wNps}NP)`;
       btn.addEventListener("click", () => {
         state.activeWave = w;
         state.pendingTargetSkill = null;
         render();
       });
-      waveBar.append(btn);
+      tab.append(btn);
+
+      if (waveCount > 1) {
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "wizard-wave-del";
+        delBtn.textContent = "×";
+        const delLabel = t("Delete wave {round}", { round: w });
+        delBtn.title = delLabel;
+        delBtn.setAttribute("aria-label", delLabel);
+        delBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (hasWaveData(config, w)) {
+            const ok = window.confirm(t("Delete wave {round} and all its fields?", { round: w }));
+            if (!ok) return;
+          }
+          const nextCount = Math.max(1, waveCount - 1);
+          if (w < state.activeWave) {
+            state.activeWave -= 1;
+          } else if (state.activeWave > nextCount) {
+            state.activeWave = nextCount;
+          }
+          state.pendingTargetSkill = null;
+          writeConfig((draft) => {
+            removeWaveFromConfig(draft, w);
+          });
+        });
+        tab.append(delBtn);
+      }
+
+      waveBar.append(tab);
     }
     const addWaveBtn = document.createElement("button");
     addWaveBtn.type = "button";
