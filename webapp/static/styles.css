@@ -82,15 +82,17 @@ select:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .language-select {
-  width: 96px;
-  min-width: 96px;
+  width: 92px;
+  min-width: 92px;
   min-height: 30px;
   height: 30px;
   padding: 0 7px;
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .brand-mark {
@@ -132,17 +134,22 @@ select:disabled {
 }
 
 .compact {
-  max-width: 150px;
+  min-width: 78px;
+  width: auto;
+  max-width: 128px;
+  flex: 0 1 110px;
 }
 
 .device-field {
-  min-width: 180px;
-  max-width: 360px;
+  min-width: 130px;
+  max-width: 320px;
+  flex: 1 1 180px;
 }
 
 .endpoint-field {
-  min-width: 140px;
-  max-width: 210px;
+  min-width: 108px;
+  max-width: 190px;
+  flex: 0 1 155px;
 }
 
 .primary-button,
@@ -186,11 +193,14 @@ select:disabled {
 }
 
 .status-pill {
-  min-width: 116px;
+  min-width: 0;
+  max-width: 224px;
   height: 30px;
+  padding: 0 11px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--panel-soft);
@@ -198,12 +208,35 @@ select:disabled {
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.status-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+.status-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-pill.connected {
   border-color: rgba(20, 122, 84, 0.35);
   background: rgba(20, 122, 84, 0.1);
   color: var(--ok);
+}
+
+.status-pill.connected::before {
+  opacity: 1;
 }
 
 .workspace {
@@ -2691,6 +2724,11 @@ select:disabled {
 
   .topbar-meta {
     gap: 6px;
+  }
+
+  .status-pill {
+    max-width: 156px;
+    padding: 0 9px;
   }
 
   .connection-strip > * {

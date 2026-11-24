@@ -5871,12 +5871,26 @@ function renderStrategyDetail(strategy) {
 }
 
 function setConnectionLabel(payload) {
+  let labelEl = els.connectionState.querySelector(".status-pill-text");
+  if (!labelEl) {
+    labelEl = document.createElement("span");
+    labelEl.className = "status-pill-text";
+    els.connectionState.replaceChildren(labelEl);
+  }
   if (payload.connected) {
-    els.connectionState.textContent = `${payload.backend} · ${payload.device_id}`;
+    const shortLabel = `${payload.backend} · ${payload.device_id}`;
+    const deviceName = payload.control?.name || payload.capture?.name || "";
+    const fullTooltip = deviceName && deviceName !== payload.device_id
+      ? `${shortLabel} (${deviceName})`
+      : shortLabel;
+    labelEl.textContent = shortLabel;
+    els.connectionState.title = fullTooltip;
     els.connectionState.classList.add("connected");
     return;
   }
-  els.connectionState.textContent = t("Disconnected");
+  const disconnectedText = t("Disconnected");
+  labelEl.textContent = disconnectedText;
+  els.connectionState.title = disconnectedText;
   els.connectionState.classList.remove("connected");
 }
 
