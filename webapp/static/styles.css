@@ -51,9 +51,10 @@ select:disabled {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 160px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .topbar {
@@ -208,9 +209,10 @@ select:disabled {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: 220px minmax(360px, 1fr) 290px;
+  grid-template-columns: 256px minmax(360px, 1fr) 324px;
   gap: 10px;
   padding: 10px;
+  overflow: hidden;
 }
 
 .tool-panel,
@@ -233,7 +235,197 @@ select:disabled {
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto auto minmax(160px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) minmax(140px, 0.42fr);
+}
+
+.filter-field {
+  min-height: 30px;
+  font-size: 12px;
+}
+
+.panel-details {
+  border-bottom: 1px solid var(--line);
+}
+
+.panel-details:last-child {
+  border-bottom: 0;
+}
+
+.panel-details-summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  background: var(--panel-soft);
+  user-select: none;
+}
+
+.panel-details[open] > .panel-details-summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.job-tabs-shell {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+
+.job-panel-tabs {
+  margin: 8px 10px 0;
+  width: calc(100% - 20px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.job-panel-tabs .segment {
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.job-state-section {
+  padding: 10px 12px;
+  gap: 7px;
+}
+
+.job-tab-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.job-tab-panel {
+  border-bottom: 0;
+}
+
+.job-tab-panel[hidden] {
+  display: none;
+}
+
+.job-live-summary {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(36, 104, 213, 0.22);
+  background: rgba(36, 104, 213, 0.06);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.job-step-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-step-line .job-kind,
+.job-step-line .job-step {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-alerts-details {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.job-alerts-details summary,
+.sub-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.job-alerts-body,
+.sub-details-body {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.sub-details {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--panel-soft);
+}
+
+.quick-runs-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.chip-button {
+  min-height: 26px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chip-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.chip-button.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.12);
+  color: var(--accent-strong);
+}
+
+.quick-utility-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.quick-utility-actions button {
+  padding: 0 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-event-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.preset-equip-slot-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.preset-equip-slot-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(36, 104, 213, 0.12);
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .panel-section {
@@ -2073,19 +2265,54 @@ select:disabled {
 }
 
 .log-panel {
+  height: 150px;
   min-height: 0;
   margin: 0 10px 10px;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 256px minmax(0, 1fr);
+}
+
+.log-panel.collapsed {
+  height: auto;
+  grid-template-columns: 1fr;
+}
+
+.log-panel.collapsed .log-header {
+  border-right: 0;
+  padding: 6px 12px;
+  flex-direction: row;
+  align-items: center;
+}
+
+.log-panel.collapsed .event-log {
+  display: none;
 }
 
 .log-header {
-  padding: 12px;
+  padding: 10px 12px;
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+}
+
+.log-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.log-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.log-header-actions button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .event-log {
@@ -2135,15 +2362,27 @@ select:disabled {
 }
 
 @media (max-width: 1100px) {
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
   .workspace {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
+    overflow: visible;
   }
 
   .job-panel {
     grid-column: 1 / -1;
-    grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1fr) minmax(300px, 1.2fr);
+    grid-template-columns: minmax(240px, 0.85fr) minmax(280px, 1.15fr) minmax(240px, 1fr);
     grid-template-rows: auto;
     overflow: visible;
+  }
+
+  .job-tabs-shell {
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
   }
 
   .job-panel .panel-section {

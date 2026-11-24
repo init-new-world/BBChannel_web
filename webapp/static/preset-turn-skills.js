@@ -56,12 +56,22 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     return node;
   }
 
-  function positionSelect(part, label, slots, value) {
+  function servantSlotName(config, slot) {
+    const raw = config?.[`servant_${slot - 1}_name`];
+    return typeof raw === "string" && raw.trim() ? raw.trim() : "";
+  }
+
+  function servantSlotLabel(config, slot) {
+    const name = servantSlotName(config, slot);
+    return name ? `${slot}·${name}` : t("Servant {slot}", { slot });
+  }
+
+  function positionSelect(part, label, slots, value, config = null) {
     const select = document.createElement("select");
     select.className = "field";
     select.dataset.turnSkillPart = part;
     select.setAttribute("aria-label", t(label));
-    for (const slot of slots) select.append(option(String(slot), t("Servant {slot}", { slot })));
+    for (const slot of slots) select.append(option(String(slot), servantSlotLabel(config, slot)));
     select.value = String(value);
     select.title = `${t(label)}: ${select.selectedOptions[0].textContent}`;
     return select;
@@ -219,9 +229,19 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
     skill.dataset.turnSkillPart = "skill";
     skill.setAttribute("aria-label", t("Skill {index}", { index: index + 1 }));
     for (let number = 1; number <= 13; number += 1) {
-      const label = number <= 9
-        ? t("Servant {slot} / Skill {skill}", { slot: Math.floor((number - 1) / 3) + 1, skill: (number - 1) % 3 + 1 })
-        : number <= 12 ? t("Master / Skill {skill}", { skill: number - 9 }) : t("Enemy target");
+      let label;
+      if (number <= 9) {
+        const slot = Math.floor((number - 1) / 3) + 1;
+        const skillNum = (number - 1) % 3 + 1;
+        const name = servantSlotName(config, slot);
+        label = name
+          ? `${slot}·${name} / ${t("Skill {index}", { index: skillNum })}`
+          : t("Servant {slot} / Skill {skill}", { slot, skill: skillNum });
+      } else if (number <= 12) {
+        label = t("Master / Skill {skill}", { skill: number - 9 });
+      } else {
+        label = t("Enemy target");
+      }
       skill.append(option(String(number), label));
     }
     for (let number = 10; number <= 12; number += 1) {
@@ -278,7 +298,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
         field.className = "field-stack";
         const heading = document.createElement("span");
         heading.textContent = t(label);
-        field.append(heading, positionSelect(part, label, slots, position));
+        field.append(heading, positionSelect(part, label, slots, position, config));
         target.append(field);
       }
     } else if (value.named === KUKULKAN_SKILL || value.named === "Barghest") {
@@ -296,7 +316,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       label.append(useStars, text);
       target.append(label);
       if (value.named === KUKULKAN_SKILL && kukulkanNeedsTarget(value.skill)) {
-        target.append(positionSelect("target", "Skill target", [1, 2, 3], value.target));
+        target.append(positionSelect("target", "Skill target", [1, 2, 3], value.target, config));
       }
     } else if (value.named) {
       target = document.createElement("div");
@@ -363,7 +383,7 @@ export function createPresetTurnSkillsEditor({ getEditor, source, readTarget, va
       target.setAttribute("aria-label", t(enemy ? "Enemy target" : spell ? "Command spell target" : "Skill target"));
       if (!enemy && !spell) target.append(option("", t("No target")));
       for (let slot = 1; slot <= (enemy ? 6 : 3); slot += 1) {
-        target.append(option(String(slot), t(enemy ? "Enemy {slot}" : "Servant {slot}", { slot })));
+        target.append(option(String(slot), enemy ? t("Enemy {slot}", { slot }) : servantSlotLabel(config, slot)));
       }
       target.value = value.target === null ? "" : String(value.target);
       target.title = target.selectedOptions[0].textContent;

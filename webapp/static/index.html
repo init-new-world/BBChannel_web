@@ -36,6 +36,7 @@
         <aside class="tool-panel">
           <section class="panel-section">
             <div class="section-label">Script</div>
+            <input id="setting-filter" class="field filter-field" type="search" placeholder="Filter scripts..." aria-label="Filter scripts" autocomplete="off">
             <div class="preset-picker">
               <select id="setting-select" class="field" aria-label="Script setting"></select>
               <button id="duplicate-setting" class="icon-button" type="button" title="Duplicate Script" aria-label="Duplicate Script" disabled><img src="/icons/copy.svg" width="16" height="16" alt=""></button>
@@ -69,66 +70,69 @@
             <div id="strategy-summary" class="result-box detail-box">No strategy selected</div>
           </section>
 
-          <section class="panel-section">
-            <div class="section-label">Screenshot</div>
-            <button id="snapshot-button" class="tool-button" type="button">Capture</button>
-            <button id="clear-screenshot" class="ghost-button wide" type="button">Clear</button>
-          </section>
+          <details id="left-debug-tools" class="panel-details">
+            <summary class="panel-details-summary">Device Debug Tools</summary>
+            <section class="panel-section">
+              <div class="section-label">Screenshot</div>
+              <button id="snapshot-button" class="tool-button" type="button">Capture</button>
+              <button id="clear-screenshot" class="ghost-button wide" type="button">Clear</button>
+            </section>
 
-          <section class="panel-section">
-            <div class="section-label">Recognition</div>
-            <select id="template-select" class="field" aria-label="Template"></select>
-            <label class="input-row">
-              <span>Threshold</span>
-              <input id="threshold-input" class="field number-field" type="number" min="0" max="1" step="0.01" value="0.80">
-            </label>
-            <label class="input-row">
-              <span>Scales</span>
-              <input id="recognition-scales" class="field number-field" type="text" inputmode="decimal" value="1.0">
-            </label>
-            <label class="toggle-row">
-              <input id="recognition-roi-enabled" type="checkbox">
-              <span>Limit to ROI</span>
-            </label>
-            <div id="recognition-roi-controls" class="roi-grid" hidden>
-              <label><span>X</span><input id="recognition-roi-x" class="field" type="number" min="0" value="0"></label>
-              <label><span>Y</span><input id="recognition-roi-y" class="field" type="number" min="0" value="0"></label>
-              <label><span>W</span><input id="recognition-roi-width" class="field" type="number" min="1" value="1280"></label>
-              <label><span>H</span><input id="recognition-roi-height" class="field" type="number" min="1" value="720"></label>
-            </div>
-            <button id="match-button" class="tool-button" type="button">Visualize Match</button>
-            <div id="match-result" class="result-box">No match</div>
-          </section>
-
-          <section class="panel-section">
-            <div class="section-label">Tap</div>
-            <div class="coordinate-grid">
-              <label>
-                <span>X</span>
-                <input id="tap-x" class="field" type="number" min="0" value="0">
+            <section class="panel-section">
+              <div class="section-label">Recognition</div>
+              <select id="template-select" class="field" aria-label="Template"></select>
+              <label class="input-row">
+                <span>Threshold</span>
+                <input id="threshold-input" class="field number-field" type="number" min="0" max="1" step="0.01" value="0.80">
               </label>
-              <label>
-                <span>Y</span>
-                <input id="tap-y" class="field" type="number" min="0" value="0">
+              <label class="input-row">
+                <span>Scales</span>
+                <input id="recognition-scales" class="field number-field" type="text" inputmode="decimal" value="1.0">
               </label>
-            </div>
-            <button id="tap-button" class="tool-button" type="button">Tap</button>
-          </section>
+              <label class="toggle-row">
+                <input id="recognition-roi-enabled" type="checkbox">
+                <span>Limit to ROI</span>
+              </label>
+              <div id="recognition-roi-controls" class="roi-grid" hidden>
+                <label><span>X</span><input id="recognition-roi-x" class="field" type="number" min="0" value="0"></label>
+                <label><span>Y</span><input id="recognition-roi-y" class="field" type="number" min="0" value="0"></label>
+                <label><span>W</span><input id="recognition-roi-width" class="field" type="number" min="1" value="1280"></label>
+                <label><span>H</span><input id="recognition-roi-height" class="field" type="number" min="1" value="720"></label>
+              </div>
+              <button id="match-button" class="tool-button" type="button">Visualize Match</button>
+              <div id="match-result" class="result-box">No match</div>
+            </section>
 
-          <section class="panel-section">
-            <div class="section-label">Swipe</div>
-            <div class="coordinate-grid">
-              <label><span>X1</span><input id="swipe-x1" class="field" type="number" min="0" value="0"></label>
-              <label><span>Y1</span><input id="swipe-y1" class="field" type="number" min="0" value="0"></label>
-              <label><span>X2</span><input id="swipe-x2" class="field" type="number" min="0" value="0"></label>
-              <label><span>Y2</span><input id="swipe-y2" class="field" type="number" min="0" value="0"></label>
-            </div>
-            <label class="input-row">
-              <span>Duration</span>
-              <input id="swipe-duration" class="field number-field" type="number" min="0" step="50" value="300">
-            </label>
-            <button id="swipe-button" class="tool-button" type="button">Swipe</button>
-          </section>
+            <section class="panel-section">
+              <div class="section-label">Tap</div>
+              <div class="coordinate-grid">
+                <label>
+                  <span>X</span>
+                  <input id="tap-x" class="field" type="number" min="0" value="0">
+                </label>
+                <label>
+                  <span>Y</span>
+                  <input id="tap-y" class="field" type="number" min="0" value="0">
+                </label>
+              </div>
+              <button id="tap-button" class="tool-button" type="button">Tap</button>
+            </section>
+
+            <section class="panel-section">
+              <div class="section-label">Swipe</div>
+              <div class="coordinate-grid">
+                <label><span>X1</span><input id="swipe-x1" class="field" type="number" min="0" value="0"></label>
+                <label><span>Y1</span><input id="swipe-y1" class="field" type="number" min="0" value="0"></label>
+                <label><span>X2</span><input id="swipe-x2" class="field" type="number" min="0" value="0"></label>
+                <label><span>Y2</span><input id="swipe-y2" class="field" type="number" min="0" value="0"></label>
+              </div>
+              <label class="input-row">
+                <span>Duration</span>
+                <input id="swipe-duration" class="field number-field" type="number" min="0" step="50" value="300">
+              </label>
+              <button id="swipe-button" class="tool-button" type="button">Swipe</button>
+            </section>
+          </details>
         </aside>
 
         <section class="screen-panel">
@@ -153,6 +157,10 @@
                 <input id="auto-refresh-screen" type="checkbox" disabled>
                 <span>Live</span>
               </label>
+              <label class="screen-toggle" title="Automatically refresh the screenshot while a job is running">
+                <input id="auto-follow-job-screen" type="checkbox" checked disabled>
+                <span>Follow job</span>
+              </label>
               <button id="fit-screen" class="ghost-button" type="button">Fit</button>
               <button id="actual-screen" class="ghost-button" type="button">100%</button>
             </div>
@@ -165,444 +173,507 @@
         </section>
 
         <aside class="job-panel">
-          <section class="panel-section">
-            <div class="section-label">Battle Script</div>
-            <div id="battle-script-name" class="job-kind">No script selected</div>
-            <div id="battle-program-status" class="status-line">No program</div>
-            <label class="input-row">
-              <span>Start from</span>
-              <select id="full-run-entry-mode" class="field" aria-label="Battle entry mode">
-                <option value="current">Current screen</option>
-                <option value="free_quest">Free quest</option>
-                <option value="main_story">Main story</option>
-                <option value="ooku">Ooku main story</option>
-                <option value="interlude">Interlude</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Run count</span>
-              <input id="full-run-count" class="field number-field" type="number" min="1" max="10000" step="1" value="1">
-            </label>
-            <label class="input-row">
-              <span>Restart limit</span>
-              <input id="full-run-restart-limit" class="field number-field" type="number" min="0" max="20" step="1" value="3">
-            </label>
-            <label class="input-row">
-              <span>Map swipes</span>
-              <input id="full-run-map-swipes" class="field number-field" type="number" min="0" max="100" step="1" value="15" disabled>
-            </label>
-            <label class="input-row">
-              <span>AP item</span>
-              <select id="full-run-apple" class="field" aria-label="Preferred AP recovery item">
-                <option value="gold">Gold</option>
-                <option value="silver">Silver</option>
-                <option value="blue">Blue</option>
-                <option value="copper">Copper</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Team check</span>
-              <select id="full-run-team-check" class="field" aria-label="Team verification mode">
-                <option value="warn">Warn</option>
-                <option value="strict">Strict</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-            <div class="inline-toggles">
-              <label><input id="full-run-crawl-tower" type="checkbox"><span>Auto formation</span></label>
-            </div>
-            <label class="input-row">
-              <span>Tower mode</span>
-              <select id="full-run-crawl-tower-mode" class="field" aria-label="Crawl tower battle mode" disabled>
-                <option value="script">Script sequence</option>
-                <option value="autonomous">Autonomous skills &amp; NP</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Assist filter</span>
-              <select id="full-run-assist-filter" class="field" aria-label="Assist special filter">
-                <option value="any">Any</option>
-                <option value="arts">Arts</option>
-                <option value="buster">Buster</option>
-                <option value="quick">Quick</option>
-                <option value="u_olga">U-Olga Marie</option>
-                <option value="olga">OlgaMarie Animusphere</option>
-              </select>
-            </label>
-            <button id="start-full-run" class="primary-button wide" type="button">Start Full Run</button>
-            <button id="restart-game" class="ghost-button wide" type="button">Restart &amp; Recover</button>
-            <div class="panel-divider"></div>
-            <label class="input-row">
-              <span>Action delay</span>
-              <input id="battle-action-delay" class="field number-field" type="number" min="0" max="10" step="0.05" value="0">
-            </label>
-            <button id="start-battle-dry-run" class="ghost-button wide" type="button">Dry Run Script</button>
-            <button id="start-battle-plan" class="ghost-button wide" type="button">Execute Battle</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">Valentine Event</div>
-            <div class="inline-toggles" role="group" aria-label="Valentine exchange tabs">
-              <label><input id="chocolate-female" type="checkbox" checked><span>Female</span></label>
-              <label><input id="chocolate-male" type="checkbox" checked><span>Male</span></label>
-              <label><input id="chocolate-batch-10" type="checkbox"><span>10x batch</span></label>
-            </div>
-            <button id="inspect-chocolate" class="ghost-button wide" type="button">Inspect State</button>
-            <button id="capture-chocolate-banner" class="ghost-button wide" type="button">Capture Banner</button>
-            <button id="run-chocolate" class="primary-button wide" type="button">Run Auto Exchange</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">Excavation Board</div>
-            <button id="inspect-digdig" class="ghost-button wide" type="button">Inspect Dig Board</button>
-            <button id="inspect-digdig-grid" class="ghost-button wide" type="button">Inspect Dig Grid</button>
-            <label class="toggle-row">
-              <input id="digdig-one-key" type="checkbox" checked>
-              <span>One-key free dig</span>
-            </label>
-            <label class="toggle-row">
-              <input id="digdig-reset-board" type="checkbox" checked>
-              <span>Reset board when done</span>
-            </label>
-            <label class="input-row">
-              <span>Target pieces</span>
-              <input id="digdig-target-pieces" class="field" type="text" placeholder="e.g. ash, bone, gear" autocomplete="off">
-            </label>
-            <label class="input-row">
-              <span>Target extras</span>
-              <input id="digdig-target-extras" class="field" type="text" placeholder="e.g. hx, jlg, zsds" autocomplete="off">
-            </label>
-            <label class="input-row">
-              <span>Dig cycles</span>
-              <input id="digdig-max-cycles" class="field number-field" type="number" min="1" max="200" step="1" value="10">
-            </label>
-            <button id="execute-digdig" class="ghost-button wide" type="button">Execute Selection</button>
-            <button id="run-digdig" class="primary-button wide" type="button">Run Auto Dig</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">Unlimited Lottery</div>
-            <label class="toggle-row">
-              <input id="lottery-draw-pool" type="checkbox" checked>
-              <span>Draw pool</span>
-            </label>
-            <label class="toggle-row">
-              <input id="lottery-tidy-giftbox" type="checkbox" checked>
-              <span>Tidy giftbox</span>
-            </label>
-            <label class="toggle-row">
-              <input id="lottery-long-touch-draw" type="checkbox">
-              <span>Long-touch draw</span>
-            </label>
-            <label class="input-row">
-              <span>Reward slot</span>
-              <select id="lottery-pay-slot" class="field" aria-label="Lottery reward slot">
-                <option value="0">Reward 1</option>
-                <option value="1">Reward 2</option>
-                <option value="2">Reward 3</option>
-              </select>
-            </label>
-            <div class="inline-toggles" role="group" aria-label="One-key gift box EXP rarity">
-              <label><input id="lottery-onekey-3" type="checkbox"><span>1-key 3★</span></label>
-              <label><input id="lottery-onekey-4" type="checkbox"><span>1-key 4★</span></label>
-              <label><input id="lottery-onekey-5" type="checkbox"><span>1-key 5★</span></label>
-            </div>
-            <div class="inline-toggles" role="group" aria-label="Gift box EXP rarity">
-              <label><input id="lottery-star-3" type="checkbox" checked><span>3 star</span></label>
-              <label><input id="lottery-star-4" type="checkbox" checked><span>4 star</span></label>
-              <label><input id="lottery-star-5" type="checkbox" checked><span>5 star</span></label>
-            </div>
-            <label class="input-row">
-              <span>Keep 3★ ≤</span>
-              <input id="lottery-keep-3" class="field number-field" type="number" min="0" max="99" step="1" value="0">
-            </label>
-            <label class="input-row">
-              <span>Keep 4★ ≤</span>
-              <input id="lottery-keep-4" class="field number-field" type="number" min="0" max="99" step="1" value="0">
-            </label>
-            <label class="input-row">
-              <span>Keep 5★ ≤</span>
-              <input id="lottery-keep-5" class="field number-field" type="number" min="0" max="99" step="1" value="0">
-            </label>
-            <label class="toggle-row">
-              <input id="lottery-first-round-count" type="checkbox">
-              <span>First round full count</span>
-            </label>
-            <label class="input-row">
-              <span>Full box</span>
-              <select id="lottery-overflow-action" class="field" aria-label="Lottery inventory overflow action">
-                <option value="stop">Stop</option>
-                <option value="storage">Storage</option>
-                <option value="sell">Sell</option>
-                <option value="storage_then_sell">Store then sell</option>
-                <option value="servant_enhancement">Servant enhance</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Overflow stages</span>
-              <input id="lottery-overflow-actions" class="field" type="text" placeholder="e.g. storage, sell, servant_enhancement" autocomplete="off">
-            </label>
-            <button id="inspect-lottery" class="ghost-button wide" type="button">Inspect Lottery</button>
-            <button id="inspect-lottery-stacks" class="ghost-button wide" type="button">Inspect Giftbox Stacks</button>
-            <button id="run-lottery" class="primary-button wide" type="button">Run Lottery Cycle</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">EXP Materials</div>
-            <button id="inspect-expball" class="ghost-button wide" type="button">Inspect EXP Flow</button>
-            <label class="input-row">
-              <span>Destination</span>
-              <select id="expball-destination" class="field" aria-label="EXP workflow destination">
-                <option value="summon">Summon</option>
-                <option value="sell">Sell</option>
-                <option value="storage">Storage</option>
-                <option value="servant_enhancement">Servant enhance</option>
-                <option value="equipment_enhancement">CE enhance</option>
-              </select>
-            </label>
-            <button id="navigate-expball" class="ghost-button wide" type="button">Navigate</button>
-            <button id="inspect-expball-grid" class="ghost-button wide" type="button">Inspect Storage Grid</button>
-            <button id="inspect-expball-servant-grid" class="ghost-button wide" type="button">Inspect Servant Grid</button>
-            <button id="inspect-expball-cc-grid" class="ghost-button wide" type="button">Inspect Command Code Grid</button>
-            <button id="inspect-expball-ce-bomb-grid" class="ghost-button wide" type="button">Inspect CE Bomb Grid</button>
-            <div class="inline-toggles" role="group" aria-label="EXP card rarity">
-              <label><input id="expball-star-3" type="checkbox" checked><span>3 star</span></label>
-              <label><input id="expball-star-4" type="checkbox" checked><span>4 star</span></label>
-              <label><input id="expball-star-5" type="checkbox"><span>5 star</span></label>
-            </div>
-            <label class="input-row">
-              <span>Store target</span>
-              <select id="expball-storage-target" class="field" aria-label="Storage target">
-                <option value="exp">EXP cards</option>
-                <option value="ce_bomb">CE bombs</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Sell target</span>
-              <select id="expball-sell-target" class="field" aria-label="Sell target">
-                <option value="exp">EXP cards</option>
-                <option value="servant">Servants</option>
-                <option value="command_code">Command codes</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Full box</span>
-              <select id="expball-overflow-action" class="field" aria-label="EXP inventory overflow action">
-                <option value="stop">Stop</option>
-                <option value="storage">Storage</option>
-                <option value="sell">Sell</option>
-                <option value="storage_then_sell">Store then sell</option>
-                <option value="servant_enhancement">Servant enhance</option>
-                <option value="equipment_enhancement">CE enhance</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Overflow stages</span>
-              <input id="expball-overflow-actions" class="field" type="text" placeholder="e.g. storage, sell, equipment_enhancement" autocomplete="off">
-            </label>
-            <label class="input-row">
-              <span>Enhance</span>
-              <select id="expball-enhance-target" class="field" aria-label="Enhancement target">
-                <option value="equipment">CE enhance</option>
-                <option value="servant">Servant enhance</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Select mode</span>
-              <select id="expball-material-select-mode" class="field" aria-label="Enhancement material selection mode">
-                <option value="auto">Auto</option>
-                <option value="grid">Grid</option>
-              </select>
-            </label>
-            <label class="input-row">
-              <span>Servant target</span>
-              <input id="expball-servant-target" class="field" type="text" placeholder="e.g. BB(SSR)_1" autocomplete="off">
-            </label>
-            <label class="input-row">
-              <span>Target Lv.</span>
-              <input id="expball-target-level" class="field number-field" type="number" min="1" max="120" step="1" value="100">
-            </label>
-            <label class="input-row">
-              <span>Enhance batches</span>
-              <input id="expball-max-batches" class="field number-field" type="number" min="1" max="100" step="1" value="5">
-            </label>
-            <label class="toggle-row">
-              <input id="expball-auto-limit-break" type="checkbox" checked>
-              <span>Auto limit break</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-ce-bombs" type="checkbox" checked>
-              <span>Lock/mark full CEs</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-auto-store-ce-bombs" type="checkbox">
-              <span>Auto-store full CEs</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-eat-3star" type="checkbox">
-              <span>Eat 3★ CEs</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-eat-4star" type="checkbox">
-              <span>Eat 4★ CEs</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-gold-servants" type="checkbox" checked>
-              <span>Lock gold servants</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-inscribed-cc" type="checkbox" checked>
-              <span>Lock inscribed CCs</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-allow-qp-full" type="checkbox">
-              <span>Allow QP overflow</span>
-            </label>
-            <button id="inspect-expball-servant-target" class="ghost-button wide" type="button">Inspect Servant Target</button>
-            <button id="inspect-expball-servant-level" class="ghost-button wide" type="button">Inspect Servant Level</button>
-            <button id="run-expball-enhance" class="ghost-button wide" type="button">Run Enhancement</button>
-            <label class="input-row">
-              <span>FP batches</span>
-              <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">
-            </label>
-            <label class="input-row">
-              <span>Banner dir.</span>
-              <select id="expball-banner-direction" class="field" aria-label="FP banner search direction">
-                <option value="right">Right</option>
-                <option value="left">Left</option>
-              </select>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-draw-100" type="checkbox">
-              <span>100-roll summon</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-lily" type="checkbox">
-              <span>Lock Saber Lily</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-habe" type="checkbox">
-              <span>Lock Habetrot</span>
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-hakuno" type="checkbox">
-              <span>Lock Hakuno</span>
-            </label>
-            <label class="input-row">
-              <span>Lock targets</span>
-              <input id="expball-lock-targets" class="field" type="text" placeholder="e.g. 1.png:5, Servant004" autocomplete="off">
-            </label>
-            <label class="toggle-row">
-              <input id="expball-lock-enough-stop" type="checkbox">
-              <span>Stop when lock targets met</span>
-            </label>
-            <button id="inspect-expball-summon-locks" class="ghost-button wide" type="button">Inspect FP Lock Targets</button>
-            <button id="run-expball-summon" class="primary-button wide" type="button">Run FP Cycle</button>
-            <button id="run-expball-storage" class="ghost-button wide" type="button">Store Current Selection</button>
-            <button id="run-expball-sell" class="danger-button wide" type="button">Sell Current Selection</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">Assist Equip Templates</div>
-            <label class="field-stack">
-              <span>Name</span>
-              <input id="equip-template-name" class="field" type="text" maxlength="100" autocomplete="off">
-            </label>
-            <button id="capture-equip-candidates" class="ghost-button wide" type="button">Extract Candidates</button>
-            <select id="equip-candidate-list" class="field" aria-label="Extracted equip candidate"></select>
-            <div class="equip-template-preview-frame">
-              <img id="equip-candidate-preview" alt="Extracted assist row candidate" hidden>
-              <span id="equip-candidate-preview-status" class="equip-template-preview-status">No candidates</span>
-            </div>
-            <div class="equip-template-actions">
-              <button id="use-equip-full" class="ghost-button" type="button">Set Full</button>
-              <button id="use-equip-non-full" class="ghost-button" type="button">Set Non-full</button>
-            </div>
-            <div class="equip-template-files">
-              <label class="field-stack file-field">
-                <span>Limit broken</span>
-                <input id="equip-full-image" class="field" type="file" accept="image/*">
-              </label>
-              <label class="field-stack file-field">
-                <span>Not limit broken</span>
-                <input id="equip-non-full-image" class="field" type="file" accept="image/*">
-              </label>
-            </div>
-            <div class="equip-input-state">
-              <span id="equip-full-source">Full: not set</span>
-              <span id="equip-non-full-source">Non-full: not set</span>
-            </div>
-            <button id="build-equip-template" class="primary-button wide" type="button">Build Template</button>
-            <select id="equip-template-list" class="field" aria-label="Assist equip template"></select>
-            <div class="equip-template-preview-frame">
-              <img id="equip-template-preview" alt="Selected assist equip template" hidden>
-              <span id="equip-template-preview-status" class="equip-template-preview-status">No templates</span>
-            </div>
-            <button id="test-equip-template" class="ghost-button wide" type="button">Test Recognition</button>
-            <div id="equip-test-status" class="equip-test-status" aria-live="polite">Not tested</div>
-            <div class="equip-template-actions">
-              <button id="activate-equip-template" class="ghost-button" type="button">Activate</button>
-              <button id="archive-equip-template" class="ghost-button" type="button">Archive</button>
-            </div>
-            <div class="panel-divider"></div>
-            <div class="section-label">Custom Tags</div>
-            <button id="open-assist-tags" class="ghost-button wide" type="button">Open Tag Maker</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">Material Drops</div>
-            <button id="open-material-drops" class="ghost-button wide" type="button">Open Drop Query</button>
-            <button id="open-notebook" class="ghost-button wide" type="button">Open Notebook</button>
-            <div class="panel-divider"></div>
-            <div class="section-label">Diagnostic Job</div>
-            <label class="field-stack">
-              <span>Verify after tap</span>
-              <select id="diagnostic-verify-template" class="field" aria-label="Verification template"></select>
-            </label>
-            <label class="input-row">
-              <span>Timeout</span>
-              <input id="diagnostic-timeout" class="field number-field" type="number" min="0.1" max="300" step="0.5" value="10">
-            </label>
-            <label class="toggle-row">
-              <input id="diagnostic-tap" type="checkbox" checked>
-              <span>Tap matched center</span>
-            </label>
-            <button id="start-diagnostic" class="primary-button wide" type="button">Start Diagnostic</button>
-          </section>
-
           <section class="panel-section job-state-section">
             <div class="job-state-header">
               <div class="section-label">Current Job</div>
               <span id="job-status" class="job-status idle">Idle</span>
             </div>
-            <select id="job-history" class="field" aria-label="Job history"></select>
-            <div id="job-kind" class="job-kind">No job selected</div>
+            <div id="job-live-summary" class="job-live-summary" hidden></div>
             <progress id="job-progress" class="job-progress" max="1"></progress>
-            <div id="job-step" class="job-step">Waiting</div>
+            <div class="job-step-line">
+              <span id="job-kind" class="job-kind">No job selected</span>
+              <span id="job-step" class="job-step">Waiting</span>
+            </div>
             <div id="job-result" class="result-box job-result" hidden></div>
+            <div id="job-error" class="job-error" hidden></div>
             <div class="job-actions">
               <button id="pause-job" class="ghost-button" type="button">Pause</button>
               <button id="resume-job" class="ghost-button" type="button">Resume</button>
               <button id="cancel-job" class="danger-button" type="button">Stop</button>
             </div>
-            <div class="audio-alert-row">
-              <label class="toggle-row" title="Pause before each tap or swipe and save annotated screenshot + log">
-                <input id="debug-step-mode" type="checkbox">
-                <span>Step debug</span>
-              </label>
+            <details class="job-alerts-details">
+              <summary>History, Alerts &amp; Debug</summary>
+              <div class="job-alerts-body">
+                <select id="job-history" class="field" aria-label="Job history"></select>
+                <div class="audio-alert-row">
+                  <label class="toggle-row" title="Pause before each tap or swipe and save annotated screenshot + log">
+                    <input id="debug-step-mode" type="checkbox">
+                    <span>Step debug</span>
+                  </label>
+                </div>
+                <div class="audio-alert-row">
+                  <label class="toggle-row" title="Play sound notification when a job finishes or stops">
+                    <input id="audio-alert-enabled" type="checkbox">
+                    <span>Completion alert</span>
+                  </label>
+                  <button id="test-audio-alert" class="ghost-button" type="button" title="Play completion sound preview">Test</button>
+                </div>
+                <div class="audio-alert-controls">
+                  <select id="audio-alert-tone" class="field" aria-label="Completion sound tone">
+                    <option value="chime">Chime</option>
+                    <option value="bell">Bell</option>
+                    <option value="beep">Soft beep</option>
+                    <option value="custom">Custom audio</option>
+                  </select>
+                  <button id="choose-audio-alert" class="ghost-button" type="button" title="Select custom audio file">Audio file</button>
+                  <input id="audio-alert-file" type="file" accept="audio/*" hidden>
+                </div>
+                <div id="audio-alert-file-name" class="status-line" hidden></div>
+              </div>
+            </details>
+          </section>
+
+          <section class="job-tabs-shell">
+            <div class="segmented-control job-panel-tabs" role="tablist" aria-label="Control panels">
+              <button class="segment active" type="button" role="tab" aria-selected="true" data-job-tab="battle">Battle</button>
+              <button class="segment" type="button" role="tab" aria-selected="false" data-job-tab="events">Events</button>
+              <button class="segment" type="button" role="tab" aria-selected="false" data-job-tab="tools">Tools</button>
             </div>
-            <div class="audio-alert-row">
-              <label class="toggle-row" title="Play sound notification when a job finishes or stops">
-                <input id="audio-alert-enabled" type="checkbox">
-                <span>Completion alert</span>
-              </label>
-              <button id="test-audio-alert" class="ghost-button" type="button" title="Play completion sound preview">Test</button>
+
+            <div class="job-tab-scroll">
+              <div class="panel-section job-tab-panel" data-job-tab-panel="battle">
+                <div class="section-label">Battle Script</div>
+                <div id="battle-script-name" class="job-kind">No script selected</div>
+                <div id="battle-program-status" class="status-line">No program</div>
+                <label class="input-row">
+                  <span>Run count</span>
+                  <input id="full-run-count" class="field number-field" type="number" min="1" max="10000" step="1" value="1">
+                </label>
+                <div class="quick-runs-bar" role="group" aria-label="Quick run counts">
+                  <button class="chip-button" type="button" data-quick-runs="1">1</button>
+                  <button class="chip-button" type="button" data-quick-runs="3">3</button>
+                  <button class="chip-button" type="button" data-quick-runs="5">5</button>
+                  <button class="chip-button" type="button" data-quick-runs="9">9</button>
+                  <button class="chip-button" type="button" data-quick-runs="20">20</button>
+                </div>
+                <label class="input-row">
+                  <span>AP item</span>
+                  <select id="full-run-apple" class="field" aria-label="Preferred AP recovery item">
+                    <option value="gold">Gold</option>
+                    <option value="silver">Silver</option>
+                    <option value="blue">Blue</option>
+                    <option value="copper">Copper</option>
+                  </select>
+                </label>
+                <label class="input-row">
+                  <span>Clear AP</span>
+                  <select id="full-run-clear-ap" class="field" aria-label="Clear remaining AP override">
+                    <option value="preset">Preset default</option>
+                    <option value="false">Exact runs only</option>
+                    <option value="true">Clear remaining AP</option>
+                  </select>
+                </label>
+                <label class="input-row">
+                  <span>Start from</span>
+                  <select id="full-run-entry-mode" class="field" aria-label="Battle entry mode">
+                    <option value="current">Current screen</option>
+                    <option value="free_quest">Free quest</option>
+                    <option value="main_story">Main story</option>
+                    <option value="ooku">Ooku main story</option>
+                    <option value="interlude">Interlude</option>
+                  </select>
+                </label>
+                <button id="start-full-run" class="primary-button wide" type="button">Start Full Run</button>
+                <div class="panel-divider"></div>
+                <label class="input-row">
+                  <span>Team check</span>
+                  <select id="full-run-team-check" class="field" aria-label="Team verification mode">
+                    <option value="warn">Warn</option>
+                    <option value="strict">Strict</option>
+                    <option value="off">Off</option>
+                  </select>
+                </label>
+                <label class="input-row">
+                  <span>Assist filter</span>
+                  <select id="full-run-assist-filter" class="field" aria-label="Assist special filter">
+                    <option value="any">Any</option>
+                    <option value="arts">Arts</option>
+                    <option value="buster">Buster</option>
+                    <option value="quick">Quick</option>
+                    <option value="u_olga">U-Olga Marie</option>
+                    <option value="olga">OlgaMarie Animusphere</option>
+                  </select>
+                </label>
+                <label class="input-row">
+                  <span>Restart limit</span>
+                  <input id="full-run-restart-limit" class="field number-field" type="number" min="0" max="20" step="1" value="3">
+                </label>
+                <label class="input-row">
+                  <span>Map swipes</span>
+                  <input id="full-run-map-swipes" class="field number-field" type="number" min="0" max="100" step="1" value="15" disabled>
+                </label>
+                <details id="battle-advanced-options" class="sub-details">
+                  <summary>Advanced &amp; Manual Battle</summary>
+                  <div class="sub-details-body">
+                    <div class="inline-toggles">
+                      <label><input id="full-run-crawl-tower" type="checkbox"><span>Auto formation</span></label>
+                    </div>
+                    <label class="input-row">
+                      <span>Tower mode</span>
+                      <select id="full-run-crawl-tower-mode" class="field" aria-label="Crawl tower battle mode" disabled>
+                        <option value="script">Script sequence</option>
+                        <option value="autonomous">Autonomous skills &amp; NP</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Action delay</span>
+                      <input id="battle-action-delay" class="field number-field" type="number" min="0" max="10" step="0.05" value="0">
+                    </label>
+                    <button id="restart-game" class="ghost-button wide" type="button">Restart &amp; Recover</button>
+                    <button id="start-battle-dry-run" class="ghost-button wide" type="button">Dry Run Script</button>
+                    <button id="start-battle-plan" class="ghost-button wide" type="button">Execute Battle</button>
+                  </div>
+                </details>
+                <div class="panel-divider"></div>
+                <div class="section-label">Quick Utilities</div>
+                <div class="quick-utility-actions">
+                  <button id="open-assist-tags" class="ghost-button wide" type="button">Open Tag Maker</button>
+                  <button id="open-material-drops" class="ghost-button wide" type="button">Open Drop Query</button>
+                  <button id="open-notebook" class="ghost-button wide" type="button">Open Notebook</button>
+                </div>
+              </div>
+
+              <div class="panel-section job-tab-panel" data-job-tab-panel="events" hidden>
+                <details class="sub-details" open>
+                  <summary>Unlimited Lottery</summary>
+                  <div class="sub-details-body">
+                    <label class="toggle-row">
+                      <input id="lottery-draw-pool" type="checkbox" checked>
+                      <span>Draw pool</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="lottery-tidy-giftbox" type="checkbox" checked>
+                      <span>Tidy giftbox</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="lottery-long-touch-draw" type="checkbox">
+                      <span>Long-touch draw</span>
+                    </label>
+                    <label class="input-row">
+                      <span>Reward slot</span>
+                      <select id="lottery-pay-slot" class="field" aria-label="Lottery reward slot">
+                        <option value="0">Reward 1</option>
+                        <option value="1">Reward 2</option>
+                        <option value="2">Reward 3</option>
+                      </select>
+                    </label>
+                    <div class="inline-toggles" role="group" aria-label="One-key gift box EXP rarity">
+                      <label><input id="lottery-onekey-3" type="checkbox"><span>1-key 3★</span></label>
+                      <label><input id="lottery-onekey-4" type="checkbox"><span>1-key 4★</span></label>
+                      <label><input id="lottery-onekey-5" type="checkbox"><span>1-key 5★</span></label>
+                    </div>
+                    <div class="inline-toggles" role="group" aria-label="Gift box EXP rarity">
+                      <label><input id="lottery-star-3" type="checkbox" checked><span>3 star</span></label>
+                      <label><input id="lottery-star-4" type="checkbox" checked><span>4 star</span></label>
+                      <label><input id="lottery-star-5" type="checkbox" checked><span>5 star</span></label>
+                    </div>
+                    <label class="input-row">
+                      <span>Keep 3★ ≤</span>
+                      <input id="lottery-keep-3" class="field number-field" type="number" min="0" max="99" step="1" value="0">
+                    </label>
+                    <label class="input-row">
+                      <span>Keep 4★ ≤</span>
+                      <input id="lottery-keep-4" class="field number-field" type="number" min="0" max="99" step="1" value="0">
+                    </label>
+                    <label class="input-row">
+                      <span>Keep 5★ ≤</span>
+                      <input id="lottery-keep-5" class="field number-field" type="number" min="0" max="99" step="1" value="0">
+                    </label>
+                    <label class="toggle-row">
+                      <input id="lottery-first-round-count" type="checkbox">
+                      <span>First round full count</span>
+                    </label>
+                    <label class="input-row">
+                      <span>Full box</span>
+                      <select id="lottery-overflow-action" class="field" aria-label="Lottery inventory overflow action">
+                        <option value="stop">Stop</option>
+                        <option value="storage">Storage</option>
+                        <option value="sell">Sell</option>
+                        <option value="storage_then_sell">Store then sell</option>
+                        <option value="servant_enhancement">Servant enhance</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Overflow stages</span>
+                      <input id="lottery-overflow-actions" class="field" type="text" placeholder="e.g. storage, sell, servant_enhancement" autocomplete="off">
+                    </label>
+                    <button id="inspect-lottery" class="ghost-button wide" type="button">Inspect Lottery</button>
+                    <button id="inspect-lottery-stacks" class="ghost-button wide" type="button">Inspect Giftbox Stacks</button>
+                    <button id="run-lottery" class="primary-button wide" type="button">Run Lottery Cycle</button>
+                  </div>
+                </details>
+
+                <details class="sub-details">
+                  <summary>EXP Materials</summary>
+                  <div class="sub-details-body">
+                    <button id="inspect-expball" class="ghost-button wide" type="button">Inspect EXP Flow</button>
+                    <label class="input-row">
+                      <span>Destination</span>
+                      <select id="expball-destination" class="field" aria-label="EXP workflow destination">
+                        <option value="summon">Summon</option>
+                        <option value="sell">Sell</option>
+                        <option value="storage">Storage</option>
+                        <option value="servant_enhancement">Servant enhance</option>
+                        <option value="equipment_enhancement">CE enhance</option>
+                      </select>
+                    </label>
+                    <button id="navigate-expball" class="ghost-button wide" type="button">Navigate</button>
+                    <button id="inspect-expball-grid" class="ghost-button wide" type="button">Inspect Storage Grid</button>
+                    <button id="inspect-expball-servant-grid" class="ghost-button wide" type="button">Inspect Servant Grid</button>
+                    <button id="inspect-expball-cc-grid" class="ghost-button wide" type="button">Inspect Command Code Grid</button>
+                    <button id="inspect-expball-ce-bomb-grid" class="ghost-button wide" type="button">Inspect CE Bomb Grid</button>
+                    <div class="inline-toggles" role="group" aria-label="EXP card rarity">
+                      <label><input id="expball-star-3" type="checkbox" checked><span>3 star</span></label>
+                      <label><input id="expball-star-4" type="checkbox" checked><span>4 star</span></label>
+                      <label><input id="expball-star-5" type="checkbox"><span>5 star</span></label>
+                    </div>
+                    <label class="input-row">
+                      <span>Store target</span>
+                      <select id="expball-storage-target" class="field" aria-label="Storage target">
+                        <option value="exp">EXP cards</option>
+                        <option value="ce_bomb">CE bombs</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Sell target</span>
+                      <select id="expball-sell-target" class="field" aria-label="Sell target">
+                        <option value="exp">EXP cards</option>
+                        <option value="servant">Servants</option>
+                        <option value="command_code">Command codes</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Full box</span>
+                      <select id="expball-overflow-action" class="field" aria-label="EXP inventory overflow action">
+                        <option value="stop">Stop</option>
+                        <option value="storage">Storage</option>
+                        <option value="sell">Sell</option>
+                        <option value="storage_then_sell">Store then sell</option>
+                        <option value="servant_enhancement">Servant enhance</option>
+                        <option value="equipment_enhancement">CE enhance</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Overflow stages</span>
+                      <input id="expball-overflow-actions" class="field" type="text" placeholder="e.g. storage, sell, equipment_enhancement" autocomplete="off">
+                    </label>
+                    <label class="input-row">
+                      <span>Enhance</span>
+                      <select id="expball-enhance-target" class="field" aria-label="Enhancement target">
+                        <option value="equipment">CE enhance</option>
+                        <option value="servant">Servant enhance</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Select mode</span>
+                      <select id="expball-material-select-mode" class="field" aria-label="Enhancement material selection mode">
+                        <option value="auto">Auto</option>
+                        <option value="grid">Grid</option>
+                      </select>
+                    </label>
+                    <label class="input-row">
+                      <span>Servant target</span>
+                      <input id="expball-servant-target" class="field" type="text" placeholder="e.g. BB(SSR)_1" autocomplete="off">
+                    </label>
+                    <label class="input-row">
+                      <span>Target Lv.</span>
+                      <input id="expball-target-level" class="field number-field" type="number" min="1" max="120" step="1" value="100">
+                    </label>
+                    <label class="input-row">
+                      <span>Enhance batches</span>
+                      <input id="expball-max-batches" class="field number-field" type="number" min="1" max="100" step="1" value="5">
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-auto-limit-break" type="checkbox" checked>
+                      <span>Auto limit break</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-ce-bombs" type="checkbox" checked>
+                      <span>Lock/mark full CEs</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-auto-store-ce-bombs" type="checkbox">
+                      <span>Auto-store full CEs</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-eat-3star" type="checkbox">
+                      <span>Eat 3★ CEs</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-eat-4star" type="checkbox">
+                      <span>Eat 4★ CEs</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-gold-servants" type="checkbox" checked>
+                      <span>Lock gold servants</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-inscribed-cc" type="checkbox" checked>
+                      <span>Lock inscribed CCs</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-allow-qp-full" type="checkbox">
+                      <span>Allow QP overflow</span>
+                    </label>
+                    <button id="inspect-expball-servant-target" class="ghost-button wide" type="button">Inspect Servant Target</button>
+                    <button id="inspect-expball-servant-level" class="ghost-button wide" type="button">Inspect Servant Level</button>
+                    <button id="run-expball-enhance" class="ghost-button wide" type="button">Run Enhancement</button>
+                    <label class="input-row">
+                      <span>FP batches</span>
+                      <input id="fp-summon-batches" class="field number-field" type="number" min="1" max="100" step="1" value="10">
+                    </label>
+                    <label class="input-row">
+                      <span>Banner dir.</span>
+                      <select id="expball-banner-direction" class="field" aria-label="FP banner search direction">
+                        <option value="right">Right</option>
+                        <option value="left">Left</option>
+                      </select>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-draw-100" type="checkbox">
+                      <span>100-roll summon</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-lily" type="checkbox">
+                      <span>Lock Saber Lily</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-habe" type="checkbox">
+                      <span>Lock Habetrot</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-hakuno" type="checkbox">
+                      <span>Lock Hakuno</span>
+                    </label>
+                    <label class="input-row">
+                      <span>Lock targets</span>
+                      <input id="expball-lock-targets" class="field" type="text" placeholder="e.g. 1.png:5, Servant004" autocomplete="off">
+                    </label>
+                    <label class="toggle-row">
+                      <input id="expball-lock-enough-stop" type="checkbox">
+                      <span>Stop when lock targets met</span>
+                    </label>
+                    <button id="inspect-expball-summon-locks" class="ghost-button wide" type="button">Inspect FP Lock Targets</button>
+                    <button id="run-expball-summon" class="primary-button wide" type="button">Run FP Cycle</button>
+                    <button id="run-expball-storage" class="ghost-button wide" type="button">Store Current Selection</button>
+                    <button id="run-expball-sell" class="danger-button wide" type="button">Sell Current Selection</button>
+                  </div>
+                </details>
+
+                <details class="sub-details">
+                  <summary>Excavation Board</summary>
+                  <div class="sub-details-body">
+                    <button id="inspect-digdig" class="ghost-button wide" type="button">Inspect Dig Board</button>
+                    <button id="inspect-digdig-grid" class="ghost-button wide" type="button">Inspect Dig Grid</button>
+                    <label class="toggle-row">
+                      <input id="digdig-one-key" type="checkbox" checked>
+                      <span>One-key free dig</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="digdig-reset-board" type="checkbox" checked>
+                      <span>Reset board when done</span>
+                    </label>
+                    <label class="input-row">
+                      <span>Target pieces</span>
+                      <input id="digdig-target-pieces" class="field" type="text" placeholder="e.g. ash, bone, gear" autocomplete="off">
+                    </label>
+                    <label class="input-row">
+                      <span>Target extras</span>
+                      <input id="digdig-target-extras" class="field" type="text" placeholder="e.g. hx, jlg, zsds" autocomplete="off">
+                    </label>
+                    <label class="input-row">
+                      <span>Dig cycles</span>
+                      <input id="digdig-max-cycles" class="field number-field" type="number" min="1" max="200" step="1" value="10">
+                    </label>
+                    <button id="execute-digdig" class="ghost-button wide" type="button">Execute Selection</button>
+                    <button id="run-digdig" class="primary-button wide" type="button">Run Auto Dig</button>
+                  </div>
+                </details>
+
+                <details class="sub-details">
+                  <summary>Valentine Event</summary>
+                  <div class="sub-details-body">
+                    <div class="inline-toggles" role="group" aria-label="Valentine exchange tabs">
+                      <label><input id="chocolate-female" type="checkbox" checked><span>Female</span></label>
+                      <label><input id="chocolate-male" type="checkbox" checked><span>Male</span></label>
+                      <label><input id="chocolate-batch-10" type="checkbox"><span>10x batch</span></label>
+                    </div>
+                    <button id="inspect-chocolate" class="ghost-button wide" type="button">Inspect State</button>
+                    <button id="capture-chocolate-banner" class="ghost-button wide" type="button">Capture Banner</button>
+                    <button id="run-chocolate" class="primary-button wide" type="button">Run Auto Exchange</button>
+                  </div>
+                </details>
+              </div>
+
+              <div class="panel-section job-tab-panel" data-job-tab-panel="tools" hidden>
+                <div class="section-label">Assist Equip Templates</div>
+                <label class="field-stack">
+                  <span>Name</span>
+                  <input id="equip-template-name" class="field" type="text" maxlength="100" autocomplete="off">
+                </label>
+                <button id="capture-equip-candidates" class="ghost-button wide" type="button">Extract Candidates</button>
+                <select id="equip-candidate-list" class="field" aria-label="Extracted equip candidate"></select>
+                <div class="equip-template-preview-frame">
+                  <img id="equip-candidate-preview" alt="Extracted assist row candidate" hidden>
+                  <span id="equip-candidate-preview-status" class="equip-template-preview-status">No candidates</span>
+                </div>
+                <div class="equip-template-actions">
+                  <button id="use-equip-full" class="ghost-button" type="button">Set Full</button>
+                  <button id="use-equip-non-full" class="ghost-button" type="button">Set Non-full</button>
+                </div>
+                <div class="equip-template-files">
+                  <label class="field-stack file-field">
+                    <span>Limit broken</span>
+                    <input id="equip-full-image" class="field" type="file" accept="image/*">
+                  </label>
+                  <label class="field-stack file-field">
+                    <span>Not limit broken</span>
+                    <input id="equip-non-full-image" class="field" type="file" accept="image/*">
+                  </label>
+                </div>
+                <div class="equip-input-state">
+                  <span id="equip-full-source">Full: not set</span>
+                  <span id="equip-non-full-source">Non-full: not set</span>
+                </div>
+                <button id="build-equip-template" class="primary-button wide" type="button">Build Template</button>
+                <select id="equip-template-list" class="field" aria-label="Assist equip template"></select>
+                <div class="equip-template-preview-frame">
+                  <img id="equip-template-preview" alt="Selected assist equip template" hidden>
+                  <span id="equip-template-preview-status" class="equip-template-preview-status">No templates</span>
+                </div>
+                <button id="test-equip-template" class="ghost-button wide" type="button">Test Recognition</button>
+                <div id="equip-test-status" class="equip-test-status" aria-live="polite">Not tested</div>
+                <div class="equip-template-actions">
+                  <button id="activate-equip-template" class="ghost-button" type="button">Activate</button>
+                  <button id="archive-equip-template" class="ghost-button" type="button">Archive</button>
+                </div>
+                <div class="panel-divider"></div>
+                <div class="section-label">Diagnostic Job</div>
+                <label class="field-stack">
+                  <span>Verify after tap</span>
+                  <select id="diagnostic-verify-template" class="field" aria-label="Verification template"></select>
+                </label>
+                <label class="input-row">
+                  <span>Timeout</span>
+                  <input id="diagnostic-timeout" class="field number-field" type="number" min="0.1" max="300" step="0.5" value="10">
+                </label>
+                <label class="toggle-row">
+                  <input id="diagnostic-tap" type="checkbox" checked>
+                  <span>Tap matched center</span>
+                </label>
+                <button id="start-diagnostic" class="primary-button wide" type="button">Start Diagnostic</button>
+              </div>
             </div>
-            <div class="audio-alert-controls">
-              <select id="audio-alert-tone" class="field" aria-label="Completion sound tone">
-                <option value="chime">Chime</option>
-                <option value="bell">Bell</option>
-                <option value="beep">Soft beep</option>
-                <option value="custom">Custom audio</option>
-              </select>
-              <button id="choose-audio-alert" class="ghost-button" type="button" title="Select custom audio file">Audio file</button>
-              <input id="audio-alert-file" type="file" accept="audio/*" hidden>
-            </div>
-            <div id="audio-alert-file-name" class="status-line" hidden></div>
-            <div id="job-error" class="job-error" hidden></div>
           </section>
 
           <section class="panel-section job-event-section">
             <div class="job-event-header">
               <div class="section-label">Job Events</div>
+              <div class="job-event-filters" role="group" aria-label="Filter job events">
+                <button class="chip-button active" type="button" data-job-event-filter="all">All</button>
+                <button class="chip-button" type="button" data-job-event-filter="actions">Actions</button>
+                <button class="chip-button" type="button" data-job-event-filter="errors">Errors</button>
+              </div>
               <span id="job-event-count" class="log-count">0 events</span>
             </div>
             <div id="job-events" class="job-events" aria-live="polite"></div>
@@ -610,13 +681,16 @@
         </aside>
       </section>
 
-      <section class="log-panel">
+      <section id="log-panel" class="log-panel collapsed">
         <div class="log-header">
-          <div>
+          <div class="log-header-title">
             <div class="section-label">Event Log</div>
             <div id="log-count" class="log-count">0 events</div>
           </div>
-          <button id="refresh-events" class="ghost-button" type="button">Refresh</button>
+          <div class="log-header-actions">
+            <button id="refresh-events" class="ghost-button" type="button">Refresh</button>
+            <button id="toggle-log-panel" class="ghost-button" type="button" aria-expanded="false">Expand</button>
+          </div>
         </div>
         <div id="event-log" class="event-log" aria-live="polite"></div>
       </section>

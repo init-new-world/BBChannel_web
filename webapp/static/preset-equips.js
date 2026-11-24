@@ -1,5 +1,5 @@
 import { t } from "./i18n.js";
-import { editAssistEquipSource, inspectAssistEquipSource } from "./assist-equips-source.js";
+import { editAssistEquipSource, inspectAssistEquipGrandSlots, inspectAssistEquipSource } from "./assist-equips-source.js";
 
 export function createPresetEquipEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-assist-equips");
@@ -31,7 +31,13 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     }
   }
 
-  function equipRow(name, available) {
+  const GRAND_SLOT_BADGE_KEYS = {
+    normal: "Normal CE",
+    kizuna: "Bond CE",
+    houshuu: "Reward CE",
+  };
+
+  function equipRow(name, available, slots = null) {
     const row = document.createElement("div");
     row.className = "preset-equip-row";
     row.dataset.assistEquipName = name;
@@ -43,7 +49,19 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     const note = document.createElement("small");
     note.textContent = available === false ? t("Unavailable") : "";
     note.hidden = available !== false;
-    caption.append(label, note);
+    caption.append(label);
+    if (Array.isArray(slots) && slots.length) {
+      const badges = document.createElement("span");
+      badges.className = "preset-equip-slot-badges";
+      for (const slotKey of slots) {
+        const badge = document.createElement("span");
+        badge.className = "preset-equip-slot-badge";
+        badge.textContent = t(GRAND_SLOT_BADGE_KEYS[slotKey] || slotKey);
+        badges.append(badge);
+      }
+      caption.append(badges);
+    }
+    caption.append(note);
     if (available) {
       const image = document.createElement("img");
       image.alt = "";
@@ -104,7 +122,14 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
     const focusedRow = focused?.closest("[data-assist-equip-name]");
     const focusedIndex = [...list.children].indexOf(focusedRow);
     const available = catalog.names || [];
-    list.replaceChildren(...names.map((name) => equipRow(name, catalog.state === "ready" ? available.includes(name) : null)));
+    const slotsByName = inspectAssistEquipGrandSlots(source.value);
+    list.replaceChildren(
+      ...names.map((name) => equipRow(
+        name,
+        catalog.state === "ready" ? available.includes(name) : null,
+        slotsByName ? slotsByName[name] : null,
+      )),
+    );
     const choices = available.filter((name) => !names.includes(name));
     const selected = picker.value;
     picker.replaceChildren(...(choices.length ? choices : [""]).map((name) => {

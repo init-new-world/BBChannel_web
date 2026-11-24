@@ -369,4 +369,14 @@ def test_operator_console_references_api_controls():
     assert "new WebSocket" in script
     assert 'id="debug-step-mode"' in index
     assert "debug_step: true" in script
+    assert 'id="setting-filter"' in index
+    assert 'id="full-run-clear-ap"' in index
+    assert 'id="auto-follow-job-screen"' in index
+    assert 'id="job-live-summary"' in index
+    assert 'id="toggle-log-panel"' in index
+    assert 'data-job-tab="battle"' in index
+    assert 'data-job-tab="events"' in index
+    assert 'data-job-tab="tools"' in index
+    assert "apple: els.fullRunApple.value" in script
+    assert "CONSOLE_PREFS_STORAGE_KEY" in script
 

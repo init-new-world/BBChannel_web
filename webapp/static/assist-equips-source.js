@@ -26,6 +26,34 @@ function document(source) {
   return readJsonField(source, "assistEquip", "Ambiguous CE field.");
 }
 
+const GRAND_SLOT_LABELS = ["normal", "kizuna", "houshuu"];
+
+function collectGrandSlots(value) {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  const hasSlotStructure = value.some((item) => item === null || Array.isArray(item));
+  if (!hasSlotStructure) return null;
+  const slotsByName = {};
+  value.forEach((slotValue, slotIndex) => {
+    const slotKey = GRAND_SLOT_LABELS[slotIndex];
+    if (!slotKey || slotValue == null) return;
+    const slotNames = readAssistEquipNames(slotValue);
+    for (const name of slotNames) {
+      if (!slotsByName[name]) slotsByName[name] = [];
+      if (!slotsByName[name].includes(slotKey)) slotsByName[name].push(slotKey);
+    }
+  });
+  return slotsByName;
+}
+
+export function inspectAssistEquipGrandSlots(source) {
+  try {
+    const entry = document(source);
+    return collectGrandSlots(entry.value);
+  } catch {
+    return null;
+  }
+}
+
 export function inspectAssistEquipSource(source) {
   const entry = document(source);
   let names = null;

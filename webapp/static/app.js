@@ -15,7 +15,19 @@ import { setLocale, t } from "./i18n.js";
 const TERMINAL_JOB_STATES = new Set(["cancelled", "succeeded", "failed"]);
 const ACTIVE_JOB_STATES = new Set(["queued", "running", "paused", "cancelling"]);
 const AUDIO_ALERT_STORAGE_KEY = "bbchannel.audioAlert";
+const CONSOLE_PREFS_STORAGE_KEY = "bbchannel.consolePrefs";
 const SCREEN_ROTATION_OPTIONS = new Set([0, 90, 180, 270]);
+const JOB_ACTION_EVENT_TYPES = new Set([
+  "step",
+  "device_action",
+  "battle_stage",
+  "battle_settings",
+  "team_verification",
+  "job_started",
+  "job_succeeded",
+  "job_failed",
+  "job_cancelled",
+]);
 
 const state = {
   connected: false,
@@ -74,6 +86,13 @@ const state = {
   audioAlertFileUrl: null,
   audioAlertFileName: "",
   audioContext: null,
+  activeJobTab: "battle",
+  jobEventFilter: "all",
+  logDrawerOpen: false,
+  followJobScreenTimer: null,
+  followJobScreenInFlight: false,
+  jobElapsedTimer: null,
+  consolePrefs: {},
 };
 
 const els = {
@@ -86,6 +105,7 @@ const els = {
   connectDevice: document.querySelector("#connect-device"),
   disconnectDevice: document.querySelector("#disconnect-device"),
   connectionState: document.querySelector("#connection-state"),
+  settingFilter: document.querySelector("#setting-filter"),
   settingSelect: document.querySelector("#setting-select"),
   settingValidation: document.querySelector("#setting-validation"),
   settingPlan: document.querySelector("#setting-plan"),
@@ -188,8 +208,11 @@ const els = {
   rotateScreenAuto: document.querySelector("#rotate-screen-auto"),
   clickToTap: document.querySelector("#click-to-tap"),
   autoRefreshScreen: document.querySelector("#auto-refresh-screen"),
+  autoFollowJobScreen: document.querySelector("#auto-follow-job-screen"),
   fitScreen: document.querySelector("#fit-screen"),
   actualScreen: document.querySelector("#actual-screen"),
+  logPanel: document.querySelector("#log-panel"),
+  toggleLogPanel: document.querySelector("#toggle-log-panel"),
   refreshEvents: document.querySelector("#refresh-events"),
   eventLog: document.querySelector("#event-log"),
   logCount: document.querySelector("#log-count"),
@@ -197,14 +220,20 @@ const els = {
   diagnosticTimeout: document.querySelector("#diagnostic-timeout"),
   diagnosticTap: document.querySelector("#diagnostic-tap"),
   startDiagnostic: document.querySelector("#start-diagnostic"),
+  jobLiveSummary: document.querySelector("#job-live-summary"),
+  jobTabs: [...document.querySelectorAll("[data-job-tab]")],
+  jobTabPanels: [...document.querySelectorAll("[data-job-tab-panel]")],
+  jobEventFilters: [...document.querySelectorAll("[data-job-event-filter]")],
   battleScriptName: document.querySelector("#battle-script-name"),
   battleProgramStatus: document.querySelector("#battle-program-status"),
   battleActionDelay: document.querySelector("#battle-action-delay"),
   fullRunEntryMode: document.querySelector("#full-run-entry-mode"),
   fullRunCount: document.querySelector("#full-run-count"),
+  quickRunButtons: [...document.querySelectorAll("[data-quick-runs]")],
   fullRunRestartLimit: document.querySelector("#full-run-restart-limit"),
   fullRunMapSwipes: document.querySelector("#full-run-map-swipes"),
   fullRunApple: document.querySelector("#full-run-apple"),
+  fullRunClearAp: document.querySelector("#full-run-clear-ap"),
   fullRunTeamCheck: document.querySelector("#full-run-team-check"),
   fullRunCrawlTower: document.querySelector("#full-run-crawl-tower"),
   fullRunCrawlTowerMode: document.querySelector("#full-run-crawl-tower-mode"),
@@ -479,14 +508,107 @@ async function api(path, options = {}) {
   return response;
 }
 
+function loadConsolePrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CONSOLE_PREFS_STORAGE_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveConsolePrefs(patch = {}) {
+  state.consolePrefs = { ...state.consolePrefs, ...patch };
+  try {
+    localStorage.setItem(CONSOLE_PREFS_STORAGE_KEY, JSON.stringify(state.consolePrefs));
+  } catch {
+    // Ignore blocked storage.
+  }
+}
+
+function applySavedConsolePrefs() {
+  state.consolePrefs = loadConsolePrefs();
+  const prefs = state.consolePrefs;
+  if (prefs.fullRunCount && els.fullRunCount) {
+    const count = Number(prefs.fullRunCount);
+    if (Number.isInteger(count) && count >= 1 && count <= 10000) {
+      els.fullRunCount.value = String(count);
+    }
+  }
+  if (prefs.fullRunApple && els.fullRunApple) {
+    if ([...els.fullRunApple.options].some((o) => o.value === prefs.fullRunApple)) {
+      els.fullRunApple.value = prefs.fullRunApple;
+    }
+  }
+  if (prefs.fullRunClearAp && els.fullRunClearAp) {
+    if ([...els.fullRunClearAp.options].some((o) => o.value === prefs.fullRunClearAp)) {
+      els.fullRunClearAp.value = prefs.fullRunClearAp;
+    }
+  }
+  if (prefs.fullRunEntryMode && els.fullRunEntryMode) {
+    if ([...els.fullRunEntryMode.options].some((o) => o.value === prefs.fullRunEntryMode)) {
+      els.fullRunEntryMode.value = prefs.fullRunEntryMode;
+    }
+  }
+  if (prefs.fullRunTeamCheck && els.fullRunTeamCheck) {
+    if ([...els.fullRunTeamCheck.options].some((o) => o.value === prefs.fullRunTeamCheck)) {
+      els.fullRunTeamCheck.value = prefs.fullRunTeamCheck;
+    }
+  }
+  if (typeof prefs.autoFollowJobScreen === "boolean" && els.autoFollowJobScreen) {
+    els.autoFollowJobScreen.checked = prefs.autoFollowJobScreen;
+  }
+  if (typeof prefs.lastAdbEndpoint === "string" && prefs.lastAdbEndpoint && els.manualAdbEndpoint) {
+    els.manualAdbEndpoint.placeholder = prefs.lastAdbEndpoint;
+  }
+  setActiveJobTab(prefs.activeJobTab || "battle", false);
+  setLogDrawerOpen(Boolean(prefs.logDrawerOpen), false);
+  syncQuickRunButtons();
+}
+
+function setActiveJobTab(tabName, persist = true) {
+  const validTabs = new Set(["battle", "events", "tools"]);
+  const next = validTabs.has(tabName) ? tabName : "battle";
+  state.activeJobTab = next;
+  for (const tab of els.jobTabs) {
+    const active = tab.dataset.jobTab === next;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  for (const panel of els.jobTabPanels) {
+    panel.hidden = panel.dataset.jobTabPanel !== next;
+  }
+  if (persist) saveConsolePrefs({ activeJobTab: next });
+}
+
+function setLogDrawerOpen(open, persist = true) {
+  state.logDrawerOpen = Boolean(open);
+  if (els.logPanel) {
+    els.logPanel.classList.toggle("collapsed", !state.logDrawerOpen);
+  }
+  if (els.toggleLogPanel) {
+    els.toggleLogPanel.setAttribute("aria-expanded", String(state.logDrawerOpen));
+    els.toggleLogPanel.textContent = t(state.logDrawerOpen ? "Collapse" : "Expand");
+  }
+  if (persist) saveConsolePrefs({ logDrawerOpen: state.logDrawerOpen });
+}
+
+function syncQuickRunButtons() {
+  const current = String(els.fullRunCount?.value || "");
+  for (const btn of els.quickRunButtons) {
+    btn.classList.toggle("active", btn.dataset.quickRuns === current);
+  }
+}
+
 async function init() {
   initAudioAlertControls();
+  applySavedConsolePrefs();
   bindEvents();
   await Promise.allSettled([
     loadCapabilities(),
-    loadDevices(),
+    loadDevices(state.consolePrefs.lastDeviceId || ""),
     loadScreenRotation(),
-    loadSettings(),
+    loadSettings(state.consolePrefs.settingName || ""),
     loadStrategies(),
     loadTemplates(),
     loadEquipTemplates(),
@@ -503,6 +625,8 @@ function bindEvents() {
   window.addEventListener("pagehide", () => {
     closeEventsSocket();
     stopAutoRefreshScreen();
+    stopFollowJobScreen();
+    syncJobElapsedTimer(null);
     closeJobEventSource();
   });
   els.languageSelect.addEventListener("change", () => setLocale(els.languageSelect.value));
@@ -516,11 +640,56 @@ function bindEvents() {
     renderAudioAlertState();
     if (!state.connected) els.connectionState.textContent = t("Disconnected");
     els.screenMeta.textContent = formatScreenMeta();
+    if (els.toggleLogPanel) {
+      els.toggleLogPanel.textContent = t(state.logDrawerOpen ? "Collapse" : "Expand");
+    }
     if (state.presetEditor) {
       els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
     }
   });
-  els.backendSelect.addEventListener("change", () => renderDevices());
+  els.jobTabs.forEach((tab) => {
+    tab.addEventListener("click", () => setActiveJobTab(tab.dataset.jobTab));
+  });
+  els.jobEventFilters.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.jobEventFilter = btn.dataset.jobEventFilter || "all";
+      for (const item of els.jobEventFilters) {
+        item.classList.toggle("active", item === btn);
+      }
+      renderJobEvents();
+    });
+  });
+  els.toggleLogPanel?.addEventListener("click", () => setLogDrawerOpen(!state.logDrawerOpen));
+  els.quickRunButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!els.fullRunCount) return;
+      els.fullRunCount.value = btn.dataset.quickRuns || "1";
+      syncQuickRunButtons();
+      saveConsolePrefs({ fullRunCount: Number(els.fullRunCount.value) });
+    });
+  });
+  els.fullRunCount?.addEventListener("change", () => {
+    syncQuickRunButtons();
+    saveConsolePrefs({ fullRunCount: readNumber(els.fullRunCount) });
+  });
+  els.fullRunApple?.addEventListener("change", () => {
+    saveConsolePrefs({ fullRunApple: els.fullRunApple.value });
+  });
+  els.fullRunClearAp?.addEventListener("change", () => {
+    saveConsolePrefs({ fullRunClearAp: els.fullRunClearAp.value });
+  });
+  els.fullRunTeamCheck?.addEventListener("change", () => {
+    saveConsolePrefs({ fullRunTeamCheck: els.fullRunTeamCheck.value });
+  });
+  els.autoFollowJobScreen?.addEventListener("change", () => {
+    saveConsolePrefs({ autoFollowJobScreen: Boolean(els.autoFollowJobScreen.checked) });
+    syncFollowJobScreen();
+  });
+  els.settingFilter?.addEventListener("input", () => renderFilteredSettings());
+  els.backendSelect.addEventListener("change", () => {
+    saveConsolePrefs({ lastBackend: els.backendSelect.value });
+    renderDevices();
+  });
   els.refreshDevices.addEventListener("click", () => loadDevices());
   els.addAdbEndpoint.addEventListener("click", addManualAdbEndpoint);
   els.manualAdbEndpoint.addEventListener("input", updateControls);
@@ -532,7 +701,11 @@ function bindEvents() {
   });
   els.connectDevice.addEventListener("click", connect);
   els.disconnectDevice.addEventListener("click", disconnect);
-  els.settingSelect.addEventListener("change", loadSelectedSettingPlan);
+  els.settingSelect.addEventListener("change", () => {
+    els.settingSelect.title = els.settingSelect.value || "";
+    saveConsolePrefs({ settingName: els.settingSelect.value });
+    loadSelectedSettingPlan();
+  });
   els.strategySelect.addEventListener("change", loadSelectedStrategy);
   els.newSetting.addEventListener("click", () => openPresetEditor("settings", "new"));
   els.editSetting.addEventListener("click", () => openPresetEditor("settings", "edit"));
@@ -634,7 +807,10 @@ function bindEvents() {
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.startBattlePlan.addEventListener("click", startBattlePlan);
-  els.fullRunEntryMode.addEventListener("change", updateControls);
+  els.fullRunEntryMode.addEventListener("change", () => {
+    saveConsolePrefs({ fullRunEntryMode: els.fullRunEntryMode.value });
+    updateControls();
+  });
   els.fullRunCrawlTower?.addEventListener("change", updateControls);
   els.fullRunCrawlTowerMode?.addEventListener("change", updateControls);
   els.startFullRun.addEventListener("click", startFullRun);
@@ -1889,22 +2065,35 @@ async function closeNotebook() {
   await saveNotebook(undefined, true);
 }
 
+function renderFilteredSettings(preferredName = "") {
+  const query = (els.settingFilter?.value || "").trim().toLowerCase();
+  const previous = preferredName || els.settingSelect.value;
+  const filtered = query
+    ? state.settings.filter((setting) => setting.name.toLowerCase().includes(query))
+    : state.settings;
+  els.settingSelect.replaceChildren(
+    ...filtered.map((setting) => {
+      const option = document.createElement("option");
+      option.value = setting.name;
+      option.textContent = setting.name;
+      return option;
+    }),
+  );
+  if (filtered.some((setting) => setting.name === previous)) {
+    els.settingSelect.value = previous;
+  }
+  els.settingSelect.title = els.settingSelect.value || "";
+  if (els.settingSelect.value !== previous) {
+    void loadSelectedSettingPlan();
+  }
+}
+
 async function loadSettings(preferredName = "") {
   try {
     const selectedName = preferredName || els.settingSelect.value;
     const payload = await api("/api/settings");
     state.settings = payload.settings || [];
-    els.settingSelect.replaceChildren(
-      ...state.settings.map((setting) => {
-        const option = document.createElement("option");
-        option.value = setting.name;
-        option.textContent = setting.name;
-        return option;
-      }),
-    );
-    if (state.settings.some((setting) => setting.name === selectedName)) {
-      els.settingSelect.value = selectedName;
-    }
+    renderFilteredSettings(selectedName);
     await loadSelectedSettingPlan();
     updateControls();
   } catch (error) {
@@ -3128,6 +3317,8 @@ async function addManualAdbEndpoint() {
     });
     const device = payload.device;
     if (device) {
+      saveConsolePrefs({ lastAdbEndpoint: endpoint, lastBackend: device.backend, lastDeviceId: device.device_id });
+      els.manualAdbEndpoint.placeholder = endpoint;
       selectBackend(device.backend);
       mergeDevice(device);
       renderDevices(device.device_id);
@@ -3152,6 +3343,9 @@ async function connect() {
       }),
     });
     state.connected = payload.connected;
+    if (payload.connected) {
+      saveConsolePrefs({ lastBackend: payload.backend, lastDeviceId: payload.device_id });
+    }
     setConnectionLabel(payload);
     await Promise.allSettled([loadScreenRotation(), loadEvents()]);
   } catch (error) {
@@ -3373,13 +3567,52 @@ function stopAutoRefreshScreen() {
   }
 }
 
+function stopFollowJobScreen() {
+  if (state.followJobScreenTimer) {
+    window.clearInterval(state.followJobScreenTimer);
+    state.followJobScreenTimer = null;
+  }
+}
+
+async function pollFollowJobScreenFrame() {
+  if (document.hidden || state.followJobScreenInFlight || !state.connected) return;
+  state.followJobScreenInFlight = true;
+  try {
+    await captureScreenshot({ quiet: true });
+  } finally {
+    state.followJobScreenInFlight = false;
+  }
+}
+
+function syncFollowJobScreen() {
+  const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
+  const shouldFollow = Boolean(
+    state.connected
+      && els.autoFollowJobScreen?.checked
+      && hasRunningJob
+      && !els.autoRefreshScreen?.checked,
+  );
+  if (!shouldFollow) {
+    stopFollowJobScreen();
+    return;
+  }
+  if (!state.followJobScreenTimer) {
+    void pollFollowJobScreenFrame();
+    state.followJobScreenTimer = window.setInterval(() => {
+      void pollFollowJobScreenFrame();
+    }, 2500);
+  }
+}
+
 function syncAutoRefreshScreen(triggerImmediate = false) {
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
   const shouldRun = Boolean(state.connected && els.autoRefreshScreen?.checked && !hasRunningJob);
   if (!shouldRun) {
     stopAutoRefreshScreen();
+    syncFollowJobScreen();
     return;
   }
+  stopFollowJobScreen();
   if (typeof WebSocket === "function") {
     connectScreenSocket(triggerImmediate);
     return;
@@ -3584,16 +3817,21 @@ async function startFullRun() {
   }
   const crawlTower = Boolean(els.fullRunCrawlTower?.checked);
   const crawlTowerMode = els.fullRunCrawlTowerMode?.value || "script";
+  const clearApValue = els.fullRunClearAp?.value;
+  const clearApOverride = clearApValue === "true" ? { clear_ap: true }
+    : clearApValue === "false" ? { clear_ap: false } : {};
   await enqueueJob("battle.run", {
     setting_name: settingName,
     max_runs: readNumber(els.fullRunCount),
     max_restarts: readNumber(els.fullRunRestartLimit),
     entry_mode: els.fullRunEntryMode.value,
+    ...clearApOverride,
     ...(crawlTower ? { crawl_tower_mode: crawlTowerMode } : {}),
     entry: {
       max_map_swipes: readNumber(els.fullRunMapSwipes),
     },
     assist: {
+      apple: els.fullRunApple.value,
       special_filter: els.fullRunAssistFilter.disabled ? "any" : els.fullRunAssistFilter.value,
     },
     prepare: {
@@ -4490,12 +4728,73 @@ function trackJobTransitions(jobs, announce = false) {
   }
 }
 
+function formatElapsedDuration(startIso, endIso = null) {
+  if (!startIso) return "";
+  const startedMs = Date.parse(startIso);
+  if (Number.isNaN(startedMs)) return "";
+  const endMs = endIso ? Date.parse(endIso) : Date.now();
+  const totalSeconds = Math.max(0, Math.floor((endMs - startedMs) / 1000));
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function syncJobElapsedTimer(job) {
+  const isActive = Boolean(job && ACTIVE_JOB_STATES.has(job.status));
+  if (!isActive) {
+    if (state.jobElapsedTimer) {
+      window.clearInterval(state.jobElapsedTimer);
+      state.jobElapsedTimer = null;
+    }
+    return;
+  }
+  if (!state.jobElapsedTimer) {
+    state.jobElapsedTimer = window.setInterval(() => {
+      if (state.activeJob && ACTIVE_JOB_STATES.has(state.activeJob.status)) {
+        renderJobLiveSummary(state.activeJob);
+      } else {
+        syncJobElapsedTimer(null);
+      }
+    }, 1000);
+  }
+}
+
+function renderJobLiveSummary(job) {
+  if (!els.jobLiveSummary) return;
+  if (!job) {
+    els.jobLiveSummary.hidden = true;
+    els.jobLiveSummary.textContent = "";
+    return;
+  }
+  const parts = [];
+  if (job.kind === "battle.run" && job.payload?.max_runs) {
+    const maxRuns = Number(job.payload.max_runs);
+    const done = typeof job.result?.runs_completed === "number"
+      ? job.result.runs_completed
+      : Math.min(maxRuns, Math.floor((Number(job.progress) || 0) * maxRuns) + 1);
+    parts.push(t("Run {current}/{total}", { current: Math.max(1, done), total: maxRuns }));
+  }
+  if (job.current_step) {
+    parts.push(t(job.current_step));
+  }
+  const elapsed = formatElapsedDuration(job.started_at, TERMINAL_JOB_STATES.has(job.status) ? job.finished_at : null);
+  if (elapsed) {
+    parts.push(t("Elapsed {time}", { time: elapsed }));
+  }
+  const refreshes = state.jobEvents.filter((ev) => ev?.data?.role === "assist_refresh").length;
+  if (refreshes > 0) {
+    parts.push(t("Refreshes: {count}", { count: refreshes }));
+  }
+  els.jobLiveSummary.hidden = parts.length === 0;
+  els.jobLiveSummary.textContent = parts.join(" · ");
+}
+
 function renderJob(job) {
   const status = job?.status || "idle";
   els.jobStatus.textContent = t(status[0].toUpperCase() + status.slice(1));
   els.jobStatus.className = `job-status ${status}`;
-  els.jobKind.textContent = job ? job.kind : t("No job selected");
-  els.jobStep.textContent = job?.current_step || t("Waiting");
+  els.jobKind.textContent = job ? t(job.kind) : t("No job selected");
+  els.jobStep.textContent = job?.current_step ? t(job.current_step) : t("Waiting");
   if (typeof job?.progress === "number") {
     els.jobProgress.value = job.progress;
   } else {
@@ -4508,6 +4807,8 @@ function renderJob(job) {
     els.jobError.hidden = true;
     els.jobError.textContent = "";
   }
+  renderJobLiveSummary(job);
+  syncJobElapsedTimer(job);
   renderJobResult(job);
 }
 
@@ -4833,9 +5134,20 @@ function humanizeResultValue(value) {
 }
 
 function renderJobEvents() {
-  els.jobEventCount.textContent = `${state.jobEvents.length} ${t(state.jobEvents.length === 1 ? "event" : "events")}`;
-  els.jobEvents.replaceChildren(...state.jobEvents.map(renderJobEvent));
+  const filter = state.jobEventFilter || "all";
+  const visible = state.jobEvents.filter((event) => {
+    if (filter === "errors") {
+      return event.level === "error" || String(event.event_type || "").includes("fail");
+    }
+    if (filter === "actions") {
+      return JOB_ACTION_EVENT_TYPES.has(event.event_type) || event.level === "error";
+    }
+    return true;
+  });
+  els.jobEventCount.textContent = `${visible.length} ${t(visible.length === 1 ? "event" : "events")}`;
+  els.jobEvents.replaceChildren(...visible.map(renderJobEvent));
   els.jobEvents.scrollTop = els.jobEvents.scrollHeight;
+  renderJobLiveSummary(state.activeJob);
 }
 
 function renderJobEvent(event) {
@@ -5183,6 +5495,10 @@ function updateControls() {
   const hasScreenshot = Boolean(state.screenshotBase64);
   const hasTemplate = Boolean(els.templateSelect.value);
   const adbCapability = state.backends.find((backend) => backend.name === "adb");
+  const isAdbSelected = !els.backendSelect.value || els.backendSelect.value === "adb";
+  const hideManualAdb = !isAdbSelected && window.innerWidth > 560;
+  els.manualAdbEndpoint.hidden = hideManualAdb;
+  els.addAdbEndpoint.hidden = hideManualAdb;
   const canAddAdbEndpoint = Boolean(adbCapability?.available && els.manualAdbEndpoint.value.trim());
   els.addAdbEndpoint.disabled = !canAddAdbEndpoint;
   els.connectDevice.disabled = !hasDevice || state.connected;
@@ -5198,6 +5514,9 @@ function updateControls() {
   if (els.autoRefreshScreen) {
     els.autoRefreshScreen.disabled = !state.connected;
     if (!state.connected) els.autoRefreshScreen.checked = false;
+  }
+  if (els.autoFollowJobScreen) {
+    els.autoFollowJobScreen.disabled = !state.connected;
   }
   syncAutoRefreshScreen(false);
   els.tapButton.disabled = !state.connected;
