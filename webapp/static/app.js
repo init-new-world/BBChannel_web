@@ -56,6 +56,7 @@ const state = {
   notebookSavedContent: "",
   notebookBusy: false,
   screenshotUrl: null,
+  screenshotBlob: null,
   screenshotBase64: "",
   debugOverlayDataUrl: null,
   screenMode: "source",
@@ -66,6 +67,7 @@ const state = {
   screenReconnectTimer: null,
   screenFrameDecodeInFlight: false,
   pendingScreenBlob: null,
+  screenFrameTimestamps: [],
   screenshotNaturalSize: null,
   latestMatch: null,
   selectedSettingPlan: null,
@@ -809,6 +811,7 @@ function bindEvents() {
   els.rotateScreenRight?.addEventListener("click", () => rotateScreen({ steps: 1 }));
   els.rotateScreenAuto?.addEventListener("click", () => rotateScreen({ rotation: null }));
   els.autoRefreshScreen?.addEventListener("change", () => {
+    saveConsolePrefs({ autoLiveStream: Boolean(els.autoRefreshScreen.checked) });
     syncAutoRefreshScreen(true);
     updateControls();
   });
@@ -1013,6 +1016,10 @@ async function loadConnectionState() {
     if (payload.connected && payload.backend) {
       selectBackend(payload.backend);
       renderDevices(payload.device_id || "");
+      if (els.autoRefreshScreen && state.consolePrefs.autoLiveStream !== false) {
+        els.autoRefreshScreen.checked = true;
+      }
+      syncAutoRefreshScreen(true);
     }
   } catch {
     state.connected = false;
@@ -3478,9 +3485,15 @@ async function connect() {
     state.connected = payload.connected;
     if (payload.connected) {
       saveConsolePrefs({ lastBackend: payload.backend, lastDeviceId: payload.device_id });
+      if (els.autoRefreshScreen && state.consolePrefs.autoLiveStream !== false) {
+        els.autoRefreshScreen.checked = true;
+      }
     }
     setConnectionLabel(payload);
     await Promise.allSettled([loadScreenRotation(), loadEvents()]);
+    if (payload.connected) {
+      syncAutoRefreshScreen(true);
+    }
   } catch (error) {
     showError(error);
   } finally {
@@ -3574,6 +3587,35 @@ function queueScreenFrameBlob(blob) {
   void drainPendingScreenBlobs();
 }
 
+function setLiveStreamBlob(blob) {
+  const objectUrl = URL.createObjectURL(blob);
+  const previousUrl = state.screenshotUrl;
+  state.screenshotUrl = objectUrl;
+  state.screenshotBlob = blob;
+  state.screenshotBase64 = "";
+  const now = performance.now();
+  state.screenFrameTimestamps.push(now);
+  while (state.screenFrameTimestamps.length > 1 && now - state.screenFrameTimestamps[0] > 2000) {
+    state.screenFrameTimestamps.shift();
+  }
+  els.screenshot.classList.add("visible");
+  els.screenEmpty.hidden = true;
+  if (state.screenMode === "source") {
+    els.screenshot.src = objectUrl;
+  }
+  if (previousUrl && previousUrl.startsWith("blob:")) {
+    window.setTimeout(() => URL.revokeObjectURL(previousUrl), 1500);
+  }
+}
+
+async function ensureScreenshotBase64() {
+  if (state.screenshotBase64) return state.screenshotBase64;
+  if (!state.screenshotBlob) return "";
+  const dataUrl = await blobToDataUrl(state.screenshotBlob);
+  state.screenshotBase64 = dataUrl.split(",", 2)[1] || "";
+  return state.screenshotBase64;
+}
+
 async function drainPendingScreenBlobs() {
   if (state.screenFrameDecodeInFlight) {
     return;
@@ -3583,13 +3625,10 @@ async function drainPendingScreenBlobs() {
     while (state.pendingScreenBlob) {
       const nextBlob = state.pendingScreenBlob;
       state.pendingScreenBlob = null;
-      if (!state.connected || !els.autoRefreshScreen?.checked) {
+      if (!state.connected || (!els.autoRefreshScreen?.checked && !els.autoFollowJobScreen?.checked)) {
         break;
       }
-      const dataUrl = await blobToDataUrl(nextBlob);
-      if (state.connected && els.autoRefreshScreen?.checked) {
-        setScreenshot(dataUrl);
-      }
+      setLiveStreamBlob(nextBlob);
     }
   } catch {
     // Ignore transient frame decode failures.
@@ -3620,7 +3659,10 @@ function connectScreenSocket(triggerImmediate = false) {
   }
   let socket;
   try {
-    socket = new WebSocket(buildWsUrl("/api/ws/screen?interval_ms=500"));
+    const followJobs = Boolean(els.autoFollowJobScreen?.checked ?? true);
+    socket = new WebSocket(
+      buildWsUrl(`/api/ws/screen?interval_ms=120&format=jpeg&follow_jobs=${followJobs ? "true" : "false"}`),
+    );
   } catch {
     return;
   }
@@ -3739,10 +3781,14 @@ function syncFollowJobScreen() {
 
 function syncAutoRefreshScreen(triggerImmediate = false) {
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
-  const shouldRun = Boolean(state.connected && els.autoRefreshScreen?.checked && !hasRunningJob);
-  if (!shouldRun) {
+  const followJobs = Boolean(els.autoFollowJobScreen?.checked);
+  const wantLive = Boolean(els.autoRefreshScreen?.checked);
+  const shouldRunWs = Boolean(
+    state.connected && (wantLive || (hasRunningJob && followJobs)),
+  );
+  if (!shouldRunWs) {
     stopAutoRefreshScreen();
-    syncFollowJobScreen();
+    stopFollowJobScreen();
     return;
   }
   stopFollowJobScreen();
@@ -3750,10 +3796,14 @@ function syncAutoRefreshScreen(triggerImmediate = false) {
     connectScreenSocket(triggerImmediate);
     return;
   }
+  if (hasRunningJob) {
+    syncFollowJobScreen();
+    return;
+  }
   if (!state.autoRefreshScreenTimer) {
     state.autoRefreshScreenTimer = window.setInterval(() => {
       void refreshLiveScreenFrame();
-    }, 750);
+    }, 350);
   }
   if (triggerImmediate) {
     void refreshLiveScreenFrame();
@@ -3774,10 +3824,11 @@ async function captureScreenshot(options = {}) {
 }
 
 function setScreenshot(dataUrl) {
-  if (state.screenshotUrl) {
+  if (state.screenshotUrl && state.screenshotUrl.startsWith("blob:")) {
     URL.revokeObjectURL(state.screenshotUrl);
   }
   state.screenshotUrl = dataUrl;
+  state.screenshotBlob = null;
   state.screenshotBase64 = dataUrl.split(",", 2)[1] || "";
   state.debugOverlayDataUrl = null;
   state.screenMode = "source";
@@ -3790,11 +3841,13 @@ function setScreenshot(dataUrl) {
 }
 
 function clearScreenshot() {
-  if (state.screenshotUrl) {
+  if (state.screenshotUrl && state.screenshotUrl.startsWith("blob:")) {
     URL.revokeObjectURL(state.screenshotUrl);
   }
   state.screenshotUrl = null;
+  state.screenshotBlob = null;
   state.screenshotBase64 = "";
+  state.screenFrameTimestamps = [];
   state.debugOverlayDataUrl = null;
   state.screenMode = "source";
   state.screenshotNaturalSize = null;
@@ -3811,6 +3864,7 @@ function clearScreenshot() {
 
 async function matchTemplate() {
   try {
+    const screenshotBase64 = await ensureScreenshotBase64();
     const roi = els.recognitionRoiEnabled.checked
       ? [
         readNumber(els.recognitionRoiX),
@@ -3822,7 +3876,7 @@ async function matchTemplate() {
     const payload = await api("/api/match/debug", {
       method: "POST",
       body: JSON.stringify({
-        screenshot_base64: state.screenshotBase64,
+        screenshot_base64: screenshotBase64,
         template_path: els.templateSelect.value,
         threshold: Number(els.thresholdInput.value),
         roi,
@@ -5625,7 +5679,7 @@ function formatCommand(value) {
 
 function updateControls() {
   const hasDevice = Boolean(els.deviceList.value);
-  const hasScreenshot = Boolean(state.screenshotBase64);
+  const hasScreenshot = Boolean(state.screenshotBase64 || state.screenshotBlob);
   const hasTemplate = Boolean(els.templateSelect.value);
   const adbCapability = state.backends.find((backend) => backend.name === "adb");
   const isAdbSelected = !els.backendSelect.value || els.backendSelect.value === "adb";
@@ -5949,11 +6003,22 @@ function formatScreenMeta() {
       ? `${t("No capture")} · ${t("Rotation {angle}°", { angle: state.screenRotation })}`
       : t("No capture");
   }
-  const modeLabel = state.screenMode === "debug" ? "Debug" : "Source";
+  const modeLabel = state.screenMode === "debug" ? t("Debug") : t("Source");
   const rotationLabel = state.screenRotation === null
     ? ""
     : ` · ${t("Rotation {angle}°", { angle: state.screenRotation })}`;
-  return `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${modeLabel}${rotationLabel}`;
+  let liveLabel = "";
+  if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+    const stamps = state.screenFrameTimestamps;
+    if (stamps.length >= 2) {
+      const span = (stamps[stamps.length - 1] - stamps[0]) / 1000;
+      const fps = span > 0.1 ? (stamps.length - 1) / span : 0;
+      if (fps > 0.1) {
+        liveLabel = ` · ${t("Live")} ${fps.toFixed(1)} fps`;
+      }
+    }
+  }
+  return `${state.screenshotNaturalSize.width} x ${state.screenshotNaturalSize.height} · ${modeLabel}${rotationLabel}${liveLabel}`;
 }
 
 function onScreenshotLoaded() {

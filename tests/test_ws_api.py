@@ -240,3 +240,38 @@ def test_ws_screen_reports_error_when_disconnected_and_pauses_during_active_job(
             finally:
                 release.set()
                 manager.wait(job_id, timeout=2)
+
+
+def test_ws_screen_jpeg_format_and_passive_follow_during_active_job(tmp_path: Path):
+    app, _event_log, backend, device_service, manager = _build_env(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    with manager:
+        device_service.connect("fake", "dev-ws")
+        with create_test_client(app) as client:
+            # Verify JPEG encoding in idle stream
+            with client.websocket_connect("/api/ws/screen?interval_ms=5000&format=jpeg") as ws:
+                jpg_frame = ws.receive_bytes()
+                assert jpg_frame.startswith(b"\xff\xd8")
+
+            # Verify zero-overhead passive broadcast during active job when follow_jobs=true
+            def job_worker(_context, _payload):
+                started.set()
+                assert release.wait(timeout=3)
+                device_service.snapshot()
+                return {"done": True}
+
+            manager.register("ws.follow", job_worker)
+            job_id = client.post("/api/jobs", json={"kind": "ws.follow"}).json()["job"]["job_id"]
+            assert started.wait(timeout=2)
+            snaps_before = backend.snapshots
+            try:
+                with client.websocket_connect("/api/ws/screen?interval_ms=500&format=jpeg&follow_jobs=true") as ws:
+                    release.set()
+                    broadcast = ws.receive_bytes()
+                    assert broadcast.startswith(b"\xff\xd8")
+                    assert backend.snapshots == snaps_before + 1
+            finally:
+                release.set()
+                manager.wait(job_id, timeout=2)

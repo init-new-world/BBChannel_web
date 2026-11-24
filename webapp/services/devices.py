@@ -42,6 +42,9 @@ class DeviceService:
         self._state_lock = threading.RLock()
         self._endpoint_locks_guard = threading.Lock()
         self._endpoint_locks: dict[str, threading.RLock] = {}
+        self._frame_subscribers_lock = threading.Lock()
+        self._frame_subscribers: list[Callable[[bytes], None]] = []
+        self._latest_frame: bytes | None = None
         self._closed = False
         self._operation_timing: ContextVar[tuple[Callable[[float], None], object, object] | None] = ContextVar(
             "device_operation_timing", default=None,
@@ -281,6 +284,33 @@ class DeviceService:
                     {"backend": backend.name, "error": str(exc)},
                 )
 
+    def subscribe_frames(self, callback: Callable[[bytes], None]) -> Callable[[], None]:
+        with self._frame_subscribers_lock:
+            self._frame_subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            with self._frame_subscribers_lock:
+                try:
+                    self._frame_subscribers.remove(callback)
+                except ValueError:
+                    pass
+
+        return unsubscribe
+
+    def latest_frame(self) -> bytes | None:
+        with self._frame_subscribers_lock:
+            return self._latest_frame
+
+    def _broadcast_frame(self, data: bytes) -> None:
+        with self._frame_subscribers_lock:
+            self._latest_frame = data
+            subscribers = list(self._frame_subscribers)
+        for subscriber in subscribers:
+            try:
+                subscriber(data)
+            except Exception:
+                pass
+
     def snapshot(self) -> bytes:
         backend, endpoint = self._require_capture()
         with self._lock_for(endpoint):
@@ -321,6 +351,7 @@ class DeviceService:
         hooks = self._action_hooks.get()
         if hooks is not None:
             hooks[0](data)
+        self._broadcast_frame(data)
         return data
 
     def screen_is_stuck(self, minimum_seconds: float) -> bool:

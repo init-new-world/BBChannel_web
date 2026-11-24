@@ -1,16 +1,49 @@
 from __future__ import annotations
 
 import asyncio
+from io import BytesIO
 import json
 from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from PIL import Image
 
 from webapp.core.errors import AppError
+from webapp.devices.coordinates import get_cached_bgr_frame
 from webapp.runtime import JobManager
 from webapp.runtime.models import JobEvent, JobRecord
 from webapp.services.devices import DeviceService
 from webapp.services.event_log import EventLog
+
+try:
+    import cv2
+    import numpy as np
+except ImportError:  # pragma: no cover
+    cv2 = None  # type: ignore[assignment]
+    np = None  # type: ignore[assignment]
+
+
+def _encode_stream_frame(frame_bytes: bytes, image_format: str, jpeg_quality: int = 75) -> bytes:
+    if image_format != "jpeg":
+        return frame_bytes
+    if frame_bytes.startswith(b"\xff\xd8"):
+        return frame_bytes
+    if cv2 is not None and np is not None:
+        bgr = get_cached_bgr_frame(frame_bytes)
+        if bgr is None:
+            bgr = cv2.imdecode(np.frombuffer(frame_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if bgr is not None:
+            ok, encoded = cv2.imencode(
+                ".jpg",
+                bgr,
+                [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality],
+            )
+            if ok:
+                return encoded.tobytes()
+    with Image.open(BytesIO(frame_bytes)) as img:
+        out = BytesIO()
+        img.convert("RGB").save(out, format="JPEG", quality=jpeg_quality)
+        return out.getvalue()
 
 
 def create_ws_router(
@@ -181,14 +214,39 @@ def create_ws_router(
     @router.websocket("/screen")
     async def ws_screen(
         websocket: WebSocket,
-        interval_ms: int = Query(default=500, ge=80, le=10000),
+        interval_ms: int = Query(default=500, ge=50, le=10000),
+        format: str = Query(default="png"),
+        follow_jobs: bool = Query(default=False),
     ) -> None:
         await websocket.accept()
+        loop = asyncio.get_running_loop()
         send_lock = asyncio.Lock()
         wake_event = asyncio.Event()
         stop_event = asyncio.Event()
         wake_event.set()
-        interval_seconds = max(0.08, min(interval_ms / 1000.0, 10.0))
+        interval_seconds = max(0.05, min(interval_ms / 1000.0, 10.0))
+        stream_format = "jpeg" if format.strip().lower() in {"jpg", "jpeg"} else "png"
+        passive_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=2)
+
+        def on_device_frame(frame_bytes: bytes) -> None:
+            if stop_event.is_set() or not follow_jobs:
+                return
+            def _push() -> None:
+                if passive_queue.full():
+                    try:
+                        passive_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                try:
+                    passive_queue.put_nowait(frame_bytes)
+                except asyncio.QueueFull:
+                    pass
+            try:
+                loop.call_soon_threadsafe(_push)
+            except RuntimeError:
+                pass
+
+        unsub_frames = device_service.subscribe_frames(on_device_frame) if follow_jobs else (lambda: None)
 
         async def send_json_locked(payload: dict[str, Any]) -> None:
             async with send_lock:
@@ -212,10 +270,34 @@ def create_ws_router(
             try:
                 while not stop_event.is_set():
                     if has_active_job():
-                        await send_json_locked({"type": "paused", "reason": "job_running"})
-                        stop_event.set()
-                        await close_locked()
-                        return
+                        if not follow_jobs:
+                            await send_json_locked({"type": "paused", "reason": "job_running"})
+                            stop_event.set()
+                            await close_locked()
+                            return
+                        # Passive zero-overhead live broadcast while a job owns the device.
+                        try:
+                            raw_frame = await asyncio.wait_for(passive_queue.get(), timeout=0.5)
+                        except TimeoutError:
+                            if not device_service.state().connected:
+                                await send_json_locked(
+                                    {"type": "error", "error": {"code": "device_not_connected", "message": "No device is connected."}}
+                                )
+                                stop_event.set()
+                                await close_locked()
+                                return
+                            continue
+                        encoded = await asyncio.to_thread(_encode_stream_frame, raw_frame, stream_format)
+                        if stop_event.is_set():
+                            return
+                        await send_bytes_locked(encoded)
+                        continue
+                    # Drain any stale passive frames when returning to active preview.
+                    while not passive_queue.empty():
+                        try:
+                            passive_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
                     wake_event.clear()
                     try:
                         frame = await asyncio.to_thread(device_service.snapshot)
@@ -224,9 +306,10 @@ def create_ws_router(
                         stop_event.set()
                         await close_locked()
                         return
+                    encoded = await asyncio.to_thread(_encode_stream_frame, frame, stream_format)
                     if stop_event.is_set():
                         return
-                    await send_bytes_locked(frame)
+                    await send_bytes_locked(encoded)
                     try:
                         await asyncio.wait_for(wake_event.wait(), timeout=interval_seconds)
                     except TimeoutError:
@@ -299,6 +382,7 @@ def create_ws_router(
         finally:
             stop_event.set()
             wake_event.set()
+            unsub_frames()
             for task in (stream_task, recv_task):
                 if not task.done():
                     task.cancel()
