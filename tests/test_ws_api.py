@@ -27,6 +27,8 @@ class _FakeScreenBackend:
         self.frame = _make_png((20, 40, 80))
         self.snapshots = 0
         self.taps: list[tuple[str, int, int]] = []
+        self.swipes: list[tuple[str, int, int, int, int, int]] = []
+        self.touch_events: list[tuple[str, str, int, int]] = []
 
     def capability(self) -> Capability:
         return Capability(name=self.name, available=True)
@@ -45,7 +47,27 @@ class _FakeScreenBackend:
         return OperationResult(ok=True, action="tap", message=f"tap {x},{y}")
 
     def swipe(self, device_id: str, x1: int, y1: int, x2: int, y2: int, duration_ms: int) -> OperationResult:
+        self.swipes.append((device_id, x1, y1, x2, y2, duration_ms))
+        self.frame = _make_png((50, 180, 90))
         return OperationResult(ok=True, action="swipe", message="swipe")
+
+    def touch_down(self, device_id: str, x: int, y: int) -> OperationResult:
+        self.touch_events.append(("down", device_id, x, y))
+        self.frame = _make_png((180, 140, 40))
+        return OperationResult(ok=True, action="touch_down", message=f"down {x},{y}")
+
+    def touch_move(self, device_id: str, x: int, y: int) -> OperationResult:
+        self.touch_events.append(("move", device_id, x, y))
+        return OperationResult(ok=True, action="touch_move", message=f"move {x},{y}")
+
+    def touch_up(self, device_id: str, x: int, y: int) -> OperationResult:
+        self.touch_events.append(("up", device_id, x, y))
+        self.frame = _make_png((90, 90, 200))
+        return OperationResult(ok=True, action="touch_up", message=f"up {x},{y}")
+
+    def touch_cancel(self, device_id: str, x: int, y: int) -> OperationResult:
+        self.touch_events.append(("cancel", device_id, x, y))
+        return OperationResult(ok=True, action="touch_cancel", message=f"cancel {x},{y}")
 
 
 def _build_env(tmp_path: Path):
@@ -335,3 +357,73 @@ def test_ws_screen_keeps_streaming_via_non_blocking_preview_when_active_job_slee
             finally:
                 release.set()
                 manager.wait(job_id, timeout=2)
+
+
+def test_ws_screen_executes_swipe_and_realtime_touch_with_disconnect_cleanup(tmp_path: Path):
+    import json
+
+    app, _event_log, backend, device_service, manager = _build_env(tmp_path)
+    with manager:
+        device_service.connect("fake", "dev-ws")
+        with create_test_client(app) as client:
+            # Verify HTTP /api/touch endpoint as well
+            resp = client.post("/api/touch", json={"action": "down", "x": 10, "y": 12})
+            assert resp.status_code == 200
+            assert resp.json()["action"] == "touch_down"
+            resp_up = client.post("/api/touch", json={"action": "up", "x": 10, "y": 12})
+            assert resp_up.status_code == 200
+            assert client.post("/api/touch", json={"action": "bogus", "x": 1, "y": 1}).status_code == 422
+
+            backend.touch_events.clear()
+            with client.websocket_connect("/api/ws/screen?interval_ms=5000") as ws:
+                first_frame = ws.receive_bytes()
+                assert first_frame.startswith(b"\x89PNG\r\n\x1a\n")
+
+                # 1. Swipe over WS
+                ws.send_json({"type": "swipe", "x1": 10, "y1": 20, "x2": 50, "y2": 20, "duration_ms": 240})
+                got_swipe = False
+                for _ in range(6):
+                    packet = ws.receive()
+                    if packet.get("text") is not None:
+                        payload = json.loads(packet["text"])
+                        if payload.get("type") == "swipe_result":
+                            assert payload["result"]["ok"] is True
+                            got_swipe = True
+                            break
+                assert got_swipe is True
+                assert backend.swipes == [("dev-ws", 10, 20, 50, 20, 240)]
+
+                # 2. Live touch_down -> touch_up at a different point (fast flick auto-inserts touch_move!)
+                ws.send_json({"type": "touch_down", "x": 12, "y": 15})
+                ws.send_json({"type": "touch_up", "x": 44, "y": 18})
+                got_down = False
+                got_up = False
+                for _ in range(10):
+                    packet = ws.receive()
+                    if packet.get("text") is not None:
+                        payload = json.loads(packet["text"])
+                        if payload.get("type") == "touch_result" and payload.get("action") == "down":
+                            got_down = True
+                        elif payload.get("type") == "touch_result" and payload.get("action") == "up":
+                            got_up = True
+                    if got_down and got_up:
+                        break
+                assert got_down is True and got_up is True
+                assert backend.touch_events == [
+                    ("down", "dev-ws", 12, 15),
+                    ("move", "dev-ws", 44, 18),
+                    ("up", "dev-ws", 44, 18),
+                ]
+
+                # 3. Safety net: leave finger held down and abruptly close WS -> server must auto-cancel!
+                backend.touch_events.clear()
+                ws.send_json({"type": "touch_down", "x": 30, "y": 25})
+                for _ in range(6):
+                    packet = ws.receive()
+                    if packet.get("text") is not None:
+                        payload = json.loads(packet["text"])
+                        if payload.get("type") == "touch_result" and payload.get("action") == "down":
+                            break
+
+            assert ("down", "dev-ws", 30, 25) in backend.touch_events
+            assert ("cancel", "dev-ws", 30, 25) in backend.touch_events

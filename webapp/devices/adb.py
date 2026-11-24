@@ -909,6 +909,65 @@ class AdbBackend:
             data={"attempts": attempts},
         )
 
+    def _motionevent(
+        self,
+        device_id: str,
+        event: str,
+        x: int,
+        y: int,
+        action: str,
+    ) -> OperationResult:
+        ix, iy = int(x), int(y)
+        fallback_cmd = (
+            f"cmd input motionevent {event} {ix} {iy} >/dev/null 2>&1 || "
+            f"input motionevent {event} {ix} {iy}"
+        )
+        if event == "CANCEL":
+            fallback_cmd = (
+                f"cmd input motionevent CANCEL {ix} {iy} >/dev/null 2>&1 || "
+                f"cmd input motionevent UP {ix} {iy} >/dev/null 2>&1 || "
+                f"input motionevent UP {ix} {iy}"
+            )
+        if self._fast_shell_exec(device_id, fallback_cmd):
+            return OperationResult(
+                ok=True,
+                action=action,
+                message=f"Touch {event.lower()} {ix},{iy}",
+                data={"attempts": 1, "mode": "fast_shell"},
+            )
+        _result, attempts = self._run_with_retry(
+            [
+                "-s",
+                device_id,
+                "shell",
+                "input",
+                "motionevent",
+                "UP" if event == "CANCEL" else event,
+                str(ix),
+                str(iy),
+            ],
+            text=True,
+            attempts=self.retry_config.control_attempts,
+        )
+        return OperationResult(
+            ok=True,
+            action=action,
+            message=f"Touch {event.lower()} {ix},{iy}",
+            data={"attempts": attempts},
+        )
+
+    def touch_down(self, device_id: str, x: int, y: int) -> OperationResult:
+        return self._motionevent(device_id, "DOWN", x, y, "touch_down")
+
+    def touch_move(self, device_id: str, x: int, y: int) -> OperationResult:
+        return self._motionevent(device_id, "MOVE", x, y, "touch_move")
+
+    def touch_up(self, device_id: str, x: int, y: int) -> OperationResult:
+        return self._motionevent(device_id, "UP", x, y, "touch_up")
+
+    def touch_cancel(self, device_id: str, x: int, y: int) -> OperationResult:
+        return self._motionevent(device_id, "CANCEL", x, y, "touch_cancel")
+
     def restart_game(
         self,
         device_id: str,

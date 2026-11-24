@@ -125,6 +125,18 @@ class SwipeRequest(BaseModel):
     duration_ms: int = Field(default=300, ge=0)
 
 
+class TouchRequest(BaseModel):
+    action: StrictStr
+    x: int
+    y: int
+
+    @model_validator(mode="after")
+    def validate_action(self) -> TouchRequest:
+        if self.action not in {"down", "move", "up", "cancel"}:
+            raise ValueError("action must be down, move, up, or cancel.")
+        return self
+
+
 class MatchRequest(BaseModel):
     screenshot_base64: str
     template_path: str
@@ -730,6 +742,16 @@ def create_app(
             request.y2,
             request.duration_ms,
         ).to_dict()
+
+    @app.post("/api/touch")
+    def touch(request: TouchRequest) -> dict:
+        if request.action == "down":
+            return device_service.touch_down(request.x, request.y).to_dict()
+        if request.action == "move":
+            return device_service.touch_move(request.x, request.y).to_dict()
+        if request.action == "up":
+            return device_service.touch_up(request.x, request.y).to_dict()
+        return device_service.touch_cancel(request.x, request.y).to_dict()
 
     @app.get("/api/templates")
     def templates() -> dict[str, list[str]]:

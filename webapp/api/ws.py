@@ -267,6 +267,122 @@ def create_ws_router(
         def has_active_job() -> bool:
             return any(not job.status.terminal for job in job_manager.list(50))
 
+        live_touch_active = False
+        live_touch_pos: tuple[int, int] | None = None
+        touch_queue: asyncio.Queue[tuple[str, tuple[Any, ...]]] = asyncio.Queue()
+        pending_move_pos: tuple[int, int] | None = None
+        move_signal = asyncio.Event()
+
+        def _is_int(value: Any) -> bool:
+            return not isinstance(value, bool) and isinstance(value, int)
+
+        async def _execute_touch_item(kind: str, args: tuple[Any, ...]) -> None:
+            nonlocal live_touch_active, live_touch_pos
+            try:
+                if kind == "tap":
+                    op = await asyncio.to_thread(device_service.tap, args[0], args[1])
+                    await send_json_locked({"type": "tap_result", "result": op.to_dict()})
+                    wake_event.set()
+                elif kind == "swipe":
+                    op = await asyncio.to_thread(
+                        device_service.swipe,
+                        args[0],
+                        args[1],
+                        args[2],
+                        args[3],
+                        args[4],
+                    )
+                    await send_json_locked({"type": "swipe_result", "result": op.to_dict()})
+                    wake_event.set()
+                elif kind == "touch_down":
+                    op = await asyncio.to_thread(device_service.touch_down, args[0], args[1])
+                    live_touch_active = True
+                    live_touch_pos = (args[0], args[1])
+                    await send_json_locked({"type": "touch_result", "action": "down", "result": op.to_dict()})
+                    wake_event.set()
+                elif kind == "touch_move":
+                    if not live_touch_active:
+                        return
+                    await asyncio.to_thread(device_service.touch_move, args[0], args[1])
+                    live_touch_pos = (args[0], args[1])
+                    wake_event.set()
+                elif kind == "touch_up":
+                    was_active = live_touch_active
+                    prev_pos = live_touch_pos
+                    live_touch_active = False
+                    live_touch_pos = None
+                    if not was_active:
+                        return
+                    if prev_pos is not None and prev_pos != (args[0], args[1]):
+                        await asyncio.to_thread(device_service.touch_move, args[0], args[1])
+                    op = await asyncio.to_thread(device_service.touch_up, args[0], args[1])
+                    await send_json_locked({"type": "touch_result", "action": "up", "result": op.to_dict()})
+                    wake_event.set()
+                elif kind == "touch_cancel":
+                    was_active = live_touch_active
+                    live_touch_active = False
+                    live_touch_pos = None
+                    if not was_active:
+                        return
+                    op = await asyncio.to_thread(device_service.touch_cancel, args[0], args[1])
+                    await send_json_locked({"type": "touch_result", "action": "cancel", "result": op.to_dict()})
+                    wake_event.set()
+            except AppError as exc:
+                err_type = (
+                    "tap_error"
+                    if kind == "tap"
+                    else "swipe_error"
+                    if kind == "swipe"
+                    else "touch_error"
+                )
+                if kind == "touch_down":
+                    live_touch_active = False
+                    live_touch_pos = None
+                await send_json_locked({"type": err_type, "error": exc.to_response()["error"]})
+
+        async def touch_worker() -> None:
+            nonlocal pending_move_pos
+            try:
+                while not stop_event.is_set():
+                    if not touch_queue.empty():
+                        kind, args = touch_queue.get_nowait()
+                        if kind in {"touch_up", "touch_cancel"}:
+                            pending_move_pos = None
+                            move_signal.clear()
+                        await _execute_touch_item(kind, args)
+                        continue
+                    if pending_move_pos is not None:
+                        pos = pending_move_pos
+                        pending_move_pos = None
+                        move_signal.clear()
+                        await _execute_touch_item("touch_move", pos)
+                        continue
+                    queue_wait = asyncio.create_task(touch_queue.get())
+                    move_wait = asyncio.create_task(move_signal.wait())
+                    stop_wait = asyncio.create_task(stop_event.wait())
+                    done_wait, pending_wait = await asyncio.wait(
+                        {queue_wait, move_wait, stop_wait},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in pending_wait:
+                        task.cancel()
+                    await asyncio.gather(*pending_wait, return_exceptions=True)
+                    if stop_event.is_set():
+                        return
+                    if queue_wait in done_wait:
+                        kind, args = queue_wait.result()
+                        if kind in {"touch_up", "touch_cancel"}:
+                            pending_move_pos = None
+                            move_signal.clear()
+                        await _execute_touch_item(kind, args)
+                    elif move_wait in done_wait and pending_move_pos is not None:
+                        pos = pending_move_pos
+                        pending_move_pos = None
+                        move_signal.clear()
+                        await _execute_touch_item("touch_move", pos)
+            except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
+                return
+
         async def streamer() -> None:
             try:
                 while not stop_event.is_set():
@@ -321,8 +437,9 @@ def create_ws_router(
                     if stop_event.is_set():
                         return
                     await send_bytes_locked(encoded)
+                    active_interval = min(interval_seconds, 0.08) if live_touch_active else interval_seconds
                     try:
-                        await asyncio.wait_for(wake_event.wait(), timeout=interval_seconds)
+                        await asyncio.wait_for(wake_event.wait(), timeout=active_interval)
                     except TimeoutError:
                         pass
             except (WebSocketDisconnect, RuntimeError):
@@ -330,7 +447,7 @@ def create_ws_router(
                 return
 
         async def receiver() -> None:
-            nonlocal interval_seconds
+            nonlocal interval_seconds, pending_move_pos
             try:
                 while not stop_event.is_set():
                     raw = await websocket.receive_text()
@@ -357,23 +474,54 @@ def create_ws_router(
                     elif msg_type == "tap":
                         x = message.get("x")
                         y = message.get("y")
-                        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, int) or not isinstance(y, int):
+                        if not _is_int(x) or not _is_int(y):
                             await send_json_locked(
                                 {"type": "tap_error", "error": {"code": "invalid_tap", "message": "x and y must be integers."}}
                             )
                             continue
-                        try:
-                            op = await asyncio.to_thread(device_service.tap, x, y)
-                            await send_json_locked({"type": "tap_result", "result": op.to_dict()})
-                            wake_event.set()
-                        except AppError as exc:
-                            await send_json_locked({"type": "tap_error", "error": exc.to_response()["error"]})
+                        touch_queue.put_nowait(("tap", (x, y)))
+                    elif msg_type == "swipe":
+                        x1 = message.get("x1")
+                        y1 = message.get("y1")
+                        x2 = message.get("x2")
+                        y2 = message.get("y2")
+                        duration_ms = message.get("duration_ms", 300)
+                        if (
+                            not _is_int(x1)
+                            or not _is_int(y1)
+                            or not _is_int(x2)
+                            or not _is_int(y2)
+                            or not _is_int(duration_ms)
+                            or duration_ms < 0
+                        ):
+                            await send_json_locked(
+                                {"type": "swipe_error", "error": {"code": "invalid_swipe", "message": "Swipe coordinates and duration_ms must be integers."}}
+                            )
+                            continue
+                        touch_queue.put_nowait(("swipe", (x1, y1, x2, y2, min(duration_ms, 10000))))
+                    elif msg_type in {"touch_down", "touch_move", "touch_up", "touch_cancel"}:
+                        x = message.get("x")
+                        y = message.get("y")
+                        if not _is_int(x) or not _is_int(y):
+                            await send_json_locked(
+                                {"type": "touch_error", "error": {"code": "invalid_touch", "message": "x and y must be integers."}}
+                            )
+                            continue
+                        if msg_type == "touch_move":
+                            pending_move_pos = (x, y)
+                            move_signal.set()
+                        else:
+                            if msg_type in {"touch_up", "touch_cancel"}:
+                                pending_move_pos = None
+                                move_signal.clear()
+                            touch_queue.put_nowait((msg_type, (x, y)))
             except (WebSocketDisconnect, RuntimeError):
                 stop_event.set()
                 return
 
         stream_task = asyncio.create_task(streamer())
         recv_task = asyncio.create_task(receiver())
+        touch_task = asyncio.create_task(touch_worker())
         try:
             done, pending = await asyncio.wait(
                 {stream_task, recv_task},
@@ -381,9 +529,9 @@ def create_ws_router(
             )
             stop_event.set()
             wake_event.set()
-            for task in pending:
+            for task in (*pending, touch_task):
                 task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(*pending, touch_task, return_exceptions=True)
             for task in done:
                 exc = task.exception()
                 if exc is not None and not isinstance(exc, WebSocketDisconnect):
@@ -394,8 +542,13 @@ def create_ws_router(
             stop_event.set()
             wake_event.set()
             unsub_frames()
-            for task in (stream_task, recv_task):
+            for task in (stream_task, recv_task, touch_task):
                 if not task.done():
                     task.cancel()
+            if live_touch_active and live_touch_pos is not None:
+                try:
+                    await asyncio.to_thread(device_service.touch_cancel, live_touch_pos[0], live_touch_pos[1])
+                except Exception:
+                    pass
 
     return router

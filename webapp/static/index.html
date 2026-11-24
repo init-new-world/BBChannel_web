@@ -150,9 +150,9 @@
               <button id="rotate-screen-left" class="ghost-button" type="button" title="Rotate screen counter-clockwise 90 degrees" disabled>-90°</button>
               <button id="rotate-screen-right" class="ghost-button" type="button" title="Rotate screen clockwise 90 degrees" disabled>+90°</button>
               <button id="rotate-screen-auto" class="ghost-button" type="button" title="Reset screen rotation to automatic" disabled>Auto</button>
-              <label class="screen-toggle" title="Send tap immediately when clicking the screenshot">
+              <label class="screen-toggle" title="Tap, long-press, or drag directly on the screenshot in real time">
                 <input id="click-to-tap" type="checkbox" disabled>
-                <span>Click to tap</span>
+                <span>Touch control</span>
               </label>
               <label class="screen-toggle" title="Continuously refresh the screenshot for connection calibration">
                 <input id="auto-refresh-screen" type="checkbox" disabled>
@@ -167,9 +167,10 @@
             </div>
           </div>
           <div id="screen-stage" class="screen-stage">
-            <img id="screenshot" alt="Device screenshot">
+            <img id="screenshot" alt="Device screenshot" draggable="false">
             <div id="screen-empty" class="empty-state">No screenshot</div>
             <div id="match-overlay" class="match-overlay" hidden></div>
+            <div id="touch-overlay" class="touch-overlay" hidden></div>
           </div>
         </section>
 

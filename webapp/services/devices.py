@@ -45,6 +45,7 @@ class DeviceService:
         self._frame_subscribers_lock = threading.Lock()
         self._frame_subscribers: list[Callable[[bytes], None]] = []
         self._latest_frame: bytes | None = None
+        self._live_touch_active: tuple[DeviceEndpoint, int, int] | None = None
         self._closed = False
         self._operation_timing: ContextVar[tuple[Callable[[float], None], object, object] | None] = ContextVar(
             "device_operation_timing", default=None,
@@ -243,6 +244,19 @@ class DeviceService:
 
     def disconnect(self) -> ConnectionState:
         previous_state = self.state()
+        with self._state_lock:
+            active_touch = self._live_touch_active
+            self._live_touch_active = None
+        if active_touch is not None:
+            touch_endpoint, last_x, last_y = active_touch
+            try:
+                backend = self._backend_for(touch_endpoint.backend)
+                cancel_fn = getattr(backend, "touch_cancel", None) or getattr(backend, "touch_up", None)
+                if callable(cancel_fn):
+                    with self._lock_for(touch_endpoint):
+                        cancel_fn(touch_endpoint.device_id, last_x, last_y)
+            except Exception:
+                pass
         with self._state_lock:
             self._capture = None
             self._control = None
@@ -458,6 +472,71 @@ class DeviceService:
             [[x1, y1], [x2, y2]],
             [list(mapped_start), list(mapped_end)],
         )
+
+    def supports_live_touch(self) -> bool:
+        try:
+            backend, _endpoint = self._require_control()
+        except AppError:
+            return False
+        return all(
+            callable(getattr(backend, name, None))
+            for name in ("touch_down", "touch_move", "touch_up")
+        )
+
+    def _run_live_touch(
+        self,
+        action: str,
+        x: int,
+        y: int,
+        *,
+        log_event: bool,
+    ) -> OperationResult:
+        backend, endpoint = self._require_control()
+        method = getattr(backend, action, None)
+        if action == "touch_cancel" and not callable(method):
+            method = getattr(backend, "touch_up", None)
+        if not callable(method):
+            raise AppError(
+                ErrorCode.TAP_FAILED,
+                "Connected control backend does not support real-time touch events.",
+                {"backend": endpoint.backend, "action": action, "live_touch_unavailable": True},
+            )
+        mapped_x, mapped_y = self._map_point(x, y)
+        with self._lock_for(endpoint):
+            try:
+                result = method(endpoint.device_id, mapped_x, mapped_y)
+            except AppError as exc:
+                self._event_log.error(action, exc.message, exc.details)
+                raise
+        with self._state_lock:
+            if action in {"touch_down", "touch_move"}:
+                self._live_touch_active = (endpoint, mapped_x, mapped_y)
+            elif action in {"touch_up", "touch_cancel"}:
+                self._live_touch_active = None
+        if log_event:
+            self._event_log.info(
+                action,
+                result.message,
+                {
+                    "backend": endpoint.backend,
+                    "device_id": endpoint.device_id,
+                    "requested": [x, y],
+                    "mapped": [mapped_x, mapped_y],
+                },
+            )
+        return _operation_with_mapping(result, [x, y], [mapped_x, mapped_y])
+
+    def touch_down(self, x: int, y: int) -> OperationResult:
+        return self._run_live_touch("touch_down", x, y, log_event=True)
+
+    def touch_move(self, x: int, y: int) -> OperationResult:
+        return self._run_live_touch("touch_move", x, y, log_event=False)
+
+    def touch_up(self, x: int, y: int) -> OperationResult:
+        return self._run_live_touch("touch_up", x, y, log_event=True)
+
+    def touch_cancel(self, x: int, y: int) -> OperationResult:
+        return self._run_live_touch("touch_cancel", x, y, log_event=True)
 
     def restart_game(self, package_name: str | None = None) -> OperationResult:
         with self._state_lock:

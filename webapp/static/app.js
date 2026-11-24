@@ -6,6 +6,7 @@ import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnConditionsEditor } from "./preset-turn-conditions.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { createPresetWizard } from "./preset-wizard.js";
+import { attachScreenTouchController } from "./screen-touch.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { changeReplaceSource, inspectReplaceSource } from "./turn-replace-source.js";
 import { editUsedServantsSource, inspectTeamSource } from "./team-source.js";
@@ -98,6 +99,9 @@ const state = {
   jobElapsedTimer: null,
   devicesRefreshing: false,
   consolePrefs: {},
+  screenTouch: null,
+  touchRefreshTimer: null,
+  touchRefreshInFlight: false,
 };
 
 const els = {
@@ -210,6 +214,7 @@ const els = {
   screenshot: document.querySelector("#screenshot"),
   screenEmpty: document.querySelector("#screen-empty"),
   matchOverlay: document.querySelector("#match-overlay"),
+  touchOverlay: document.querySelector("#touch-overlay"),
   screenSourceMode: document.querySelector("#screen-source-mode"),
   screenDebugMode: document.querySelector("#screen-debug-mode"),
   rotateScreenLeft: document.querySelector("#rotate-screen-left"),
@@ -819,7 +824,77 @@ function bindEvents() {
   });
   els.refreshEvents.addEventListener("click", () => loadEvents(true));
   els.screenshot.addEventListener("load", onScreenshotLoaded);
-  els.screenStage.addEventListener("click", populateTapFromClick);
+  els.clickToTap?.addEventListener("change", () => {
+    if (!els.clickToTap.checked) {
+      state.screenTouch?.cancel("disabled");
+    }
+    syncScreenTouchMode();
+  });
+  state.screenTouch = attachScreenTouchController({
+    stage: els.screenStage,
+    image: els.screenshot,
+    overlay: els.touchOverlay,
+    getNaturalSize: () => state.screenshotNaturalSize,
+    isControlEnabled: () => Boolean(els.clickToTap?.checked && state.connected),
+    translate: t,
+    callbacks: {
+      onTap: ({ x, y, controlEnabled }) => {
+        els.tapX.value = x;
+        els.tapY.value = y;
+        if (controlEnabled) {
+          void sendTapCoordinates(x, y);
+        }
+      },
+      onLiveDown: ({ x, y, mode }) => {
+        els.tapX.value = x;
+        els.tapY.value = y;
+        if (mode === "drag") {
+          els.swipeX1.value = x;
+          els.swipeY1.value = y;
+        }
+        void sendLiveTouchEvent("down", x, y);
+        startTouchFallbackRefresh();
+      },
+      onLiveMove: ({ x, y }) => {
+        els.swipeX2.value = x;
+        els.swipeY2.value = y;
+        void sendLiveTouchEvent("move", x, y);
+      },
+      onLiveUp: ({ x, y, mode, durationMs, start }) => {
+        if (mode === "drag") {
+          els.swipeX1.value = start.x;
+          els.swipeY1.value = start.y;
+          els.swipeX2.value = x;
+          els.swipeY2.value = y;
+          els.swipeDuration.value = Math.max(100, Math.round(durationMs));
+        } else {
+          els.tapX.value = x;
+          els.tapY.value = y;
+        }
+        stopTouchFallbackRefresh();
+        void sendLiveTouchEvent("up", x, y);
+      },
+      onLiveCancel: ({ x, y }) => {
+        stopTouchFallbackRefresh();
+        void sendLiveTouchEvent("cancel", x, y);
+      },
+      onSwipeFallback: ({ x1, y1, x2, y2, durationMs }) => {
+        els.swipeX1.value = x1;
+        els.swipeY1.value = y1;
+        els.swipeX2.value = x2;
+        els.swipeY2.value = y2;
+        els.swipeDuration.value = durationMs;
+        void sendSwipeCoordinates(x1, y1, x2, y2, durationMs);
+      },
+      onPickDrag: ({ x1, y1, x2, y2, durationMs }) => {
+        els.swipeX1.value = x1;
+        els.swipeY1.value = y1;
+        els.swipeX2.value = x2;
+        els.swipeY2.value = y2;
+        els.swipeDuration.value = durationMs;
+      },
+    },
+  });
   els.startDiagnostic.addEventListener("click", startDiagnosticJob);
   els.startBattleDryRun.addEventListener("click", startBattleDryRun);
   els.startBattlePlan.addEventListener("click", startBattlePlan);
@@ -1017,6 +1092,9 @@ function applyConnectionState(payload, { fromSnapshot = false } = {}) {
   state.connected = connected;
   setConnectionLabel(payload || { connected: false });
   if (connected && payload?.backend) {
+    if (!wasConnected) {
+      state.screenTouch?.resetLiveTouchCapability();
+    }
     selectBackend(payload.backend);
     renderDevices(payload.device_id || "");
     if (!fromSnapshot && els.autoRefreshScreen && state.consolePrefs.autoLiveStream !== false) {
@@ -1024,6 +1102,8 @@ function applyConnectionState(payload, { fromSnapshot = false } = {}) {
     }
     syncAutoRefreshScreen(!fromSnapshot);
   } else if (!connected && wasConnected) {
+    state.screenTouch?.cancel("disconnected");
+    stopTouchFallbackRefresh();
     state.screenRotation = null;
     if (els.autoRefreshScreen) els.autoRefreshScreen.checked = false;
     stopAutoRefreshScreen();
@@ -3725,6 +3805,18 @@ function connectScreenSocket(triggerImmediate = false) {
           const error = new Error(payload.error?.message || "Tap failed.");
           error.payload = { error: payload.error };
           showError(error);
+        } else if (payload.type === "swipe_error") {
+          const error = new Error(payload.error?.message || "Swipe failed.");
+          error.payload = { error: payload.error };
+          showError(error);
+        } else if (payload.type === "touch_error") {
+          if (payload.error?.details?.live_touch_unavailable) {
+            state.screenTouch?.disableLiveTouch();
+          } else {
+            const error = new Error(payload.error?.message || "Touch event failed.");
+            error.payload = { error: payload.error };
+            showError(error);
+          }
         }
       } catch {
         // Ignore malformed text frames.
@@ -3937,26 +4029,35 @@ async function sendTapCoordinates(x, y) {
       method: "POST",
       body: JSON.stringify({ x, y }),
     });
+    if (state.connected && !els.autoRefreshScreen?.checked) {
+      void refreshTouchSnapshotOnce();
+    }
     await loadEvents();
   } catch (error) {
     showError(error);
   }
 }
 
-async function sendTap() {
-  await sendTapCoordinates(readNumber(els.tapX), readNumber(els.tapY));
-}
-
-async function sendSwipe() {
+async function sendSwipeCoordinates(x1, y1, x2, y2, durationMs) {
+  if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+    try {
+      state.screenSocket.send(
+        JSON.stringify({ type: "swipe", x1, y1, x2, y2, duration_ms: durationMs }),
+      );
+      return;
+    } catch {
+      // Fall back to HTTP swipe if socket send fails.
+    }
+  }
   try {
     await api("/api/swipe", {
       method: "POST",
       body: JSON.stringify({
-        x1: readNumber(els.swipeX1),
-        y1: readNumber(els.swipeY1),
-        x2: readNumber(els.swipeX2),
-        y2: readNumber(els.swipeY2),
-        duration_ms: readNumber(els.swipeDuration),
+        x1,
+        y1,
+        x2,
+        y2,
+        duration_ms: durationMs,
       }),
     });
     if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
@@ -3965,11 +4066,91 @@ async function sendSwipe() {
       } catch {
         // Ignore transient send failures.
       }
+    } else if (state.connected && !els.autoRefreshScreen?.checked) {
+      void refreshTouchSnapshotOnce();
     }
     await loadEvents();
   } catch (error) {
     showError(error);
   }
+}
+
+async function sendLiveTouchEvent(action, x, y) {
+  const wsType = `touch_${action}`;
+  if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+    try {
+      state.screenSocket.send(JSON.stringify({ type: wsType, x, y }));
+      return;
+    } catch {
+      // Fall back to HTTP touch if socket send fails.
+    }
+  }
+  try {
+    await api("/api/touch", {
+      method: "POST",
+      body: JSON.stringify({ action, x, y }),
+    });
+    if ((action === "up" || action === "cancel") && state.connected && !els.autoRefreshScreen?.checked) {
+      void refreshTouchSnapshotOnce();
+    }
+  } catch (error) {
+    if (error?.payload?.error?.details?.live_touch_unavailable) {
+      state.screenTouch?.disableLiveTouch();
+      return;
+    }
+    showError(error);
+  }
+}
+
+async function refreshTouchSnapshotOnce() {
+  if (!state.connected || state.touchRefreshInFlight) {
+    return;
+  }
+  state.touchRefreshInFlight = true;
+  try {
+    await captureScreenshot({ quiet: true });
+  } catch {
+    // Ignore transient preview refresh errors during manual touch.
+  } finally {
+    state.touchRefreshInFlight = false;
+  }
+}
+
+function startTouchFallbackRefresh() {
+  stopTouchFallbackRefresh();
+  if (!state.connected) return;
+  if (state.screenSocket && state.screenSocket.readyState === WebSocket.OPEN) {
+    return;
+  }
+  state.touchRefreshTimer = window.setInterval(() => {
+    void refreshTouchSnapshotOnce();
+  }, 220);
+}
+
+function stopTouchFallbackRefresh() {
+  if (state.touchRefreshTimer) {
+    window.clearInterval(state.touchRefreshTimer);
+    state.touchRefreshTimer = null;
+  }
+}
+
+function syncScreenTouchMode() {
+  const active = Boolean(els.clickToTap?.checked && state.connected);
+  els.screenStage?.classList.toggle("touch-control-active", active);
+}
+
+async function sendTap() {
+  await sendTapCoordinates(readNumber(els.tapX), readNumber(els.tapY));
+}
+
+async function sendSwipe() {
+  await sendSwipeCoordinates(
+    readNumber(els.swipeX1),
+    readNumber(els.swipeY1),
+    readNumber(els.swipeX2),
+    readNumber(els.swipeY2),
+    readNumber(els.swipeDuration),
+  );
 }
 
 async function startDiagnosticJob() {
@@ -5740,6 +5921,11 @@ function updateControls() {
   if (els.rotateScreenRight) els.rotateScreenRight.disabled = !state.connected;
   if (els.rotateScreenAuto) els.rotateScreenAuto.disabled = !state.connected || state.screenRotation === null;
   if (els.clickToTap) els.clickToTap.disabled = !state.connected;
+  if (!state.connected) {
+    state.screenTouch?.cancel("disconnected");
+    stopTouchFallbackRefresh();
+  }
+  syncScreenTouchMode();
   if (els.autoRefreshScreen) {
     els.autoRefreshScreen.disabled = !state.connected;
     if (!state.connected) els.autoRefreshScreen.checked = false;
@@ -6109,28 +6295,6 @@ function renderMatch(result) {
 function clearMatchOverlay() {
   els.matchOverlay.hidden = true;
   els.matchOverlay.removeAttribute("style");
-}
-
-function populateTapFromClick(event) {
-  if (!state.screenshotNaturalSize || !els.screenshot.classList.contains("visible")) {
-    return;
-  }
-  const rect = els.screenshot.getBoundingClientRect();
-  if (
-    event.clientX < rect.left ||
-    event.clientX > rect.right ||
-    event.clientY < rect.top ||
-    event.clientY > rect.bottom
-  ) {
-    return;
-  }
-  const x = Math.round(((event.clientX - rect.left) / rect.width) * state.screenshotNaturalSize.width);
-  const y = Math.round(((event.clientY - rect.top) / rect.height) * state.screenshotNaturalSize.height);
-  els.tapX.value = x;
-  els.tapY.value = y;
-  if (els.clickToTap?.checked && state.connected) {
-    void sendTapCoordinates(x, y);
-  }
 }
 
 function setScreenScale(mode) {

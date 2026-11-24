@@ -629,6 +629,71 @@ class MumuBackend:
             data={"from": [x1, y1], "to": [x2, y2], "duration_ms": duration_ms},
         )
 
+    def touch_down(self, device_id: str, x: int, y: int) -> OperationResult:
+        index = self._parse_device_id(device_id)
+        try:
+            handle = self._session(index)
+            native_x, native_y = self._native_touch_point(index, handle, x, y)
+            self.native_api.touch_down(handle, self.display_id, native_x, native_y)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                ErrorCode.TAP_FAILED,
+                "MuMu direct touch_down failed.",
+                {"device_id": device_id, "x": x, "y": y, "error": str(exc)},
+            ) from exc
+        return OperationResult(
+            ok=True,
+            action="touch_down",
+            message="MuMu touch down completed.",
+            data={"x": x, "y": y, "display_id": self.display_id},
+        )
+
+    def touch_move(self, device_id: str, x: int, y: int) -> OperationResult:
+        index = self._parse_device_id(device_id)
+        try:
+            handle = self._session(index)
+            native_x, native_y = self._native_touch_point(index, handle, x, y)
+            self.native_api.touch_down(handle, self.display_id, native_x, native_y)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                ErrorCode.SWIPE_FAILED,
+                "MuMu direct touch_move failed.",
+                {"device_id": device_id, "x": x, "y": y, "error": str(exc)},
+            ) from exc
+        return OperationResult(
+            ok=True,
+            action="touch_move",
+            message="MuMu touch move completed.",
+            data={"x": x, "y": y, "display_id": self.display_id},
+        )
+
+    def touch_up(self, device_id: str, x: int, y: int) -> OperationResult:
+        index = self._parse_device_id(device_id)
+        try:
+            handle = self._session(index)
+            self.native_api.touch_up(handle, self.display_id)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise AppError(
+                ErrorCode.TAP_FAILED,
+                "MuMu direct touch_up failed.",
+                {"device_id": device_id, "x": x, "y": y, "error": str(exc)},
+            ) from exc
+        return OperationResult(
+            ok=True,
+            action="touch_up",
+            message="MuMu touch up completed.",
+            data={"x": x, "y": y, "display_id": self.display_id},
+        )
+
+    def touch_cancel(self, device_id: str, x: int, y: int) -> OperationResult:
+        return self.touch_up(device_id, x, y)
+
     def close(self) -> None:
         with self._session_lock:
             sessions = sorted(self._sessions.items())
