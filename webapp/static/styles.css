@@ -3051,14 +3051,14 @@ select:disabled {
 
 .wizard-battle-board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .wizard-servant-skill-col {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 7px;
+  padding: 9px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel);
@@ -3071,8 +3071,8 @@ select:disabled {
 .wizard-skill-col-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  gap: 7px;
+  font-size: 13px;
   font-weight: 700;
   min-width: 0;
 }
@@ -3084,8 +3084,8 @@ select:disabled {
 }
 
 .wizard-mini-avatar {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 5px;
   object-fit: cover;
   border: 1px solid var(--line);
@@ -3094,39 +3094,88 @@ select:disabled {
 
 .wizard-skill-buttons {
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 .wizard-skill-btn {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 4px 7px;
-  border-radius: 6px;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 46px;
+  padding: 6px 8px;
+  border-radius: 7px;
   border: 1px solid var(--line);
   background: var(--panel-soft);
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 
 .wizard-skill-btn:hover {
   border-color: var(--accent);
   background: rgba(36, 104, 213, 0.08);
-  color: var(--accent-strong);
+}
+
+.wizard-skill-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: #1b222c;
+  border: 1px solid rgba(30, 37, 45, 0.25);
+  flex-shrink: 0;
+}
+
+.wizard-skill-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 2px;
+}
+
+.wizard-skill-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
 }
 
 .wizard-skill-btn .sk-idx {
-  font-weight: 800;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(36, 104, 213, 0.12);
   color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 800;
   flex-shrink: 0;
 }
 
 .wizard-skill-btn .sk-name {
+  font-weight: 700;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wizard-skill-btn .sk-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.32;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.wizard-chip-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+  background: #1b222c;
+  flex-shrink: 0;
 }
 
 .wizard-target-bar {
@@ -3244,9 +3293,12 @@ img.broken {
 
 @media (max-width: 760px) {
   .wizard-stepper,
-  .wizard-mode-cards,
-  .wizard-battle-board {
+  .wizard-mode-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wizard-battle-board {
+    grid-template-columns: 1fr;
   }
 
   .wizard-slots-grid {

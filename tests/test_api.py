@@ -1809,6 +1809,14 @@ def test_servant_portrait_route_serves_face_image_and_exposes_star_metadata(tmp_
     bad = client.get("/api/servants/image", params={"name": "../secret", "server": "CH"})
     assert bad.status_code == 404
 
+    skill_dir = assets / "servant_skill"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (40, 40), (200, 150, 40)).save(skill_dir / "充能.png")
+    icon = client.get("/api/skills/icon", params={"name": "充能"})
+    assert icon.status_code == 200
+    assert icon.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert client.get("/api/skills/icon", params={"name": "../bad"}).status_code == 404
+
 
 def test_tap_route_returns_structured_error_when_disconnected(tmp_path: Path):
     response = _client(tmp_path).post("/api/tap", json={"x": 10, "y": 20})

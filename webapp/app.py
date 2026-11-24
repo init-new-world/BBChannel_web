@@ -1115,6 +1115,25 @@ def create_app(
     def master_portrait(equip: str, sex: int = Query(default=0, ge=0, le=1)) -> Response:
         return Response(content=master_portraits.read_image(equip, sex), media_type="image/png", headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/skills/icon")
+    def skill_icon(name: str) -> Response:
+        cleaned = name.strip()
+        if (
+            not cleaned
+            or cleaned in (".", "..")
+            or any(ch in cleaned for ch in ("/", "\\", ":", "\x00"))
+        ):
+            raise AppError(ErrorCode.TEMPLATE_NOT_FOUND, "Skill icon not found.")
+        icon_root = (resources.assets_dir / "servant_skill").resolve()
+        path = resources.resolve_template(f"servant_skill/{cleaned}.png")
+        if not path.is_relative_to(icon_root):
+            raise AppError(ErrorCode.TEMPLATE_NOT_FOUND, "Skill icon not found.")
+        return Response(
+            content=path.read_bytes(),
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
     @app.post("/api/match")
     def match_template(request: MatchRequest) -> dict:
         resources.resolve_template(request.template_path)

@@ -2089,6 +2089,21 @@ class ScriptDataService:
                     names.update(alias for alias in aliases if isinstance(alias, str))
         return names
 
+    def _load_skill_details(self) -> dict[str, dict[str, list[dict[str, str]]]]:
+        cached = getattr(self, "_skill_details_cache", None)
+        if cached is not None:
+            return cached
+        path = self.data_dir / "skill_details.json"
+        if not path.is_file():
+            return {}
+        try:
+            loaded = self._load_json(path)
+        except AppError:
+            loaded = {}
+        result = loaded if isinstance(loaded, dict) else {}
+        self._skill_details_cache = result
+        return result
+
     def _servant_summary(self, name: str, details: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "name": name,
@@ -2105,15 +2120,26 @@ class ScriptDataService:
         face_index = details.get("servant_face")
         if isinstance(face_index, int) and not isinstance(face_index, bool) and face_index > 0:
             summary["face_index"] = face_index
+        sn = str(details.get("SN") or "").strip()
+        if sn:
+            skill_db = self._load_skill_details().get("servants")
+            if isinstance(skill_db, dict) and isinstance(skill_db.get(sn), list):
+                summary["skill_details"] = skill_db[sn]
         return summary
 
     def _master_summary(self, name: str, details: dict[str, Any]) -> dict[str, Any]:
-        return {
+        summary: dict[str, Any] = {
             "name": name,
             "sn": details.get("SN"),
             "skills": details.get("skill_name") if isinstance(details.get("skill_name"), list) else [],
             "skill_types": details.get("skill_type") if isinstance(details.get("skill_type"), list) else [],
         }
+        sn = details.get("SN")
+        if sn is not None and not isinstance(sn, bool):
+            skill_db = self._load_skill_details().get("masters")
+            if isinstance(skill_db, dict) and isinstance(skill_db.get(str(sn)), list):
+                summary["skill_details"] = skill_db[str(sn)]
+        return summary
 
     def _relative_path(self, path: Path) -> str:
         try:

@@ -59,6 +59,22 @@ function masterPortraitUrl(sn, sex = 0) {
   return `/api/masters/image?${params.toString()}`;
 }
 
+function skillIconUrl(iconName) {
+  return `/api/skills/icon?name=${encodeURIComponent(iconName)}`;
+}
+
+function resolveSkillDisplay(info, skillIndex, fallbackLabel) {
+  const iconKey = typeof info?.skills?.[skillIndex] === "string" ? info.skills[skillIndex].trim() : "";
+  const detailObj = info?.skill_details?.[skillIndex];
+  const officialName = typeof detailObj?.name === "string" ? detailObj.name.trim() : "";
+  const detailText = typeof detailObj?.detail === "string" ? detailObj.detail.trim() : "";
+  return {
+    iconKey,
+    title: officialName || iconKey || fallbackLabel,
+    note: detailText || (officialName && iconKey ? iconKey : ""),
+  };
+}
+
 function normalizeAssistEquipArray(value, isGrand) {
   if (isGrand) {
     if (Array.isArray(value) && value.length === 3 && value.some((v) => v === null || Array.isArray(v))) {
@@ -994,16 +1010,37 @@ export function createPresetWizard({
       btns.className = "wizard-skill-buttons";
       for (let sk = 0; sk < 3; sk += 1) {
         const skillNum = slot * 3 + sk + 1;
-        const skName = info?.skills?.[sk] || t("Skill {index}", { index: sk + 1 });
+        const display = resolveSkillDisplay(info, sk, t("Skill {index}", { index: sk + 1 }));
         const skType = info?.skill_types?.[sk];
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "wizard-skill-btn";
-        btn.innerHTML = `<span class="sk-idx">S${sk + 1}</span><span class="sk-name">${skName}</span>`;
-        btn.title = `${title.textContent} · S${sk + 1} ${skName}`;
+        if (display.iconKey) {
+          btn.append(createAvatarImg(skillIconUrl(display.iconKey), display.iconKey, "wizard-skill-icon"));
+        }
+        const textWrap = document.createElement("div");
+        textWrap.className = "wizard-skill-text";
+        const topLine = document.createElement("div");
+        topLine.className = "wizard-skill-top";
+        const idxEl = document.createElement("span");
+        idxEl.className = "sk-idx";
+        idxEl.textContent = `S${sk + 1}`;
+        const nameEl = document.createElement("span");
+        nameEl.className = "sk-name";
+        nameEl.textContent = display.title;
+        topLine.append(idxEl, nameEl);
+        textWrap.append(topLine);
+        if (display.note) {
+          const noteEl = document.createElement("div");
+          noteEl.className = "sk-note";
+          noteEl.textContent = display.note;
+          textWrap.append(noteEl);
+        }
+        btn.append(textWrap);
+        btn.title = `${title.textContent} · S${sk + 1} ${display.title}${display.note ? `\n${display.note}` : ""}`;
         btn.addEventListener("click", () => {
           if (skType === 1) {
-            state.pendingTargetSkill = { skillNum, isSwap: false, label: `${title.textContent} S${sk + 1} (${skName})` };
+            state.pendingTargetSkill = { skillNum, isSwap: false, label: `${title.textContent} · ${display.title}` };
             render();
           } else {
             pushSkillCommand(skillNum);
@@ -1032,18 +1069,40 @@ export function createPresetWizard({
     mBtns.className = "wizard-skill-buttons";
     for (let sk = 0; sk < 3; sk += 1) {
       const skillNum = 10 + sk;
-      const skName = masterInfo?.skills?.[sk] || t("Skill {index}", { index: sk + 1 });
+      const display = resolveSkillDisplay(masterInfo, sk, t("Skill {index}", { index: sk + 1 }));
       const skType = masterInfo?.skill_types?.[sk];
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "wizard-skill-btn";
-      btn.innerHTML = `<span class="sk-idx">M${sk + 1}</span><span class="sk-name">${skName}</span>`;
+      if (display.iconKey) {
+        btn.append(createAvatarImg(skillIconUrl(display.iconKey), display.iconKey, "wizard-skill-icon"));
+      }
+      const textWrap = document.createElement("div");
+      textWrap.className = "wizard-skill-text";
+      const topLine = document.createElement("div");
+      topLine.className = "wizard-skill-top";
+      const idxEl = document.createElement("span");
+      idxEl.className = "sk-idx";
+      idxEl.textContent = `M${sk + 1}`;
+      const nameEl = document.createElement("span");
+      nameEl.className = "sk-name";
+      nameEl.textContent = display.title;
+      topLine.append(idxEl, nameEl);
+      textWrap.append(topLine);
+      if (display.note) {
+        const noteEl = document.createElement("div");
+        noteEl.className = "sk-note";
+        noteEl.textContent = display.note;
+        textWrap.append(noteEl);
+      }
+      btn.append(textWrap);
+      btn.title = `${mTitle.textContent} · M${sk + 1} ${display.title}${display.note ? `\n${display.note}` : ""}`;
       btn.addEventListener("click", () => {
         if (skType === 3) {
-          state.pendingTargetSkill = { skillNum, isSwap: true, front: 1, reserve: 4, label: `${t("Order Change")} (M${sk + 1})` };
+          state.pendingTargetSkill = { skillNum, isSwap: true, front: 1, reserve: 4, label: `${display.title} (M${sk + 1})` };
           render();
         } else if (skType === 1) {
-          state.pendingTargetSkill = { skillNum, isSwap: false, label: `${t("Master")} M${sk + 1} (${skName})` };
+          state.pendingTargetSkill = { skillNum, isSwap: false, label: `${mTitle.textContent} · ${display.title}` };
           render();
         } else {
           pushSkillCommand(skillNum);
@@ -1229,8 +1288,12 @@ export function createPresetWizard({
       skillList.forEach((cmd, idx) => {
         const chip = document.createElement("span");
         chip.className = "wizard-action-chip";
+        const chipIcon = resolveSkillChipIcon(cmd, config, servants);
+        if (chipIcon) {
+          chip.append(createAvatarImg(skillIconUrl(chipIcon), "", "wizard-chip-icon"));
+        }
         const lbl = document.createElement("span");
-        lbl.textContent = formatSkillChip(cmd, config);
+        lbl.textContent = formatSkillChip(cmd, config, servants);
         const del = document.createElement("button");
         del.type = "button";
         del.textContent = "×";
@@ -1250,7 +1313,23 @@ export function createPresetWizard({
     container.append(timeline);
   }
 
-  function formatSkillChip(cmd, config) {
+  function resolveSkillChipIcon(cmd, config, servants = []) {
+    const num = typeof cmd === "number" ? cmd : (Array.isArray(cmd) && typeof cmd[0] === "number" ? cmd[0] : null);
+    if (num === null) return "";
+    if (num >= 1 && num <= 9) {
+      const slot = Math.floor((num - 1) / 3);
+      const sk = (num - 1) % 3;
+      const info = findServant(servants, config[`servant_${slot}_name`]);
+      return info?.skills?.[sk] || "";
+    }
+    if (num >= 10 && num <= 12) {
+      const mInfo = (state.masters || []).find((m) => String(m.sn) === String(config.master_equip));
+      return mInfo?.skills?.[num - 10] || "";
+    }
+    return "";
+  }
+
+  function formatSkillChip(cmd, config, servants = []) {
     const slotLabel = (slot) => {
       const nm = config[`servant_${slot - 1}_name`];
       return nm ? `${slot}·${nm.slice(0, 6)}` : `S${slot}`;
@@ -1259,9 +1338,15 @@ export function createPresetWizard({
       if (num >= 1 && num <= 9) {
         const slot = Math.floor((num - 1) / 3) + 1;
         const sk = ((num - 1) % 3) + 1;
-        return `${slotLabel(slot)} 技${sk}`;
+        const info = findServant(servants, config[`servant_${slot - 1}_name`]);
+        const official = info?.skill_details?.[sk - 1]?.name;
+        return official ? `${slotLabel(slot)} ${official}` : `${slotLabel(slot)} 技${sk}`;
       }
-      if (num >= 10 && num <= 12) return `${t("Master")} 技${num - 9}`;
+      if (num >= 10 && num <= 12) {
+        const mInfo = (state.masters || []).find((m) => String(m.sn) === String(config.master_equip));
+        const official = mInfo?.skill_details?.[num - 10]?.name;
+        return official ? `${t("Master")} ${official}` : `${t("Master")} 技${num - 9}`;
+      }
       if (num === 13) return t("Enemy target");
       return String(num);
     };
@@ -1326,7 +1411,7 @@ export function createPresetWizard({
       const nps = Array.isArray(config[`round${w}_turn0_np`]) ? config[`round${w}_turn0_np`] : [];
       const line = document.createElement("div");
       line.className = "wizard-review-wave-line";
-      const skText = sks.map((c) => formatSkillChip(c, config)).join(" → ") || t("No skills");
+      const skText = sks.map((c) => formatSkillChip(c, config, servants)).join(" → ") || t("No skills");
       const npText = nps.length ? `NP: ${nps.join(", ")}` : t("No NP");
       line.textContent = `${t("Wave {round}", { round: w })}: ${skText} | ${npText}`;
       waveSummary.append(line);
