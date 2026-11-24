@@ -456,8 +456,9 @@ export function createPresetWizard({
       });
     });
     masterRow.append(masterSel);
+    const masterSexVal = config.master_sex === 1 ? 1 : 0;
     if (masterSel.value !== "") {
-      const portrait = createAvatarImg(masterPortraitUrl(masterSel.value, config.master_sex || 0), "", "wizard-master-thumb");
+      const portrait = createAvatarImg(masterPortraitUrl(masterSel.value, masterSexVal), "", "wizard-master-thumb");
       masterRow.append(portrait);
     }
     masterField.append(masterRow);
@@ -467,13 +468,13 @@ export function createPresetWizard({
     sexField.innerHTML = `<span>${t("Master gender")}</span>`;
     const sexSel = document.createElement("select");
     sexSel.className = "field";
-    for (const [val, lbl] of [["0", t("Male")], ["1", t("Female")]]) {
+    for (const [val, lbl] of [["0", t("Female")], ["1", t("Male")]]) {
       const opt = document.createElement("option");
       opt.value = val;
       opt.textContent = lbl;
       sexSel.append(opt);
     }
-    sexSel.value = String(config.master_sex === 1 ? 1 : 0);
+    sexSel.value = String(masterSexVal);
     sexSel.addEventListener("change", () => {
       writeConfig((draft) => { draft.master_sex = Number(sexSel.value); });
     });
@@ -1138,7 +1139,7 @@ export function createPresetWizard({
     const mHead = document.createElement("div");
     mHead.className = "wizard-skill-col-head";
     if (masterInfo) {
-      mHead.append(createAvatarImg(masterPortraitUrl(masterInfo.sn, config.master_sex || 0), masterInfo.name, "wizard-mini-avatar"));
+      mHead.append(createAvatarImg(masterPortraitUrl(masterInfo.sn, config.master_sex === 1 ? 1 : 0), masterInfo.name, "wizard-mini-avatar"));
     }
     const mTitle = document.createElement("span");
     mTitle.textContent = masterInfo ? masterInfo.name : t("Master");
