@@ -201,6 +201,8 @@ export function createPresetWizard({
     classFilter: "all",
     npFilter: "all",
     searchQuery: "",
+    masterSearchQuery: "",
+    masterFilter: "all",
     ceSearchQuery: "",
     grandCeSlot: 0,
     activeWave: 1,
@@ -409,8 +411,119 @@ export function createPresetWizard({
     container.append(bar);
   }
 
+  function masterMatchesFilters(master) {
+    if (state.masterFilter === "swap") {
+      if (!Array.isArray(master.skill_types) || !master.skill_types.includes(3)) return false;
+    }
+    const q = state.masterSearchQuery.trim().toLowerCase();
+    if (!q) return true;
+    const parts = [String(master.name || "")];
+    if (Array.isArray(master.skills)) parts.push(...master.skills);
+    if (Array.isArray(master.skill_details)) {
+      for (const d of master.skill_details) {
+        if (d?.name) parts.push(d.name);
+        if (d?.detail) parts.push(d.detail);
+      }
+    }
+    if (Array.isArray(master.skill_types) && master.skill_types.includes(3)) {
+      parts.push("换人 order change swap");
+    }
+    return parts.join(" ").toLowerCase().includes(q);
+  }
+
+  function renderMasterOutfitGrid(gridWrap, countLabel, masters, selectedSn, masterSexVal) {
+    if (masters === null) {
+      countLabel.textContent = t("Loading...");
+      gridWrap.innerHTML = `<div class="wizard-empty-hint">${t("Loading master outfits...")}</div>`;
+      return;
+    }
+    const matched = masters.filter(masterMatchesFilters);
+    countLabel.textContent = t("{count} outfits", { count: matched.length });
+    const frag = document.createDocumentFragment();
+
+    const showNoneCard = state.masterFilter === "all" && !state.masterSearchQuery.trim();
+    if (showNoneCard) {
+      const noneCard = document.createElement("button");
+      noneCard.type = "button";
+      const isNoneSelected = selectedSn === "";
+      noneCard.className = `wizard-master-card is-none-card${isNoneSelected ? " active" : ""}`;
+      noneCard.dataset.wizardMasterSn = "";
+      const noneBox = document.createElement("div");
+      noneBox.className = "wizard-master-none-avatar";
+      noneBox.textContent = "—";
+      const noneInfo = document.createElement("div");
+      noneInfo.className = "wizard-master-card-info";
+      const noneTitle = document.createElement("div");
+      noneTitle.className = "wizard-master-card-name";
+      noneTitle.textContent = t("None");
+      const noneSub = document.createElement("div");
+      noneSub.className = "wizard-master-card-sub";
+      noneSub.textContent = t("No outfit check");
+      noneInfo.append(noneTitle, noneSub);
+      noneCard.append(noneBox, noneInfo);
+      noneCard.addEventListener("click", () => {
+        writeConfig((draft) => { delete draft.master_equip; });
+      });
+      frag.append(noneCard);
+    }
+
+    for (const m of matched) {
+      const snStr = String(m.sn);
+      const isSelected = selectedSn === snStr;
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = `wizard-master-card${isSelected ? " active" : ""}`;
+      card.dataset.wizardMasterSn = snStr;
+
+      const skillTooltips = [];
+      const skillStrip = document.createElement("div");
+      skillStrip.className = "wizard-master-card-skills";
+      for (let sk = 0; sk < 3; sk += 1) {
+        const display = resolveSkillDisplay(m, sk, `M${sk + 1}`);
+        skillTooltips.push(`M${sk + 1} ${display.title}${display.note ? `: ${display.note}` : ""}`);
+        if (display.iconKey) {
+          const skImg = createAvatarImg(skillIconUrl(display.iconKey), display.title, "wizard-master-sk-icon");
+          skImg.title = `${display.title}${display.note ? `\n${display.note}` : ""}`;
+          skillStrip.append(skImg);
+        }
+      }
+      if (Array.isArray(m.skill_types) && m.skill_types.includes(3)) {
+        const swapPill = document.createElement("span");
+        swapPill.className = "wizard-master-swap-badge";
+        swapPill.textContent = t("Order Change");
+        skillStrip.append(swapPill);
+      }
+
+      card.title = `${m.name}\n${skillTooltips.join("\n")}`;
+      card.append(createAvatarImg(masterPortraitUrl(m.sn, masterSexVal), m.name, "wizard-master-card-avatar"));
+
+      const infoCol = document.createElement("div");
+      infoCol.className = "wizard-master-card-info";
+      const nameEl = document.createElement("div");
+      nameEl.className = "wizard-master-card-name";
+      nameEl.textContent = m.name;
+      infoCol.append(nameEl, skillStrip);
+      card.append(infoCol);
+
+      card.addEventListener("click", () => {
+        writeConfig((draft) => {
+          draft.master_equip = m.sn;
+        });
+      });
+      frag.append(card);
+    }
+
+    if (!matched.length && !showNoneCard) {
+      const empty = document.createElement("div");
+      empty.className = "wizard-empty-hint";
+      empty.textContent = t("No outfits match the current search.");
+      frag.append(empty);
+    }
+    gridWrap.replaceChildren(frag);
+  }
+
   function renderStep1Team(container, config, servants, server) {
-    // Row 1: Server + Master outfit + Gender
+    // Row 1: Server + Selected Master Summary + Gender
     const topMeta = document.createElement("div");
     topMeta.className = "wizard-top-row";
 
@@ -431,37 +544,52 @@ export function createPresetWizard({
     });
     serverField.append(serverSel);
 
-    const masterField = document.createElement("label");
-    masterField.className = "field-stack wizard-master-field";
-    masterField.innerHTML = `<span>${t("Master outfit")}</span>`;
-    const masterRow = document.createElement("div");
-    masterRow.className = "wizard-master-picker";
-    const masterSel = document.createElement("select");
-    masterSel.className = "field";
-    const emptyMaster = document.createElement("option");
-    emptyMaster.value = "";
-    emptyMaster.textContent = t("None");
-    masterSel.append(emptyMaster);
-    for (const m of (state.masters || [])) {
-      const opt = document.createElement("option");
-      opt.value = String(m.sn);
-      opt.textContent = m.name;
-      masterSel.append(opt);
-    }
-    masterSel.value = config.master_equip != null ? String(config.master_equip) : "";
-    masterSel.addEventListener("change", () => {
-      writeConfig((draft) => {
-        if (masterSel.value === "") delete draft.master_equip;
-        else draft.master_equip = Number.isNaN(Number(masterSel.value)) ? masterSel.value : Number(masterSel.value);
-      });
-    });
-    masterRow.append(masterSel);
     const masterSexVal = config.master_sex === 1 ? 1 : 0;
-    if (masterSel.value !== "") {
-      const portrait = createAvatarImg(masterPortraitUrl(masterSel.value, masterSexVal), "", "wizard-master-thumb");
-      masterRow.append(portrait);
+    const selectedMasterSn = config.master_equip != null ? String(config.master_equip) : "";
+    const selectedMasterInfo = (state.masters || []).find((m) => String(m.sn) === selectedMasterSn) || null;
+
+    const masterSummaryField = document.createElement("div");
+    masterSummaryField.className = "field-stack wizard-master-field";
+    const masterSummaryLabel = document.createElement("span");
+    masterSummaryLabel.textContent = t("Master outfit");
+    const masterSummaryBar = document.createElement("div");
+    masterSummaryBar.className = "wizard-master-summary-bar";
+    if (selectedMasterSn !== "") {
+      masterSummaryBar.append(
+        createAvatarImg(masterPortraitUrl(selectedMasterSn, masterSexVal), selectedMasterInfo?.name || "", "wizard-master-thumb"),
+      );
+      const summaryText = document.createElement("div");
+      summaryText.className = "wizard-master-summary-text";
+      const summaryName = document.createElement("strong");
+      summaryName.textContent = selectedMasterInfo?.name || `#${selectedMasterSn}`;
+      summaryText.append(summaryName);
+      if (selectedMasterInfo) {
+        const skNames = [0, 1, 2]
+          .map((idx) => resolveSkillDisplay(selectedMasterInfo, idx, "").title)
+          .filter(Boolean)
+          .join(" · ");
+        if (skNames) {
+          const sub = document.createElement("small");
+          sub.textContent = skNames;
+          summaryText.append(sub);
+        }
+      }
+      const clearMasterBtn = document.createElement("button");
+      clearMasterBtn.type = "button";
+      clearMasterBtn.className = "chip-button wizard-slot-clear";
+      clearMasterBtn.textContent = "×";
+      clearMasterBtn.title = t("Clear");
+      clearMasterBtn.addEventListener("click", () => {
+        writeConfig((draft) => { delete draft.master_equip; });
+      });
+      masterSummaryBar.append(summaryText, clearMasterBtn);
+    } else {
+      const emptyHint = document.createElement("span");
+      emptyHint.className = "wizard-master-summary-empty";
+      emptyHint.textContent = t("None — click a Master outfit card below to select");
+      masterSummaryBar.append(emptyHint);
     }
-    masterField.append(masterRow);
+    masterSummaryField.append(masterSummaryLabel, masterSummaryBar);
 
     const sexField = document.createElement("label");
     sexField.className = "field-stack";
@@ -480,8 +608,50 @@ export function createPresetWizard({
     });
     sexField.append(sexSel);
 
-    topMeta.append(serverField, masterField, sexField);
+    topMeta.append(serverField, masterSummaryField, sexField);
     container.append(topMeta);
+
+    // Visual Master Outfit Card Grid
+    const masterPickerBox = document.createElement("div");
+    masterPickerBox.className = "wizard-picker-box wizard-master-box";
+    const masterPickerTop = document.createElement("div");
+    masterPickerTop.className = "wizard-picker-search-row";
+    const masterPickLabel = document.createElement("span");
+    masterPickLabel.className = "wizard-picking-label";
+    masterPickLabel.textContent = t("Pick Master Outfit");
+
+    const masterFilterRow = document.createElement("div");
+    masterFilterRow.className = "wizard-filter-row";
+    for (const [fVal, fLbl] of [["all", t("All")], ["swap", t("Order Change")]]) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = `chip-button${state.masterFilter === fVal ? " active" : ""}`;
+      chip.textContent = fLbl;
+      chip.addEventListener("click", () => {
+        state.masterFilter = fVal;
+        render();
+      });
+      masterFilterRow.append(chip);
+    }
+
+    const masterSearchInput = document.createElement("input");
+    masterSearchInput.type = "search";
+    masterSearchInput.className = "field";
+    masterSearchInput.placeholder = t("Search master outfits or skills (e.g. Order Change, NP)...");
+    masterSearchInput.value = state.masterSearchQuery;
+    const masterCountLabel = document.createElement("span");
+    masterCountLabel.className = "wizard-picker-count";
+    masterSearchInput.addEventListener("input", () => {
+      state.masterSearchQuery = masterSearchInput.value;
+      renderMasterOutfitGrid(masterGridWrap, masterCountLabel, state.masters || [], selectedMasterSn, masterSexVal);
+    });
+    masterPickerTop.append(masterPickLabel, masterFilterRow, masterSearchInput, masterCountLabel);
+
+    const masterGridWrap = document.createElement("div");
+    masterGridWrap.className = "wizard-master-grid";
+    renderMasterOutfitGrid(masterGridWrap, masterCountLabel, state.masters, selectedMasterSn, masterSexVal);
+    masterPickerBox.append(masterPickerTop, masterGridWrap);
+    container.append(masterPickerBox);
 
     // Row 2: 6 Team Slots
     const slotsHeading = document.createElement("div");
@@ -1462,7 +1632,7 @@ export function createPresetWizard({
     head.append(autoNameBtn);
     card.append(head);
 
-    // Compact team preview strip
+    // Compact team + Master outfit + Assist CE preview strip
     const teamStrip = document.createElement("div");
     teamStrip.className = "wizard-review-team";
     for (let i = 0; i < 6; i += 1) {
@@ -1476,6 +1646,30 @@ export function createPresetWizard({
       txt.textContent = `${i + 1}·${name}${config.assistIdx === i ? ` (${t("Support")})` : ""}`;
       pill.append(txt);
       teamStrip.append(pill);
+    }
+    if (config.master_equip != null && String(config.master_equip) !== "") {
+      const mSn = String(config.master_equip);
+      const mInfo = (state.masters || []).find((m) => String(m.sn) === mSn);
+      const mSex = config.master_sex === 1 ? 1 : 0;
+      const mPill = document.createElement("div");
+      mPill.className = "wizard-review-servant wizard-review-master";
+      mPill.append(createAvatarImg(masterPortraitUrl(mSn, mSex), mInfo?.name || mSn, "wizard-mini-avatar"));
+      const mTxt = document.createElement("span");
+      mTxt.textContent = `${t("Master")}: ${mInfo?.name || mSn}`;
+      mPill.append(mTxt);
+      teamStrip.append(mPill);
+    }
+    const flatCes = normalizeAssistEquipArray(config.assistEquip, false);
+    for (const ceName of flatCes) {
+      const cePill = document.createElement("div");
+      cePill.className = "wizard-review-servant wizard-review-ce";
+      if ((state.equips || []).includes(ceName)) {
+        cePill.append(createAvatarImg(`/api/equip-templates/${encodeURIComponent(ceName)}/image?location=active`, ceName, "wizard-ce-thumb"));
+      }
+      const ceTxt = document.createElement("span");
+      ceTxt.textContent = ceName;
+      cePill.append(ceTxt);
+      teamStrip.append(cePill);
     }
     if (!teamStrip.children.length) {
       teamStrip.innerHTML = `<span class="wizard-empty-hint">${t("No servants selected yet.")}</span>`;
@@ -1597,6 +1791,8 @@ export function createPresetWizard({
     state.classFilter = "all";
     state.npFilter = "all";
     state.searchQuery = "";
+    state.masterSearchQuery = "";
+    state.masterFilter = "all";
     state.ceSearchQuery = "";
     state.grandCeSlot = 0;
     state.activeWave = 1;

@@ -2849,15 +2849,22 @@ select:disabled {
 }
 
 /* Simple Script Wizard & Dual-Mode Editor */
+.preset-dialog-header {
+  flex-wrap: wrap;
+}
+
 .preset-dialog-header-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  margin-left: auto;
 }
 
 .preset-mode-switch {
   display: inline-grid;
   grid-template-columns: repeat(2, auto);
+  min-width: 0;
 }
 
 .preset-mode-switch .segment {
@@ -2865,6 +2872,14 @@ select:disabled {
   padding: 4px 10px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+@media (max-width: 440px) {
+  .preset-mode-switch .segment {
+    min-height: 28px;
+    padding: 3px 7px;
+    font-size: 11px;
+  }
 }
 
 .preset-dialog.wizard-mode {
@@ -3591,3 +3606,657 @@ img.broken {
     flex-wrap: wrap;
   }
 }
+
+/* Visual Select Combobox & Rich Image Popovers */
+.visual-select-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.visual-select-control > select {
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 100%;
+  width: 0;
+  cursor: pointer;
+}
+
+.visual-select-control:has(select:disabled) > select {
+  cursor: not-allowed;
+}
+
+.visual-select-inline-thumb {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.visual-select-control:has(select:disabled) .visual-select-inline-thumb {
+  opacity: 0.54;
+  cursor: not-allowed;
+}
+
+.visual-thumb-box {
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: #1b222c;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.visual-thumb-box img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.visual-thumb-box.is-ce img,
+.visual-thumb-box.is-drop img {
+  object-fit: contain;
+}
+
+.visual-thumb-box.is-drop {
+  background: var(--panel-soft);
+}
+
+.visual-thumb-box.is-none,
+.visual-thumb-box.is-fallback {
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.visual-thumb-box.is-fallback::after {
+  content: "—";
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.visual-select-inline-thumb .visual-thumb-box.is-servant {
+  width: 30px;
+  height: 30px;
+}
+
+.visual-select-inline-thumb .visual-thumb-box.is-ce {
+  width: 58px;
+  height: 22px;
+}
+
+.visual-select-inline-thumb .visual-thumb-box.is-drop {
+  width: 30px;
+  height: 32px;
+}
+
+.visual-select-popover {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 16px 40px rgba(21, 26, 32, 0.24);
+  overflow: hidden;
+}
+
+.visual-select-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.visual-select-search {
+  min-height: 32px;
+  font-size: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.visual-select-count {
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.visual-select-filters {
+  display: grid;
+  gap: 5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.visual-select-filters[hidden] {
+  display: none;
+}
+
+.visual-select-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.visual-select-filter-row .chip-button {
+  min-height: 22px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+.visual-select-filter-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.visual-select-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: grid;
+  gap: 3px;
+  align-content: start;
+}
+
+.visual-select-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.visual-select-option:hover:not(:disabled),
+.visual-select-option.is-highlighted:not(:disabled) {
+  background: var(--panel-soft);
+  border-color: var(--line);
+}
+
+.visual-select-option.is-selected {
+  background: rgba(36, 104, 213, 0.09);
+  border-color: rgba(36, 104, 213, 0.36);
+}
+
+.visual-select-option .visual-thumb-box.is-servant,
+.visual-select-option .visual-thumb-box.is-master {
+  width: 38px;
+  height: 38px;
+}
+
+.visual-select-option .visual-thumb-box.is-ce {
+  width: 84px;
+  height: 25px;
+}
+
+.visual-select-option .visual-thumb-box.is-drop {
+  width: 40px;
+  height: 44px;
+}
+
+.visual-option-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.visual-option-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.visual-option-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-select-option.is-selected .visual-option-label {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.visual-option-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.visual-option-badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.visual-option-badge.star-5 {
+  background: #fff2cc;
+  border-color: #eed484;
+  color: #9e6200;
+}
+
+.visual-option-badge.star-4 {
+  background: #f5efe0;
+  border-color: #e2d3b3;
+  color: #8f5c00;
+}
+
+.visual-option-badge.np-b {
+  background: #cf362d;
+  border-color: #cf362d;
+  color: #fff;
+}
+
+.visual-option-badge.np-a {
+  background: #2667cc;
+  border-color: #2667cc;
+  color: #fff;
+}
+
+.visual-option-badge.np-q {
+  background: #1d8a4e;
+  border-color: #1d8a4e;
+  color: #fff;
+}
+
+.visual-option-badge.swap-tag {
+  background: rgba(20, 122, 84, 0.14);
+  border-color: rgba(20, 122, 84, 0.3);
+  color: var(--ok);
+}
+
+.visual-option-sub {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-option-skills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 1px;
+}
+
+.visual-option-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 150px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.visual-option-skill-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-option-skill-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+  background: #1b222c;
+  flex-shrink: 0;
+}
+
+.visual-option-check {
+  flex-shrink: 0;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.visual-select-hint {
+  padding: 10px 6px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Pro Mode Assist CE Visual Gallery */
+.preset-equip-gallery-block {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-soft);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preset-equip-gallery-block[hidden] {
+  display: none;
+}
+
+.preset-equip-gallery-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preset-equip-gallery-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.preset-equip-gallery-search {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 120px;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.preset-equip-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr));
+  gap: 6px;
+  max-height: 196px;
+  overflow-y: auto;
+  min-width: 0;
+  padding: 1px;
+}
+
+.preset-equip-gallery-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  width: 100%;
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.preset-equip-gallery-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.05);
+}
+
+.preset-equip-gallery-card.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.1);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.preset-equip-gallery-thumb {
+  width: 56px;
+  height: 18px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #1b222c;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.preset-equip-gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.preset-equip-gallery-thumb.is-fallback {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.preset-equip-gallery-thumb.is-fallback::after {
+  content: "CE";
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.preset-equip-gallery-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-equip-gallery-check {
+  flex-shrink: 0;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.preset-equip-gallery-empty {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+/* Simple Wizard Step 1 Master Outfit Card Grid */
+.wizard-master-summary-bar {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  min-width: 0;
+}
+
+.wizard-master-summary-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.wizard-master-summary-text strong {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-master-summary-text small {
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-master-summary-empty {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-master-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr));
+  gap: 7px;
+  max-height: 172px;
+  overflow-y: auto;
+  padding: 2px;
+  min-width: 0;
+}
+
+.wizard-master-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.wizard-master-card:hover {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.05);
+}
+
+.wizard-master-card.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.1);
+  box-shadow: 0 0 0 1px rgba(36, 104, 213, 0.18);
+}
+
+.wizard-master-card-avatar,
+.wizard-master-none-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+  background: #1b222c;
+}
+
+.wizard-master-none-avatar {
+  display: inline-grid;
+  place-items: center;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.wizard-master-card-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.wizard-master-card-name {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-master-card.active .wizard-master-card-name {
+  color: var(--accent-strong);
+}
+
+.wizard-master-card-sub {
+  font-size: 10px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-master-card-skills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.wizard-master-sk-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  object-fit: contain;
+  background: #1b222c;
+  border: 1px solid rgba(30, 37, 45, 0.25);
+  flex-shrink: 0;
+}
+
+.wizard-master-swap-badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(20, 122, 84, 0.14);
+  color: var(--ok);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wizard-review-master {
+  border-color: rgba(20, 122, 84, 0.35);
+}
+
+.wizard-review-ce {
+  border-color: rgba(36, 104, 213, 0.3);
+}
+
+@media (max-width: 560px) {
+  .preset-team-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .visual-select-inline-thumb .visual-thumb-box.is-ce {
+    width: 40px;
+    height: 18px;
+  }
+
+  .preset-equip-gallery-grid,
+  .wizard-master-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 1fr));
+  }
+}
+
