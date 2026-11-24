@@ -30,6 +30,13 @@ BBCHANNEL_ADB_ENRICH_DETAILS=1
 
 在 Windows 本地可直接调用 MuMu 原生 DLL；在 WSL 环境中可通过宿主机运行的 `bin/mumu_ipc_bridge.py` 进行 TCP 桥接，支持低延迟截屏与 `touch_down` / `touch_up` 触控事件。
 
+## 浏览器 WebUSB 直连（跨主机 / 容器连真机）
+
+当后端运行在远端服务器、Docker 容器或 WSL 中，而 Android 真机通过 USB 线插在打开浏览器的客户端电脑上时，点击顶栏 **`USB 直连`（`WebUSB`）** 即可直接连接：
+
+- **零新增前端库**：前端直接调用浏览器内置 `navigator.usb` 认领 ADB 接口（`0xFF / 0x42 / 0x01`），仅按固定 24 字节 ADB `amessage` 包头做 Bulk 拆合包与 ZLP 对齐，通过 `WS /api/ws/webusb` 透传至后端 `127.0.0.1:<随机端口>`，由后端 `AdbBackend` 完成密钥认证并无缝复用持久 Shell 与 DroidCast 加速。
+- **环境要求**：需使用 Chrome / Edge 等支持 WebUSB 的浏览器，非 `localhost` 访问时需启用 HTTPS；连接前请确保客户端电脑未运行抢占 USB 接口的本地 `adb`（可执行 `adb kill-server`），Windows 客户端需已配置常规 Google USB / WinUSB 驱动。
+
 ## 画面旋转校准
 
 控制台屏幕工具栏复刻了原版连接校准流程，对应接口为 `GET /api/screen/rotation` 与 `POST /api/screen/rotation`：

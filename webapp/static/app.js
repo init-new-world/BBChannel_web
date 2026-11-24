@@ -19,6 +19,10 @@ const ACTIVE_JOB_STATES = new Set(["queued", "running", "paused", "cancelling"])
 const AUDIO_ALERT_STORAGE_KEY = "bbchannel.audioAlert";
 const CONSOLE_PREFS_STORAGE_KEY = "bbchannel.consolePrefs";
 const SCREEN_ROTATION_OPTIONS = new Set([0, 90, 180, 270]);
+const WEBUSB_ADB_FILTER = { classCode: 0xff, subclassCode: 0x42, protocolCode: 0x01 };
+const ADB_HEADER_BYTES = 24;
+const ADB_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
+const WEBUSB_MAX_READ_CHUNK_BYTES = 256 * 1024;
 const JOB_ACTION_EVENT_TYPES = new Set([
   "step",
   "device_action",
@@ -102,6 +106,7 @@ const state = {
   screenTouch: null,
   touchRefreshTimer: null,
   touchRefreshInFlight: false,
+  webUsbSession: null,
 };
 
 const els = {
@@ -110,6 +115,7 @@ const els = {
   deviceList: document.querySelector("#device-list"),
   manualAdbEndpoint: document.querySelector("#manual-adb-endpoint"),
   addAdbEndpoint: document.querySelector("#add-adb-endpoint"),
+  webUsbAdb: document.querySelector("#webusb-adb"),
   refreshDevices: document.querySelector("#refresh-devices"),
   connectDevice: document.querySelector("#connect-device"),
   disconnectDevice: document.querySelector("#disconnect-device"),
@@ -638,11 +644,17 @@ async function init() {
 
 function bindEvents() {
   window.addEventListener("pagehide", () => {
+    void closeWebUsbSession({ notify: false });
     closeEventsSocket();
     stopAutoRefreshScreen();
     stopFollowJobScreen();
     syncJobElapsedTimer(null);
     closeJobEventSource();
+  });
+  navigator.usb?.addEventListener("disconnect", (event) => {
+    if (state.webUsbSession && event.device === state.webUsbSession.usbDevice) {
+      void closeWebUsbSession({ notify: true, refreshBackend: true });
+    }
   });
   els.languageSelect.addEventListener("change", () => setLocale(els.languageSelect.value));
   document.addEventListener("bbchannel:localechange", () => {
@@ -653,6 +665,7 @@ function bindEvents() {
     renderJobEvents();
     renderEventsList(state.eventsList);
     renderAudioAlertState();
+    renderWebUsbButton();
     if (!state.connected) els.connectionState.textContent = t("Disconnected");
     els.screenMeta.textContent = formatScreenMeta();
     if (els.toggleLogPanel) {
@@ -708,6 +721,9 @@ function bindEvents() {
   });
   els.refreshDevices.addEventListener("click", () => loadDevices("", { announce: true }));
   els.addAdbEndpoint.addEventListener("click", addManualAdbEndpoint);
+  els.webUsbAdb?.addEventListener("click", () => {
+    void toggleWebUsbDevice();
+  });
   els.manualAdbEndpoint.addEventListener("input", updateControls);
   els.manualAdbEndpoint.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -3572,6 +3588,13 @@ async function addManualAdbEndpoint() {
 
 async function connect() {
   try {
+    if (
+      state.webUsbSession
+      && state.webUsbSession.endpoint
+      && (els.backendSelect.value !== "adb" || els.deviceList.value !== state.webUsbSession.endpoint)
+    ) {
+      await closeWebUsbSession({ notify: false });
+    }
     const payload = await api("/api/connect", {
       method: "POST",
       body: JSON.stringify({
@@ -3602,17 +3625,398 @@ async function disconnect() {
   try {
     if (els.autoRefreshScreen) els.autoRefreshScreen.checked = false;
     stopAutoRefreshScreen();
+    if (state.webUsbSession) {
+      await closeWebUsbSession({ notify: false });
+    }
     const payload = await api("/api/disconnect", { method: "POST" });
     state.connected = payload.connected;
     state.screenRotation = null;
     setConnectionLabel(payload);
     clearScreenshot();
-    await loadEvents();
+    await Promise.allSettled([loadDevices(), loadEvents()]);
   } catch (error) {
     showError(error);
   } finally {
     updateControls();
   }
+}
+
+function findAdbUsbInterface(usbDevice) {
+  const configs = usbDevice.configurations?.length
+    ? usbDevice.configurations
+    : (usbDevice.configuration ? [usbDevice.configuration] : []);
+  for (const config of configs) {
+    for (const iface of config.interfaces || []) {
+      for (const alternate of iface.alternates || []) {
+        if (
+          alternate.interfaceClass === WEBUSB_ADB_FILTER.classCode
+          && alternate.interfaceSubclass === WEBUSB_ADB_FILTER.subclassCode
+          && alternate.interfaceProtocol === WEBUSB_ADB_FILTER.protocolCode
+        ) {
+          const inEndpoint = (alternate.endpoints || []).find(
+            (ep) => ep.direction === "in" && ep.type === "bulk",
+          );
+          const outEndpoint = (alternate.endpoints || []).find(
+            (ep) => ep.direction === "out" && ep.type === "bulk",
+          );
+          if (inEndpoint && outEndpoint) {
+            return {
+              configurationValue: config.configurationValue,
+              interfaceNumber: iface.interfaceNumber,
+              alternateSetting: alternate.alternateSetting,
+              inEndpointNumber: inEndpoint.endpointNumber,
+              inPacketSize: inEndpoint.packetSize || 512,
+              outEndpointNumber: outEndpoint.endpointNumber,
+              outPacketSize: outEndpoint.packetSize || 512,
+            };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+async function safeCloseUsbDevice(usbDevice, interfaceNumber = null) {
+  if (!usbDevice) return;
+  if (interfaceNumber !== null) {
+    try {
+      await usbDevice.releaseInterface(interfaceNumber);
+    } catch {
+      // Device may already be unplugged or released.
+    }
+  }
+  try {
+    if (usbDevice.opened) {
+      await usbDevice.close();
+    }
+  } catch {
+    // Ignore close errors during teardown.
+  }
+}
+
+function renderWebUsbButton() {
+  if (!els.webUsbAdb) return;
+  const session = state.webUsbSession;
+  if (!session || session.closed) {
+    els.webUsbAdb.classList.remove("active");
+    els.webUsbAdb.textContent = t("WebUSB");
+    els.webUsbAdb.title = t("Connect USB phone directly via browser WebUSB");
+    return;
+  }
+  els.webUsbAdb.classList.add("active");
+  if (session.status === "authorizing") {
+    els.webUsbAdb.textContent = t("USB Auth...");
+  } else if (session.status === "connecting") {
+    els.webUsbAdb.textContent = t("USB Connecting...");
+  } else {
+    els.webUsbAdb.textContent = t("USB Active");
+  }
+  const detail = session.deviceLabel ? ` (${session.deviceLabel})` : "";
+  els.webUsbAdb.title = `${t("Disconnect active browser WebUSB bridge")}${detail}`;
+}
+
+async function readUsbAligned(session, requestedBytes) {
+  const packetSize = session.adbInterface.inPacketSize || 512;
+  const capped = Math.min(Math.max(requestedBytes, packetSize), WEBUSB_MAX_READ_CHUNK_BYTES);
+  const aligned = Math.ceil(capped / packetSize) * packetSize;
+  const result = await session.usbDevice.transferIn(session.adbInterface.inEndpointNumber, aligned);
+  if (result.status === "stall") {
+    await session.usbDevice.clearHalt("in", session.adbInterface.inEndpointNumber);
+    return new Uint8Array(0);
+  }
+  if (result.status !== "ok" || !result.data) {
+    throw new Error(`USB transferIn failed (${result.status}).`);
+  }
+  return new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
+}
+
+async function pumpWebUsbIn(session) {
+  try {
+    while (!session.closed) {
+      let headerChunk = null;
+      while (!session.closed) {
+        const chunk = await readUsbAligned(session, ADB_HEADER_BYTES);
+        if (chunk.byteLength > 0) {
+          headerChunk = chunk;
+          break;
+        }
+      }
+      if (!headerChunk || session.closed) return;
+      if (headerChunk.byteLength < ADB_HEADER_BYTES) {
+        throw new Error(`Short ADB header (${headerChunk.byteLength} bytes).`);
+      }
+      const view = new DataView(headerChunk.buffer, headerChunk.byteOffset, ADB_HEADER_BYTES);
+      const command = view.getUint32(0, true);
+      const dataLength = view.getUint32(12, true);
+      const magic = view.getUint32(20, true);
+      if (((command ^ 0xffffffff) >>> 0) !== magic || dataLength > ADB_MAX_PAYLOAD_BYTES) {
+        throw new Error("Invalid ADB USB packet header.");
+      }
+
+      const packet = new Uint8Array(ADB_HEADER_BYTES + dataLength);
+      const initialCopy = Math.min(headerChunk.byteLength, packet.byteLength);
+      packet.set(headerChunk.subarray(0, initialCopy), 0);
+      let offset = Math.max(0, initialCopy - ADB_HEADER_BYTES);
+      while (offset < dataLength && !session.closed) {
+        const chunk = await readUsbAligned(session, dataLength - offset);
+        if (chunk.byteLength === 0) {
+          break;
+        }
+        const copyLen = Math.min(chunk.byteLength, dataLength - offset);
+        packet.set(chunk.subarray(0, copyLen), ADB_HEADER_BYTES + offset);
+        offset += copyLen;
+      }
+      if (session.closed) return;
+      if (offset !== dataLength) {
+        throw new Error(`Truncated ADB USB payload (${offset}/${dataLength} bytes).`);
+      }
+      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(packet);
+      }
+    }
+  } catch (error) {
+    if (!session.closed) {
+      await closeWebUsbSession({ notify: true, refreshBackend: true, targetSession: session });
+      if (error && error.name !== "NotFoundError" && error.name !== "NetworkError") {
+        showError(error);
+      }
+    }
+  }
+}
+
+async function writeAdbPacketToUsb(session, arrayBuffer) {
+  if (session.closed) return;
+  const bytes = new Uint8Array(arrayBuffer);
+  if (bytes.byteLength < ADB_HEADER_BYTES) {
+    throw new Error("Short ADB packet received from bridge.");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, ADB_HEADER_BYTES);
+  const command = view.getUint32(0, true);
+  const dataLength = view.getUint32(12, true);
+  const magic = view.getUint32(20, true);
+  if (((command ^ 0xffffffff) >>> 0) !== magic || bytes.byteLength !== ADB_HEADER_BYTES + dataLength) {
+    throw new Error("Malformed ADB packet received from bridge.");
+  }
+
+  const { outEndpointNumber, outPacketSize } = session.adbInterface;
+  const headerRes = await session.usbDevice.transferOut(
+    outEndpointNumber,
+    bytes.subarray(0, ADB_HEADER_BYTES),
+  );
+  if (headerRes.status === "stall") {
+    await session.usbDevice.clearHalt("out", outEndpointNumber);
+  }
+  if (dataLength > 0) {
+    const payload = bytes.subarray(ADB_HEADER_BYTES);
+    const payloadRes = await session.usbDevice.transferOut(outEndpointNumber, payload);
+    if (payloadRes.status === "stall") {
+      await session.usbDevice.clearHalt("out", outEndpointNumber);
+    } else if (outPacketSize > 0 && dataLength % outPacketSize === 0) {
+      await session.usbDevice.transferOut(outEndpointNumber, new Uint8Array(0));
+    }
+  }
+}
+
+async function closeWebUsbSession({
+  notify = false,
+  refreshBackend = false,
+  targetSession = null,
+} = {}) {
+  const session = targetSession || state.webUsbSession;
+  if (!session || session.closed) return;
+  session.closed = true;
+  if (state.webUsbSession === session) {
+    state.webUsbSession = null;
+  }
+  renderWebUsbButton();
+  if (session.ws) {
+    try {
+      if (session.ws.readyState === WebSocket.OPEN) {
+        session.ws.send(JSON.stringify({ type: "close" }));
+      }
+      if (session.ws.readyState === WebSocket.OPEN || session.ws.readyState === WebSocket.CONNECTING) {
+        session.ws.close();
+      }
+    } catch {
+      // Ignore socket close errors.
+    }
+  }
+  await safeCloseUsbDevice(session.usbDevice, session.adbInterface?.interfaceNumber ?? null);
+  if (notify) {
+    showNotice(t("WebUSB device disconnected."));
+  }
+  if (refreshBackend) {
+    await Promise.allSettled([loadConnectionState(), loadDevices(), loadEvents()]);
+  }
+  updateControls();
+}
+
+async function toggleWebUsbDevice() {
+  if (state.webUsbSession && !state.webUsbSession.closed) {
+    if (state.connected && state.webUsbSession.status === "connected") {
+      await disconnect();
+    } else {
+      await closeWebUsbSession({ notify: true, refreshBackend: true });
+    }
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    showError(new Error(t("WebUSB requires HTTPS or localhost.")));
+    return;
+  }
+  if (!navigator.usb) {
+    showError(new Error(t("WebUSB is not supported in this browser. Please use Chrome or Edge.")));
+    return;
+  }
+
+  let usbDevice;
+  try {
+    usbDevice = await navigator.usb.requestDevice({ filters: [WEBUSB_ADB_FILTER] });
+  } catch (error) {
+    if (error?.name === "NotFoundError" || error?.name === "AbortError") {
+      return;
+    }
+    showError(error);
+    return;
+  }
+
+  let adbInterface = null;
+  try {
+    await usbDevice.open();
+    adbInterface = findAdbUsbInterface(usbDevice);
+    if (!adbInterface) {
+      await safeCloseUsbDevice(usbDevice, null);
+      showError(new Error(t("Selected USB device does not expose an ADB debugging interface. Enable USB debugging on the phone.")));
+      return;
+    }
+    if (!usbDevice.configuration || usbDevice.configuration.configurationValue !== adbInterface.configurationValue) {
+      await usbDevice.selectConfiguration(adbInterface.configurationValue);
+      adbInterface = findAdbUsbInterface(usbDevice) || adbInterface;
+    }
+    try {
+      await usbDevice.claimInterface(adbInterface.interfaceNumber);
+      if (adbInterface.alternateSetting !== 0) {
+        await usbDevice.selectAlternateInterface(adbInterface.interfaceNumber, adbInterface.alternateSetting);
+      }
+    } catch {
+      await safeCloseUsbDevice(usbDevice, null);
+      showError(new Error(t("Unable to claim USB ADB interface. Run 'adb kill-server' on this computer to release the driver (Windows requires WinUSB driver).")));
+      return;
+    }
+  } catch (error) {
+    await safeCloseUsbDevice(usbDevice, adbInterface?.interfaceNumber ?? null);
+    showError(error);
+    return;
+  }
+
+  const deviceLabel = [usbDevice.manufacturerName, usbDevice.productName]
+    .map((part) => (part || "").trim())
+    .filter(Boolean)
+    .join(" ") || usbDevice.serialNumber || "USB";
+
+  const params = new URLSearchParams();
+  if (usbDevice.productName) params.set("device_name", usbDevice.productName);
+  if (usbDevice.serialNumber) params.set("serial", usbDevice.serialNumber);
+  const query = params.toString();
+  const ws = new WebSocket(buildWsUrl(`/api/ws/webusb${query ? `?${query}` : ""}`));
+  ws.binaryType = "arraybuffer";
+
+  const session = {
+    status: "connecting",
+    usbDevice,
+    adbInterface,
+    ws,
+    endpoint: "",
+    deviceLabel,
+    writeChain: Promise.resolve(),
+    closed: false,
+  };
+  state.webUsbSession = session;
+  renderWebUsbButton();
+  updateControls();
+
+  ws.addEventListener("message", (event) => {
+    if (session.closed) return;
+    if (event.data instanceof ArrayBuffer) {
+      const buf = event.data;
+      session.writeChain = session.writeChain
+        .then(() => writeAdbPacketToUsb(session, buf))
+        .catch(async (err) => {
+          if (!session.closed) {
+            await closeWebUsbSession({ notify: true, refreshBackend: true, targetSession: session });
+            showError(err);
+          }
+        });
+      return;
+    }
+    if (typeof event.data !== "string") return;
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (payload.type === "ready") {
+      session.endpoint = payload.endpoint || "";
+      void pumpWebUsbIn(session);
+      return;
+    }
+    if (payload.type === "authorizing") {
+      session.status = "authorizing";
+      renderWebUsbButton();
+      showNotice(t("Allow USB debugging on your phone screen to finish connecting..."));
+      return;
+    }
+    if (payload.type === "connected") {
+      session.status = "connected";
+      session.endpoint = payload.endpoint || session.endpoint;
+      if (payload.device?.name) {
+        session.deviceLabel = payload.device.name;
+      }
+      renderWebUsbButton();
+      selectBackend("adb");
+      if (payload.device) {
+        mergeDevice(payload.device);
+      }
+      renderDevices(session.endpoint);
+      if (payload.connection) {
+        applyConnectionState(payload.connection, { fromSnapshot: false });
+      }
+      void Promise.allSettled([
+        loadDevices(session.endpoint),
+        loadScreenRotation(),
+        loadEvents(),
+      ]);
+      showNotice(t("WebUSB phone connected: {name}", { name: session.deviceLabel }));
+      updateControls();
+      return;
+    }
+    if (payload.type === "error") {
+      const message = payload.error?.message || "Bridge failed";
+      void closeWebUsbSession({ notify: false, refreshBackend: true, targetSession: session });
+      showError(new Error(t("WebUSB bridge error: {message}", { message })));
+    }
+  });
+
+  ws.addEventListener("close", () => {
+    if (!session.closed) {
+      const wasConnected = session.status === "connected";
+      void closeWebUsbSession({
+        notify: wasConnected,
+        refreshBackend: true,
+        targetSession: session,
+      });
+    }
+  });
+
+  ws.addEventListener("error", () => {
+    if (!session.closed && session.status === "connecting") {
+      void closeWebUsbSession({ notify: false, refreshBackend: false, targetSession: session });
+      showError(new Error(t("WebUSB bridge error: {message}", { message: "WebSocket connection failed." })));
+    }
+  });
 }
 
 async function loadScreenRotation() {
@@ -5923,10 +6327,15 @@ function updateControls() {
   const hideManualAdb = !isAdbSelected && window.innerWidth > 560;
   els.manualAdbEndpoint.hidden = hideManualAdb;
   els.addAdbEndpoint.hidden = hideManualAdb;
+  if (els.webUsbAdb) {
+    els.webUsbAdb.hidden = hideManualAdb && !adbCapability?.available && !state.webUsbSession;
+    els.webUsbAdb.disabled = !adbCapability?.available && !state.webUsbSession;
+    renderWebUsbButton();
+  }
   const canAddAdbEndpoint = Boolean(adbCapability?.available && els.manualAdbEndpoint.value.trim());
   els.addAdbEndpoint.disabled = !canAddAdbEndpoint;
   els.connectDevice.disabled = !hasDevice || state.connected;
-  els.disconnectDevice.disabled = !state.connected;
+  els.disconnectDevice.disabled = !state.connected && !state.webUsbSession;
   els.snapshotButton.disabled = !state.connected;
   els.clearScreenshot.disabled = !hasScreenshot;
   els.matchButton.disabled = !hasScreenshot || !hasTemplate;

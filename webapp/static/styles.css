@@ -134,22 +134,22 @@ select:disabled {
 }
 
 .compact {
-  min-width: 78px;
+  min-width: 72px;
   width: auto;
   max-width: 128px;
-  flex: 0 1 110px;
+  flex: 0 1 104px;
 }
 
 .device-field {
-  min-width: 130px;
+  min-width: 112px;
   max-width: 320px;
-  flex: 1 1 180px;
+  flex: 1 1 170px;
 }
 
 .endpoint-field {
-  min-width: 108px;
+  min-width: 96px;
   max-width: 190px;
-  flex: 0 1 155px;
+  flex: 0 1 146px;
 }
 
 .primary-button,
@@ -186,6 +186,12 @@ select:disabled {
 .icon-button:hover:not(:disabled) {
   border-color: var(--line-strong);
   background: var(--panel-soft);
+}
+
+.ghost-button.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.09);
+  color: var(--accent-strong);
 }
 
 .wide {
@@ -2614,7 +2620,7 @@ select:disabled {
   }
 }
 
-@media (max-width: 1250px) {
+@media (max-width: 1380px) {
   .topbar {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -2714,12 +2720,17 @@ select:disabled {
 
   .connection-strip {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 34px;
     grid-template-areas:
-      "backend device device"
-      "endpoint add refresh"
-      "connect disconnect disconnect";
+      "backend device device device"
+      "endpoint endpoint add refresh"
+      "connect disconnect webusb webusb";
     gap: 6px;
+  }
+
+  .connection-strip > button:not(.icon-button) {
+    padding: 0 6px;
+    font-size: 13px;
   }
 
   .topbar-meta {
@@ -2750,6 +2761,10 @@ select:disabled {
 
   #add-adb-endpoint {
     grid-area: add;
+  }
+
+  #webusb-adb {
+    grid-area: webusb;
   }
 
   #refresh-devices {

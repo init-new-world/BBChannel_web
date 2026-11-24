@@ -11,13 +11,14 @@ web/
 │   ├── app.py               # FastAPI 应用工厂与 REST API 路由
 │   ├── api/
 │   │   ├── jobs.py          # 任务队列、状态查询、SSE 事件流与清理接口
-│   │   └── ws.py            # WebSocket：/api/ws/events 与 /api/ws/screen
+│   │   └── ws.py            # WebSocket：/api/ws/events、/api/ws/screen 与 /api/ws/webusb
 │   ├── core/
 │   │   ├── errors.py        # 统一错误码与 AppError 响应结构
 │   │   └── models.py        # 设备、操作结果等核心数据模型
 │   ├── devices/
 │   │   ├── base.py          # DeviceBackend 协议定义
 │   │   ├── adb.py           # ADB 发现、持久 Shell、DroidCast 加速与触控原语
+│   │   ├── webusb.py        # 浏览器 WebUSB 原始 ADB 包透传与本地回环桥接
 │   │   ├── mumu.py          # MuMu 原生 DLL / Windows Bridge IPC 后端
 │   │   ├── replay.py        # 离线回放测试后端
 │   │   └── coordinates.py   # 画面归一化（1280×720）与旋转/坐标双向映射
@@ -49,7 +50,7 @@ web/
 
 ## 实时通信协议（WebSocket）
 
-前端依赖 `wsproto` 与后端建立两条实时 WebSocket 通道：
+前端依赖 `wsproto` 与后端建立实时 WebSocket 通道：
 
 1. **`WS /api/ws/events`**
    - 推送连接状态快照、实时系统事件日志、任务状态流转以及当前订阅任务的细粒度步骤事件（支持 `EventSource` 自动回退）。
@@ -58,6 +59,8 @@ web/
    - 推送二进制画面帧（支持 JPEG / PNG），用于在控制台实时预览设备屏幕。
    - **任务运行期间的被动推流（`follow_jobs=true`）**：优先复用任务执行过程中的截图零开销广播；当任务处于等待/动画间隔时，采用非阻塞 `preview_snapshot()` 补帧，不会阻塞任务主线程。
    - **实时触控上行消息**：支持 `tap`、`swipe`、`touch_down`、`touch_move`（服务端最新帧合并防堆积）、`touch_up`、`touch_cancel`，以及 `refresh` / `set_interval`。连接异常断开时服务端自动补发抬起/取消，防止模拟器“卡键”。
+3. **`WS /api/ws/webusb`**
+   - 浏览器原生 `navigator.usb`（WebUSB）与后端本地 `adb` 之间的双向二进制 `amessage` 包透传隧道，使远端或容器内的服务端可直接控制插在浏览器所在主机上的 USB 真机，断开时自动注销回环端点。
 
 ## 任务持久化与单步调试
 

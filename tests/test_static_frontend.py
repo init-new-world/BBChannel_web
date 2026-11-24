@@ -390,4 +390,9 @@ def test_operator_console_references_api_controls():
     assert 'id="preset-mode-pro"' in index
     assert 'id="preset-wizard-root"' in index
     assert "createPresetWizard" in script
+    assert 'id="webusb-adb"' in index
+    assert "/api/ws/webusb" in script
+    assert "navigator.usb" in script
+    vendor_js_files = sorted(p.name for p in (STATIC_DIR / "vendor").glob("*.js"))
+    assert vendor_js_files == ["jsonc-parser.js"]
 
