@@ -354,6 +354,30 @@ class DeviceService:
         self._broadcast_frame(data)
         return data
 
+    def preview_snapshot(self) -> bytes | None:
+        """Non-blocking, side-effect-free capture for live UI preview while a job sleeps."""
+        backend, endpoint = self._require_capture()
+        lock = self._lock_for(endpoint)
+        if not lock.acquire(blocking=False):
+            return None
+        try:
+            raw_snapshot = (
+                getattr(backend, "snapshot_raw", None)
+                if self._frame_normalizer is not None
+                else None
+            )
+            data = (
+                raw_snapshot(endpoint.device_id)
+                if callable(raw_snapshot)
+                else backend.snapshot(endpoint.device_id)
+            )
+            if self._frame_normalizer is not None:
+                frame = self._frame_normalizer.normalize(data)
+                data = frame.png
+            return data
+        finally:
+            lock.release()
+
     def screen_is_stuck(self, minimum_seconds: float) -> bool:
         return self._frame_watchdog.is_stuck(minimum_seconds)
 

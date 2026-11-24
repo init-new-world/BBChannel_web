@@ -64,6 +64,7 @@ const state = {
   autoRefreshScreenTimer: null,
   autoRefreshScreenInFlight: false,
   screenSocket: null,
+  screenSocketFollowJobs: null,
   screenReconnectTimer: null,
   screenFrameDecodeInFlight: false,
   pendingScreenBlob: null,
@@ -692,7 +693,7 @@ function bindEvents() {
   });
   els.autoFollowJobScreen?.addEventListener("change", () => {
     saveConsolePrefs({ autoFollowJobScreen: Boolean(els.autoFollowJobScreen.checked) });
-    syncFollowJobScreen();
+    syncAutoRefreshScreen(true);
   });
   els.settingFilter?.addEventListener("input", () => renderFilteredSettings());
   els.backendSelect.addEventListener("change", () => {
@@ -3638,19 +3639,25 @@ async function drainPendingScreenBlobs() {
 }
 
 function connectScreenSocket(triggerImmediate = false) {
+  const followJobs = Boolean(els.autoRefreshScreen?.checked || els.autoFollowJobScreen?.checked);
   if (state.screenSocket) {
-    if (state.screenSocket.readyState === WebSocket.OPEN && triggerImmediate) {
-      try {
-        state.screenSocket.send(JSON.stringify({ type: "refresh" }));
-      } catch {
-        // Ignore transient send failures.
+    const modeChanged = state.screenSocketFollowJobs !== followJobs;
+    if (modeChanged) {
+      stopAutoRefreshScreen();
+    } else {
+      if (state.screenSocket.readyState === WebSocket.OPEN && triggerImmediate) {
+        try {
+          state.screenSocket.send(JSON.stringify({ type: "refresh" }));
+        } catch {
+          // Ignore transient send failures.
+        }
       }
-    }
-    if (
-      state.screenSocket.readyState === WebSocket.CONNECTING
-      || state.screenSocket.readyState === WebSocket.OPEN
-    ) {
-      return;
+      if (
+        state.screenSocket.readyState === WebSocket.CONNECTING
+        || state.screenSocket.readyState === WebSocket.OPEN
+      ) {
+        return;
+      }
     }
   }
   if (state.screenReconnectTimer) {
@@ -3659,7 +3666,6 @@ function connectScreenSocket(triggerImmediate = false) {
   }
   let socket;
   try {
-    const followJobs = Boolean(els.autoFollowJobScreen?.checked ?? true);
     socket = new WebSocket(
       buildWsUrl(`/api/ws/screen?interval_ms=120&format=jpeg&follow_jobs=${followJobs ? "true" : "false"}`),
     );
@@ -3668,6 +3674,7 @@ function connectScreenSocket(triggerImmediate = false) {
   }
   socket.binaryType = "blob";
   state.screenSocket = socket;
+  state.screenSocketFollowJobs = followJobs;
   socket.addEventListener("message", (message) => {
     if (state.screenSocket !== socket) {
       return;
@@ -3692,6 +3699,12 @@ function connectScreenSocket(triggerImmediate = false) {
           updateControls();
         } else if (payload.type === "paused") {
           stopAutoRefreshScreen();
+          if (els.autoRefreshScreen?.checked || els.autoFollowJobScreen?.checked) {
+            state.screenReconnectTimer = window.setTimeout(() => {
+              state.screenReconnectTimer = null;
+              syncAutoRefreshScreen(false);
+            }, 600);
+          }
         } else if (payload.type === "tap_error") {
           const error = new Error(payload.error?.message || "Tap failed.");
           error.payload = { error: payload.error };
@@ -3707,10 +3720,11 @@ function connectScreenSocket(triggerImmediate = false) {
       return;
     }
     state.screenSocket = null;
+    state.screenSocketFollowJobs = null;
+    const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
     const stillShouldRun = Boolean(
       state.connected
-      && els.autoRefreshScreen?.checked
-      && !state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status)),
+      && (els.autoRefreshScreen?.checked || (hasRunningJob && els.autoFollowJobScreen?.checked)),
     );
     if (stillShouldRun && !state.screenReconnectTimer) {
       state.screenReconnectTimer = window.setTimeout(() => {
@@ -3734,6 +3748,7 @@ function stopAutoRefreshScreen() {
   if (state.screenSocket) {
     const socket = state.screenSocket;
     state.screenSocket = null;
+    state.screenSocketFollowJobs = null;
     try {
       socket.close();
     } catch {
@@ -3763,9 +3778,8 @@ function syncFollowJobScreen() {
   const hasRunningJob = state.jobs.some((job) => ACTIVE_JOB_STATES.has(job.status));
   const shouldFollow = Boolean(
     state.connected
-      && els.autoFollowJobScreen?.checked
       && hasRunningJob
-      && !els.autoRefreshScreen?.checked,
+      && (els.autoFollowJobScreen?.checked || els.autoRefreshScreen?.checked),
   );
   if (!shouldFollow) {
     stopFollowJobScreen();

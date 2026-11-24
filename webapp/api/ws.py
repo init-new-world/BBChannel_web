@@ -275,9 +275,11 @@ def create_ws_router(
                             stop_event.set()
                             await close_locked()
                             return
-                        # Passive zero-overhead live broadcast while a job owns the device.
+                        # Passive zero-overhead broadcast while the job captures frames,
+                        # falling back to a non-blocking preview capture during sleeps / NP animations.
+                        idle_timeout = max(0.45, interval_seconds)
                         try:
-                            raw_frame = await asyncio.wait_for(passive_queue.get(), timeout=0.5)
+                            raw_frame = await asyncio.wait_for(passive_queue.get(), timeout=idle_timeout)
                         except TimeoutError:
                             if not device_service.state().connected:
                                 await send_json_locked(
@@ -286,7 +288,15 @@ def create_ws_router(
                                 stop_event.set()
                                 await close_locked()
                                 return
-                            continue
+                            try:
+                                raw_frame = await asyncio.to_thread(device_service.preview_snapshot)
+                            except AppError as exc:
+                                await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
+                                stop_event.set()
+                                await close_locked()
+                                return
+                            if raw_frame is None:
+                                continue
                         encoded = await asyncio.to_thread(_encode_stream_frame, raw_frame, stream_format)
                         if stop_event.is_set():
                             return

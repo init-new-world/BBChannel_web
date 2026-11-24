@@ -275,3 +275,35 @@ def test_ws_screen_jpeg_format_and_passive_follow_during_active_job(tmp_path: Pa
             finally:
                 release.set()
                 manager.wait(job_id, timeout=2)
+
+
+def test_ws_screen_keeps_streaming_via_non_blocking_preview_when_active_job_sleeps(tmp_path: Path):
+    app, event_log, backend, device_service, manager = _build_env(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    with manager:
+        device_service.connect("fake", "dev-ws")
+
+        def sleeping_worker(_context, _payload):
+            started.set()
+            release.wait(timeout=3)
+            return {"done": True}
+
+        manager.register("ws.sleep", sleeping_worker)
+        with create_test_client(app) as client:
+            job_id = client.post("/api/jobs", json={"kind": "ws.sleep"}).json()["job"]["job_id"]
+            assert started.wait(timeout=2)
+            events_before = len(event_log.recent(limit=200))
+            try:
+                with client.websocket_connect(
+                    "/api/ws/screen?interval_ms=100&format=jpeg&follow_jobs=true"
+                ) as ws:
+                    frame = ws.receive_bytes()
+                    assert frame.startswith(b"\xff\xd8")
+                    assert backend.snapshots >= 1
+                    # Preview captures must not spam the EventLog.
+                    assert len(event_log.recent(limit=200)) == events_before
+            finally:
+                release.set()
+                manager.wait(job_id, timeout=2)
