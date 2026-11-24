@@ -1782,6 +1782,34 @@ def test_servant_and_master_routes_expose_catalogs(tmp_path: Path):
     assert masters_response.json()["masters"][0]["name"] == "Chaldea"
 
 
+def test_servant_portrait_route_serves_face_image_and_exposes_star_metadata(tmp_path: Path):
+    from PIL import Image
+
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    assets = Path(client.app.state.resources.assets_dir)
+    _write_json(
+        data / "servant_info_CH.json",
+        {"Hero": {"other_name": ["H"], "class": "Saber", "SN": "100100", "star": 5, "servant_face": 2}},
+    )
+    face_dir = assets / "servantface"
+    face_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (60, 60), (40, 80, 120)).save(face_dir / "Hero_2.png")
+
+    catalog = client.get("/api/servants", params={"server": "CH"})
+    assert catalog.status_code == 200
+    entry = catalog.json()["servants"][0]
+    assert entry["star"] == 5
+    assert entry["face_index"] == 2
+
+    img = client.get("/api/servants/image", params={"name": "Hero", "server": "CH"})
+    assert img.status_code == 200
+    assert img.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+    bad = client.get("/api/servants/image", params={"name": "../secret", "server": "CH"})
+    assert bad.status_code == 404
+
+
 def test_tap_route_returns_structured_error_when_disconnected(tmp_path: Path):
     response = _client(tmp_path).post("/api/tap", json={"x": 10, "y": 20})
 

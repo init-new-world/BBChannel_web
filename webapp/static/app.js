@@ -5,6 +5,7 @@ import { createPresetSettlementEditor } from "./preset-settlement.js";
 import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnConditionsEditor } from "./preset-turn-conditions.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
+import { createPresetWizard } from "./preset-wizard.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { changeReplaceSource, inspectReplaceSource } from "./turn-replace-source.js";
 import { editUsedServantsSource, inspectTeamSource } from "./team-source.js";
@@ -92,6 +93,7 @@ const state = {
   followJobScreenTimer: null,
   followJobScreenInFlight: false,
   jobElapsedTimer: null,
+  devicesRefreshing: false,
   consolePrefs: {},
 };
 
@@ -109,6 +111,7 @@ const els = {
   settingSelect: document.querySelector("#setting-select"),
   settingValidation: document.querySelector("#setting-validation"),
   settingPlan: document.querySelector("#setting-plan"),
+  newSettingWizard: document.querySelector("#new-setting-wizard"),
   newSetting: document.querySelector("#new-setting"),
   editSetting: document.querySelector("#edit-setting"),
   duplicateSetting: document.querySelector("#duplicate-setting"),
@@ -126,6 +129,9 @@ const els = {
   presetDialog: document.querySelector("#preset-dialog"),
   presetForm: document.querySelector("#preset-form"),
   presetDialogTitle: document.querySelector("#preset-dialog-title"),
+  presetModeSwitch: document.querySelector("#preset-editor-mode-switch"),
+  presetModeButtons: [...document.querySelectorAll("[data-editor-mode]")],
+  presetWizardRoot: document.querySelector("#preset-wizard-root"),
   presetName: document.querySelector("#preset-name"),
   presetJson: document.querySelector("#preset-json"),
   presetWaves: document.querySelector("#preset-waves"),
@@ -645,6 +651,7 @@ function bindEvents() {
     }
     if (state.presetEditor) {
       els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
+      presetWizard.render();
     }
   });
   els.jobTabs.forEach((tab) => {
@@ -690,7 +697,7 @@ function bindEvents() {
     saveConsolePrefs({ lastBackend: els.backendSelect.value });
     renderDevices();
   });
-  els.refreshDevices.addEventListener("click", () => loadDevices());
+  els.refreshDevices.addEventListener("click", () => loadDevices("", { announce: true }));
   els.addAdbEndpoint.addEventListener("click", addManualAdbEndpoint);
   els.manualAdbEndpoint.addEventListener("input", updateControls);
   els.manualAdbEndpoint.addEventListener("keydown", (event) => {
@@ -707,9 +714,13 @@ function bindEvents() {
     loadSelectedSettingPlan();
   });
   els.strategySelect.addEventListener("change", loadSelectedStrategy);
+  els.newSettingWizard?.addEventListener("click", () => openPresetEditor("settings", "new", { uiMode: "wizard" }));
   els.newSetting.addEventListener("click", () => openPresetEditor("settings", "new"));
   els.editSetting.addEventListener("click", () => openPresetEditor("settings", "edit"));
   els.duplicateSetting.addEventListener("click", () => openPresetEditor("settings", "duplicate"));
+  els.presetModeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setPresetEditorUiMode(btn.dataset.editorMode || "pro"));
+  });
   els.deleteSetting.addEventListener("click", () => deletePreset("settings"));
   els.refreshSettings.addEventListener("click", () => loadSettings());
   els.importSetting.addEventListener("click", () => els.settingFileInput.click());
@@ -975,6 +986,7 @@ function bindEvents() {
 async function loadCapabilities() {
   const payload = await api("/api/capabilities");
   state.backends = payload.capabilities || [];
+  const previousBackend = els.backendSelect.value;
   els.backendSelect.replaceChildren(
     ...state.backends.map((backend) => {
       const option = document.createElement("option");
@@ -984,6 +996,13 @@ async function loadCapabilities() {
       return option;
     }),
   );
+  const availableNames = state.backends.filter((backend) => backend.available).map((backend) => backend.name);
+  const preferredBackend = [previousBackend, state.consolePrefs.lastBackend, availableNames[0]]
+    .find((name) => name && availableNames.includes(name));
+  if (preferredBackend) {
+    els.backendSelect.value = preferredBackend;
+  }
+  renderDevices(state.consolePrefs.lastDeviceId || "");
 }
 
 async function loadConnectionState() {
@@ -991,6 +1010,10 @@ async function loadConnectionState() {
     const payload = await api("/api/state");
     state.connected = Boolean(payload.connected);
     setConnectionLabel(payload);
+    if (payload.connected && payload.backend) {
+      selectBackend(payload.backend);
+      renderDevices(payload.device_id || "");
+    }
   } catch {
     state.connected = false;
     setConnectionLabel({ connected: false });
@@ -2178,7 +2201,48 @@ async function loadSelectedStrategy() {
   }
 }
 
-async function openPresetEditor(kind, mode) {
+const presetWizard = createPresetWizard({
+  root: els.presetWizardRoot,
+  getEditor: () => state.presetEditor,
+  source: els.presetJson,
+  nameInput: els.presetName,
+  request: api,
+  getStrategies: () => state.strategies || [],
+  onChange: () => {
+    if (state.presetEditor) {
+      state.presetEditor.strategyDrafts = {};
+      state.presetEditor.runOptionDrafts = {};
+    }
+    renderPresetFields();
+    setPresetError("");
+  },
+  onSwitchToPro: () => setPresetEditorUiMode("pro"),
+});
+
+function setPresetEditorUiMode(mode) {
+  const editor = state.presetEditor;
+  const isSetting = editor?.kind === "settings";
+  const resolved = isSetting && mode === "wizard" ? "wizard" : "pro";
+  if (editor) editor.uiMode = resolved;
+  if (els.presetModeSwitch) {
+    els.presetModeSwitch.hidden = !isSetting;
+  }
+  for (const btn of els.presetModeButtons) {
+    const active = btn.dataset.editorMode === resolved;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", String(active));
+  }
+  els.presetForm.classList.toggle("wizard-mode", resolved === "wizard");
+  els.presetDialog.classList.toggle("wizard-mode", resolved === "wizard");
+  if (resolved === "wizard") {
+    presetWizard.render();
+  } else {
+    if (els.presetWizardRoot) els.presetWizardRoot.hidden = true;
+    renderPresetFields();
+  }
+}
+
+async function openPresetEditor(kind, mode, options = {}) {
   const isSetting = kind === "settings";
   const editing = mode === "edit";
   const usesSource = mode !== "new";
@@ -2197,19 +2261,25 @@ async function openPresetEditor(kind, mode) {
     }
     if (opening !== state.presetOpenSequence) return;
     const action = editing ? "Edit" : mode === "duplicate" ? "Duplicate" : "New";
+    const initialUiMode = isSetting && options?.uiMode === "wizard" ? "wizard" : "pro";
     state.presetEditor = {
       kind,
       originalName: editing ? selectedName : "",
       strategyIndex: 0,
       titleKey: `${action} ${isSetting ? "Script" : "Strategy"}`,
+      uiMode: initialUiMode,
     };
+    presetWizard.reset();
     els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
     els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
     els.presetJson.value = source ?? JSON.stringify(value, null, 2);
+    setPresetEditorUiMode(initialUiMode);
     renderPresetFields();
     setPresetError("");
-    els.presetName.focus();
+    if (initialUiMode !== "wizard") {
+      els.presetName.focus();
+    }
   } catch (error) {
     if (opening === state.presetOpenSequence) showError(error);
   }
@@ -2229,10 +2299,12 @@ async function handleSettingImport() {
       throw new Error("Script JSON must contain an object.");
     }
     const proposedName = file.name.replace(/\.json$/i, "") || "imported-script";
-    state.presetEditor = { kind: "settings", originalName: "", titleKey: "Import Script" };
+    state.presetEditor = { kind: "settings", originalName: "", titleKey: "Import Script", uiMode: "pro" };
+    presetWizard.reset();
     els.presetDialogTitle.textContent = t("Import Script");
     els.presetName.value = proposedName;
     els.presetJson.value = source;
+    setPresetEditorUiMode("pro");
     renderPresetFields();
     setPresetError("");
     els.presetDialog.showModal();
@@ -2272,6 +2344,10 @@ function closePresetEditor() {
   state.presetOpenSequence += 1;
   els.presetDialog.close();
   state.presetEditor = null;
+  els.presetForm.classList.remove("wizard-mode");
+  els.presetDialog.classList.remove("wizard-mode");
+  if (els.presetWizardRoot) els.presetWizardRoot.hidden = true;
+  if (els.presetModeSwitch) els.presetModeSwitch.hidden = true;
   updatePresetSaveState();
   setPresetError("");
 }
@@ -3275,33 +3351,90 @@ function setPresetError(message) {
   els.presetError.hidden = !message;
 }
 
-async function loadDevices(preferredDeviceId = "") {
+function formatDeviceLabel(device) {
+  const base = device.name && device.name !== device.device_id
+    ? `${device.name} (${device.device_id})`
+    : device.device_id;
+  return `${base} · ${device.status}`;
+}
+
+async function loadDevices(preferredDeviceId = "", options = {}) {
+  const announce = Boolean(options?.announce);
+  if (state.devicesRefreshing) return;
+  state.devicesRefreshing = true;
+  if (els.refreshDevices) {
+    els.refreshDevices.disabled = true;
+    els.refreshDevices.classList.add("spinning");
+  }
   try {
+    if (!state.backends.length) {
+      await loadCapabilities();
+    }
     const payload = await api("/api/devices");
     state.devices = payload.devices || [];
-    renderDevices(preferredDeviceId);
+    const visibleDevices = renderDevices(preferredDeviceId);
+    if (announce) {
+      const ready = visibleDevices.filter((device) => device.status === "device");
+      if (ready.length === 1) {
+        const d = ready[0];
+        const name = d.name && d.name !== d.device_id ? `${d.name} (${d.device_id})` : d.device_id;
+        showNotice(t("Found device: {name}", { name }));
+      } else if (ready.length > 1) {
+        showNotice(t("Found {count} devices", { count: ready.length }));
+      } else {
+        showNotice(t("No devices found for {backend}", { backend: els.backendSelect.value || "adb" }));
+      }
+    }
   } catch (error) {
     showError(error);
+  } finally {
+    state.devicesRefreshing = false;
+    if (els.refreshDevices) {
+      els.refreshDevices.disabled = false;
+      els.refreshDevices.classList.remove("spinning");
+    }
   }
 }
 
 function renderDevices(preferredDeviceId = "") {
+  const selectedBackendOption = els.backendSelect.selectedOptions?.[0];
+  if (!els.backendSelect.value || selectedBackendOption?.disabled) {
+    const firstAvailable = state.backends.find((candidate) => candidate.available);
+    if (firstAvailable) {
+      els.backendSelect.value = firstAvailable.name;
+    }
+  }
   const backend = els.backendSelect.value;
   const selectedDeviceId = preferredDeviceId || els.deviceList.value;
   const devices = state.devices.filter((device) => !backend || device.backend === backend);
-  els.deviceList.replaceChildren(
-    ...devices.map((device) => {
-      const option = document.createElement("option");
-      option.value = device.device_id;
-      option.textContent = `${device.name || device.device_id} · ${device.status}`;
-      option.disabled = device.status !== "device";
-      return option;
-    }),
-  );
-  if (selectedDeviceId) {
-    els.deviceList.value = selectedDeviceId;
+  if (!devices.length) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = t("No devices found");
+    empty.disabled = true;
+    empty.selected = true;
+    els.deviceList.replaceChildren(empty);
+  } else {
+    els.deviceList.replaceChildren(
+      ...devices.map((device) => {
+        const option = document.createElement("option");
+        option.value = device.device_id;
+        option.textContent = formatDeviceLabel(device);
+        option.disabled = device.status !== "device";
+        return option;
+      }),
+    );
+    const matching = devices.find((device) => device.device_id === selectedDeviceId && device.status === "device");
+    const fallback = devices.find((device) => device.status === "device");
+    if (matching) {
+      els.deviceList.value = matching.device_id;
+    } else if (fallback) {
+      els.deviceList.value = fallback.device_id;
+    }
   }
+  els.deviceList.title = els.deviceList.selectedOptions?.[0]?.textContent || "";
   updateControls();
+  return devices;
 }
 
 async function addManualAdbEndpoint() {
@@ -5914,6 +6047,14 @@ function setScreenMode(mode) {
     els.screenMeta.textContent = formatScreenMeta();
   }
   updateControls();
+}
+
+function showNotice(message) {
+  const toast = document.createElement("div");
+  toast.className = "toast info";
+  toast.textContent = message;
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 3000);
 }
 
 function showError(error) {

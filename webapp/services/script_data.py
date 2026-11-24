@@ -2090,7 +2090,7 @@ class ScriptDataService:
         return names
 
     def _servant_summary(self, name: str, details: dict[str, Any]) -> dict[str, Any]:
-        return {
+        summary: dict[str, Any] = {
             "name": name,
             "class": details.get("class"),
             "sn": details.get("SN"),
@@ -2099,6 +2099,13 @@ class ScriptDataService:
             "skill_types": details.get("skill_type") if isinstance(details.get("skill_type"), list) else [],
             "np_color": details.get("NPcolor"),
         }
+        star = details.get("star")
+        if isinstance(star, int) and not isinstance(star, bool):
+            summary["star"] = star
+        face_index = details.get("servant_face")
+        if isinstance(face_index, int) and not isinstance(face_index, bool) and face_index > 0:
+            summary["face_index"] = face_index
+        return summary
 
     def _master_summary(self, name: str, details: dict[str, Any]) -> dict[str, Any]:
         return {

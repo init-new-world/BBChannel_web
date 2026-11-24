@@ -1070,6 +1070,43 @@ def create_app(
     def servants(server: str = "CH") -> dict:
         return script_data.list_servants(server)
 
+    @app.get("/api/servants/image")
+    def servant_portrait(name: str, server: str = "CH", face: int | None = Query(default=None, ge=1, le=20)) -> Response:
+        cleaned = name.strip()
+        if (
+            not cleaned
+            or cleaned in (".", "..")
+            or any(ch in cleaned for ch in ("/", "\\", ":", "\x00"))
+        ):
+            raise AppError(ErrorCode.TEMPLATE_NOT_FOUND, "Servant portrait not found.")
+        face_candidates: list[int] = []
+        if face is not None:
+            face_candidates.append(face)
+        else:
+            try:
+                catalog = script_data.list_servants(server)["servants"]
+                match = next((item for item in catalog if item.get("name") == cleaned), None)
+                if match and isinstance(match.get("face_index"), int):
+                    face_candidates.append(match["face_index"])
+            except AppError:
+                pass
+        for fallback in (1, 2, 3):
+            if fallback not in face_candidates:
+                face_candidates.append(fallback)
+        face_root = (resources.assets_dir / "servantface").resolve()
+        for idx in face_candidates:
+            try:
+                path = resources.resolve_template(f"servantface/{cleaned}_{idx}.png")
+            except AppError:
+                continue
+            if path.is_relative_to(face_root):
+                return Response(
+                    content=path.read_bytes(),
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+        raise AppError(ErrorCode.TEMPLATE_NOT_FOUND, "Servant portrait not found.")
+
     @app.get("/api/masters")
     def masters() -> dict:
         return script_data.list_masters()

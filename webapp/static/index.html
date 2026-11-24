@@ -41,6 +41,7 @@
               <select id="setting-select" class="field" aria-label="Script setting"></select>
               <button id="duplicate-setting" class="icon-button" type="button" title="Duplicate Script" aria-label="Duplicate Script" disabled><img src="/icons/copy.svg" width="16" height="16" alt=""></button>
             </div>
+            <button id="new-setting-wizard" class="primary-button wide" type="button">+ <span>Quick New Script (Wizard)</span></button>
             <div class="preset-actions">
               <button id="new-setting" class="ghost-button" type="button">New</button>
               <button id="edit-setting" class="ghost-button" type="button" disabled>Edit</button>
@@ -703,12 +704,19 @@
             <div class="section-label">Preset Editor</div>
             <h2 id="preset-dialog-title">Edit Preset</h2>
           </div>
-          <button id="close-preset" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
+          <div class="preset-dialog-header-actions">
+            <div id="preset-editor-mode-switch" class="segmented-control preset-mode-switch" role="tablist" aria-label="Editor mode" hidden>
+              <button id="preset-mode-wizard" class="segment" type="button" role="tab" aria-selected="false" data-editor-mode="wizard">Simple Wizard</button>
+              <button id="preset-mode-pro" class="segment active" type="button" role="tab" aria-selected="true" data-editor-mode="pro">Pro Mode</button>
+            </div>
+            <button id="close-preset" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
+          </div>
         </div>
         <label class="field-stack">
           <span>Name</span>
           <input id="preset-name" class="field" type="text" autocomplete="off" required>
         </label>
+        <div id="preset-wizard-root" class="preset-wizard-root" hidden></div>
         <details id="preset-team" class="preset-team" hidden>
           <summary>Team</summary>
           <fieldset id="preset-team-controls" class="preset-team-fields">

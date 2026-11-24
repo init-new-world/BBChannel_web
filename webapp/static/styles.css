@@ -2361,6 +2361,22 @@ select:disabled {
   box-shadow: 0 12px 28px rgba(30, 37, 45, 0.14);
 }
 
+.toast.info {
+  border-color: rgba(36, 104, 213, 0.28);
+  background: #f0f6ff;
+  color: var(--accent-strong);
+}
+
+@keyframes bb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.icon-button.spinning {
+  animation: bb-spin 0.8s linear infinite;
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     height: auto;
@@ -2617,5 +2633,631 @@ select:disabled {
 @media (max-width: 360px) {
   .brand > span:last-child {
     display: none;
+  }
+}
+
+/* Simple Script Wizard & Dual-Mode Editor */
+.preset-dialog-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preset-mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, auto);
+}
+
+.preset-mode-switch .segment {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.preset-dialog.wizard-mode {
+  width: min(980px, calc(100vw - 28px));
+  height: min(860px, calc(100vh - 28px));
+}
+
+.preset-form.wizard-mode > details,
+.preset-form.wizard-mode > fieldset,
+.preset-form.wizard-mode > .preset-json-field {
+  display: none !important;
+}
+
+.preset-wizard-root {
+  display: grid;
+  gap: 12px;
+}
+
+.wizard-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wizard-step-tab {
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.wizard-step-tab.done {
+  border-color: rgba(20, 122, 84, 0.35);
+  color: var(--ok);
+}
+
+.wizard-step-tab.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.12);
+  color: var(--accent-strong);
+}
+
+.wizard-body {
+  display: grid;
+  gap: 12px;
+}
+
+.wizard-top-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 110px;
+  gap: 10px;
+  align-items: end;
+}
+
+.wizard-master-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wizard-master-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.wizard-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.wizard-slots-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wizard-slot-card {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 6px;
+  padding: 7px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.wizard-slot-card.is-reserve {
+  background: var(--panel-soft);
+}
+
+.wizard-slot-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(36, 104, 213, 0.16);
+}
+
+.wizard-slot-card.is-assist {
+  border-color: var(--ok);
+}
+
+.wizard-slot-badges {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wizard-pos-tag {
+  color: var(--muted);
+}
+
+.wizard-assist-tag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(20, 122, 84, 0.14);
+  color: var(--ok);
+}
+
+.wizard-slot-body {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 74px;
+  align-content: center;
+}
+
+.wizard-slot-avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: #1b222c;
+}
+
+.wizard-slot-name {
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-slot-empty {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.wizard-slot-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.wizard-slot-actions .chip-button {
+  min-height: 22px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+.wizard-picker-box,
+.wizard-card-block {
+  display: grid;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.wizard-picker-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wizard-picking-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+
+.wizard-picker-count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.wizard-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.wizard-filter-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.wizard-filter-sep {
+  margin-left: 10px;
+}
+
+.wizard-servant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 7px;
+  max-height: 270px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.wizard-servant-card {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  text-align: center;
+}
+
+.wizard-servant-card:hover {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.05);
+}
+
+.wizard-card-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #1b222c;
+}
+
+.wizard-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wizard-star-pill {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f5efe0;
+  color: #8f5c00;
+}
+
+.wizard-star-pill.star-5 {
+  background: #fff2cc;
+  color: #9e6200;
+}
+
+.wizard-np-dot {
+  padding: 0 4px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 9px;
+}
+
+.wizard-np-dot.np-b { background: #cf362d; }
+.wizard-np-dot.np-a { background: #2667cc; }
+.wizard-np-dot.np-q { background: #1d8a4e; }
+
+.wizard-card-name {
+  width: 100%;
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-assist-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(20, 122, 84, 0.3);
+  background: rgba(20, 122, 84, 0.06);
+  font-size: 13px;
+}
+
+.wizard-mode-cards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wizard-mode-card {
+  min-height: 36px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wizard-mode-card.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.1);
+  color: var(--accent-strong);
+}
+
+.wizard-toggle-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.wizard-inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.wizard-inline-select select {
+  width: auto;
+  min-height: 28px;
+}
+
+.wizard-ce-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 7px;
+  max-height: 210px;
+  overflow: auto;
+}
+
+.wizard-ce-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  text-align: left;
+}
+
+.wizard-ce-card.active {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.1);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.wizard-ce-thumb {
+  width: 56px;
+  height: 18px;
+  object-fit: contain;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.wizard-wave-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wizard-battle-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wizard-servant-skill-col {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.wizard-master-col {
+  background: var(--panel-soft);
+}
+
+.wizard-skill-col-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.wizard-skill-col-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-mini-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.wizard-skill-buttons {
+  display: grid;
+  gap: 5px;
+}
+
+.wizard-skill-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 11px;
+  text-align: left;
+}
+
+.wizard-skill-btn:hover {
+  border-color: var(--accent);
+  background: rgba(36, 104, 213, 0.08);
+  color: var(--accent-strong);
+}
+
+.wizard-skill-btn .sk-idx {
+  font-weight: 800;
+  color: var(--accent-strong);
+  flex-shrink: 0;
+}
+
+.wizard-skill-btn .sk-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-target-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--accent);
+  background: rgba(36, 104, 213, 0.08);
+  font-size: 12px;
+}
+
+.wizard-target-bar select {
+  width: auto;
+  min-height: 30px;
+}
+
+.wizard-strategy-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wizard-strategy-inline select {
+  max-width: 260px;
+}
+
+.wizard-timeline-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wizard-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(36, 104, 213, 0.35);
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wizard-action-chip button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  padding: 0 2px;
+}
+
+.wizard-action-chip button:hover {
+  color: var(--danger);
+}
+
+.wizard-review-team {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wizard-review-servant {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.wizard-review-waves {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.wizard-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.wizard-pro-hint {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.wizard-nav-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.wizard-empty-hint {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 4px;
+}
+
+img.broken {
+  opacity: 0.2;
+}
+
+@media (max-width: 760px) {
+  .wizard-stepper,
+  .wizard-mode-cards,
+  .wizard-battle-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wizard-slots-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .wizard-top-row {
+    grid-template-columns: 1fr;
+  }
+
+  .wizard-picker-search-row {
+    flex-wrap: wrap;
   }
 }
