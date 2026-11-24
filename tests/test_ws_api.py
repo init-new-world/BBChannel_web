@@ -82,6 +82,9 @@ def test_ws_events_streams_snapshot_logs_and_job_updates(tmp_path: Path):
             with client.websocket_connect("/api/ws/events?events_limit=20&jobs_limit=10") as ws:
                 snapshot = ws.receive_json()
                 assert snapshot["type"] == "snapshot"
+                assert snapshot["connection"]["connected"] is True
+                assert snapshot["connection"]["backend"] == "fake"
+                assert snapshot["connection"]["device_id"] == "dev-ws"
                 assert any(item["action"] == "connect" for item in snapshot["events"])
                 assert snapshot["jobs"] == []
 
@@ -170,6 +173,31 @@ def test_ws_events_pushes_live_job_events_for_subscribed_job(tmp_path: Path):
 
                 assert "custom_marker" in pushed_types
                 assert saw_terminal_update is True
+
+
+def test_ws_events_snapshot_reflects_device_disconnect_and_reconnect(tmp_path: Path):
+    app, _event_log, _backend, device_service, manager = _build_env(tmp_path)
+    with manager:
+        with create_test_client(app) as client:
+            with client.websocket_connect("/api/ws/events?events_limit=10&jobs_limit=10") as ws:
+                initial = ws.receive_json()
+                assert initial["type"] == "snapshot"
+                assert initial["connection"]["connected"] is False
+                assert initial["connection"]["backend"] is None
+                assert initial["connection"]["device_id"] is None
+
+                device_service.connect("fake", "dev-ws")
+                ws.send_json({"type": "refresh"})
+                refreshed = None
+                for _ in range(10):
+                    msg = ws.receive_json()
+                    if msg["type"] == "snapshot":
+                        refreshed = msg
+                        break
+                assert refreshed is not None
+                assert refreshed["connection"]["connected"] is True
+                assert refreshed["connection"]["backend"] == "fake"
+                assert refreshed["connection"]["device_id"] == "dev-ws"
 
 
 def test_ws_screen_streams_binary_png_frames_and_executes_tap(tmp_path: Path):

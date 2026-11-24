@@ -112,6 +112,7 @@ def create_ws_router(
                     subscribed_job_id = None
             return {
                 "type": "snapshot",
+                "connection": device_service.state().to_dict(),
                 "events": event_log.recent(events_limit),
                 "jobs": [job.to_dict() for job in job_manager.list(jobs_limit)],
                 "job_id": subscribed_job_id,

@@ -312,6 +312,10 @@ def test_operator_console_references_api_controls():
     assert 'id="pause-job"' in index
     assert 'id="resume-job"' in index
     assert 'id="cancel-job"' in index
+    assert 'id="clear-job"' in index
+    assert "applyConnectionState" in script
+    assert "SERVER_RESTARTED" in script
+    assert "DEVICE_REQUIRED" in script
     assert 'id="job-events"' in index
     assert 'id="job-result"' in index
     assert "/api/capabilities" in script

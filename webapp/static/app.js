@@ -398,6 +398,7 @@ const els = {
   pauseJob: document.querySelector("#pause-job"),
   resumeJob: document.querySelector("#resume-job"),
   cancelJob: document.querySelector("#cancel-job"),
+  clearJob: document.querySelector("#clear-job"),
   debugStepMode: document.querySelector("#debug-step-mode"),
   audioAlertEnabled: document.querySelector("#audio-alert-enabled"),
   testAudioAlert: document.querySelector("#test-audio-alert"),
@@ -970,6 +971,7 @@ function bindEvents() {
   els.pauseJob.addEventListener("click", () => controlJob("pause"));
   els.resumeJob.addEventListener("click", () => controlJob("resume"));
   els.cancelJob.addEventListener("click", () => controlJob("cancel"));
+  els.clearJob?.addEventListener("click", () => selectJob(""));
   els.audioAlertEnabled?.addEventListener("change", () => {
     state.audioAlert.enabled = Boolean(els.audioAlertEnabled.checked);
     if (state.audioAlert.enabled) ensureAudioContext();
@@ -1009,19 +1011,33 @@ async function loadCapabilities() {
   renderDevices(state.consolePrefs.lastDeviceId || "");
 }
 
+function applyConnectionState(payload, { fromSnapshot = false } = {}) {
+  const wasConnected = state.connected;
+  const connected = Boolean(payload?.connected);
+  state.connected = connected;
+  setConnectionLabel(payload || { connected: false });
+  if (connected && payload?.backend) {
+    selectBackend(payload.backend);
+    renderDevices(payload.device_id || "");
+    if (!fromSnapshot && els.autoRefreshScreen && state.consolePrefs.autoLiveStream !== false) {
+      els.autoRefreshScreen.checked = true;
+    }
+    syncAutoRefreshScreen(!fromSnapshot);
+  } else if (!connected && wasConnected) {
+    state.screenRotation = null;
+    if (els.autoRefreshScreen) els.autoRefreshScreen.checked = false;
+    stopAutoRefreshScreen();
+    stopFollowJobScreen();
+    if (fromSnapshot) {
+      showNotice(t("Device disconnected after server restart. Please reconnect."));
+    }
+  }
+}
+
 async function loadConnectionState() {
   try {
     const payload = await api("/api/state");
-    state.connected = Boolean(payload.connected);
-    setConnectionLabel(payload);
-    if (payload.connected && payload.backend) {
-      selectBackend(payload.backend);
-      renderDevices(payload.device_id || "");
-      if (els.autoRefreshScreen && state.consolePrefs.autoLiveStream !== false) {
-        els.autoRefreshScreen.checked = true;
-      }
-      syncAutoRefreshScreen(true);
-    }
+    applyConnectionState(payload, { fromSnapshot: false });
   } catch {
     state.connected = false;
     setConnectionLabel({ connected: false });
@@ -4568,6 +4584,9 @@ async function enqueueJob(kind, payload) {
     renderJobHistory(job.job_id);
     await selectJob(job.job_id);
   } catch (error) {
+    if (error?.payload?.detail?.code === "DEVICE_REQUIRED") {
+      await loadConnectionState();
+    }
     showError(error);
   } finally {
     updateControls();
@@ -4580,7 +4599,11 @@ async function loadJobs(preferredJobId = "") {
     state.jobs = payload.jobs || [];
     trackJobTransitions(state.jobs, false);
     state.jobTransitionsPrimed = true;
-    const selectedJobId = preferredJobId || state.activeJob?.job_id || state.jobs[0]?.job_id || "";
+    const latestJob = state.jobs[0];
+    const defaultJobId = latestJob && latestJob.error?.code !== "SERVER_RESTARTED"
+      ? latestJob.job_id
+      : "";
+    const selectedJobId = preferredJobId || state.activeJob?.job_id || defaultJobId;
     renderJobHistory(selectedJobId);
     if (selectedJobId) {
       await selectJob(selectedJobId);
@@ -4589,6 +4612,7 @@ async function loadJobs(preferredJobId = "") {
       state.jobEvents = [];
       renderJob(null);
       renderJobEvents();
+      updateControls();
     }
   } catch (error) {
     showError(error);
@@ -4646,6 +4670,7 @@ async function selectJob(jobId) {
     unsubscribeActiveJobStream();
     state.activeJob = null;
     state.jobEvents = [];
+    renderJobHistory("");
     renderJob(null);
     renderJobEvents();
     updateControls();
@@ -5453,6 +5478,9 @@ function connectEventsSocket() {
     try {
       const payload = JSON.parse(message.data);
       if (payload.type === "snapshot") {
+        if (payload.connection && typeof payload.connection === "object") {
+          applyConnectionState(payload.connection, { fromSnapshot: true });
+        }
         renderEventsList(payload.events || []);
         if (Array.isArray(payload.jobs)) {
           state.jobs = payload.jobs;
@@ -5932,8 +5960,14 @@ function updateControls() {
   );
   els.pauseJob.disabled = selectedJobStatus !== "running";
   els.resumeJob.disabled = selectedJobStatus !== "paused";
+  const isTerminalSelected = Boolean(state.activeJob && TERMINAL_JOB_STATES.has(selectedJobStatus));
+  els.cancelJob.hidden = isTerminalSelected;
   els.cancelJob.disabled = !ACTIVE_JOB_STATES.has(selectedJobStatus)
     || selectedJobStatus === "cancelling";
+  if (els.clearJob) {
+    els.clearJob.hidden = !isTerminalSelected;
+    els.clearJob.disabled = !isTerminalSelected;
+  }
   els.editSetting.disabled = !els.settingSelect.value;
   els.duplicateSetting.disabled = !els.settingSelect.value;
   els.deleteSetting.disabled = !els.settingSelect.value;

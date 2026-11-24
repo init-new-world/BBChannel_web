@@ -83,6 +83,7 @@ const zh = {
   "Card preference first": "优先选卡偏好",
   "Chapter": "章节",
   "Clear": "清除",
+  "Device disconnected after server restart. Please reconnect.": "服务端已重启，设备连接已断开，请重新连接。",
   "Clear NP order": "清除宝具顺序",
   "Clear all CEs": "清空礼装",
   "Clear all assist CEs?": "清空所有助战礼装？",
