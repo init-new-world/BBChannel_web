@@ -2053,7 +2053,7 @@ select:disabled {
 .screen-stage {
   position: relative;
   min-height: 320px;
-  overflow: auto;
+  overflow: hidden;
   display: grid;
   place-items: center;
   background:
@@ -2061,6 +2061,10 @@ select:disabled {
     linear-gradient(0deg, var(--screen-grid) 1px, transparent 1px),
     var(--screen);
   background-size: 32px 32px;
+}
+
+.screen-stage:has(#screenshot.actual-size) {
+  overflow: auto;
 }
 
 #screenshot {
@@ -2105,10 +2109,14 @@ select:disabled {
 
 .touch-overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 6;
-  overflow: visible;
+  overflow: hidden;
+  contain: layout paint;
 }
 
 .touch-ripple {

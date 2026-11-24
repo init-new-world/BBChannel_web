@@ -500,8 +500,27 @@ export function attachScreenTouchController({
   function clientToStage(clientX, clientY) {
     const stageRect = stage.getBoundingClientRect();
     return {
-      x: clientX - stageRect.left + stage.scrollLeft,
-      y: clientY - stageRect.top + stage.scrollTop,
+      x: clientX - stageRect.left,
+      y: clientY - stageRect.top,
+    };
+  }
+
+  function syncOverlayViewport() {
+    if (!overlay) return { width: 0, height: 0 };
+    const width = stage.clientWidth;
+    const height = stage.clientHeight;
+    overlay.style.left = `${stage.scrollLeft}px`;
+    overlay.style.top = `${stage.scrollTop}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+    return { width, height };
+  }
+
+  function clampBadgePos(x, y, width, height, yOffset = 26) {
+    const padX = Math.min(68, Math.max(24, width * 0.15));
+    return {
+      x: clamp(x, padX, Math.max(padX, width - padX)),
+      y: clamp(y - yOffset, 26, Math.max(26, height - 6)),
     };
   }
 
@@ -550,12 +569,14 @@ export function attachScreenTouchController({
 
     if (visual.phase === "tap_flash") {
       stopRaf();
+      const { width, height } = syncOverlayViewport();
       const pt = clientToStage(visual.startClient.x, visual.startClient.y);
+      const badge = clampBadgePos(pt.x, pt.y, width, height, 24);
       const cls = visual.controlEnabled ? "touch-ripple live" : "touch-ripple pick";
       overlay.hidden = false;
       overlay.innerHTML = `
         <div class="${cls}" style="left:${pt.x}px;top:${pt.y}px"></div>
-        <div class="touch-badge" style="left:${pt.x}px;top:${Math.max(18, pt.y - 24)}px">${visual.startDevice.x}, ${visual.startDevice.y}</div>
+        <div class="touch-badge" style="left:${badge.x}px;top:${badge.y}px">${visual.startDevice.x}, ${visual.startDevice.y}</div>
       `;
       rippleTimer = window.setTimeout(() => {
         rippleTimer = null;
@@ -580,6 +601,7 @@ export function attachScreenTouchController({
           rafId = null;
           return;
         }
+        syncOverlayViewport();
         const elapsed = performance.now() - visual.startedAt;
         const progress = clamp(
           (elapsed - visual.indicatorDelayMs) / Math.max(1, visual.longPressMs - visual.indicatorDelayMs),
@@ -611,6 +633,7 @@ export function attachScreenTouchController({
           rafId = null;
           return;
         }
+        const { width, height } = syncOverlayViewport();
         const p0 = clientToStage(lastVisual.startClient.x, lastVisual.startClient.y);
         const p1 = clientToStage(lastVisual.currClient.x, lastVisual.currClient.y);
         const moved = hypot(p1.x - p0.x, p1.y - p0.y) >= (options.longPressMoveSlopPx || DEFAULT_TOUCH_OPTIONS.longPressMoveSlopPx);
@@ -618,8 +641,11 @@ export function attachScreenTouchController({
         const label = moved
           ? `${t("Hold & drag")} ${holdSec}s`
           : `${t("Holding")} ${holdSec}s`;
+        const anchorX = moved ? p1.x : p0.x;
+        const anchorY = moved ? p1.y : p0.y;
+        const badge = clampBadgePos(anchorX, anchorY, width, height, 30);
         const lineSvg = moved
-          ? `<svg class="touch-trail-svg" width="${Math.max(stage.scrollWidth, stage.clientWidth)}" height="${Math.max(stage.scrollHeight, stage.clientHeight)}">
+          ? `<svg class="touch-trail-svg" width="${width}" height="${height}">
               <line class="touch-trail-line hold" x1="${p0.x}" y1="${p0.y}" x2="${p1.x}" y2="${p1.y}" />
               <circle class="touch-trail-start hold" cx="${p0.x}" cy="${p0.y}" r="5" />
             </svg>`
@@ -627,8 +653,8 @@ export function attachScreenTouchController({
         overlay.hidden = false;
         overlay.innerHTML = `
           ${lineSvg}
-          <div class="touch-hold-pulse" style="left:${moved ? p1.x : p0.x}px;top:${moved ? p1.y : p0.y}px"></div>
-          <div class="touch-badge hold" style="left:${moved ? p1.x : p0.x}px;top:${Math.max(18, (moved ? p1.y : p0.y) - 30)}px">${label}</div>
+          <div class="touch-hold-pulse" style="left:${anchorX}px;top:${anchorY}px"></div>
+          <div class="touch-badge hold" style="left:${badge.x}px;top:${badge.y}px">${label}</div>
         `;
         rafId = window.requestAnimationFrame(drawHold);
       };
@@ -639,22 +665,22 @@ export function attachScreenTouchController({
 
     if (visual.phase === "dragging") {
       stopRaf();
+      const { width, height } = syncOverlayViewport();
       const p0 = clientToStage(visual.startClient.x, visual.startClient.y);
       const p1 = clientToStage(visual.currClient.x, visual.currClient.y);
-      const w = Math.max(stage.scrollWidth, stage.clientWidth);
-      const h = Math.max(stage.scrollHeight, stage.clientHeight);
+      const badge = clampBadgePos(p1.x, p1.y, width, height, 26);
       const modeClass = visual.controlEnabled ? "live" : "pick";
       const label = visual.controlEnabled
         ? `${t("Drag")} ${visual.startDevice.x},${visual.startDevice.y} → ${visual.currDevice.x},${visual.currDevice.y}`
         : `${t("Swipe pick")} ${visual.startDevice.x},${visual.startDevice.y} → ${visual.currDevice.x},${visual.currDevice.y}`;
       overlay.hidden = false;
       overlay.innerHTML = `
-        <svg class="touch-trail-svg" width="${w}" height="${h}">
+        <svg class="touch-trail-svg" width="${width}" height="${height}">
           <line class="touch-trail-line ${modeClass}" x1="${p0.x}" y1="${p0.y}" x2="${p1.x}" y2="${p1.y}" />
           <circle class="touch-trail-start ${modeClass}" cx="${p0.x}" cy="${p0.y}" r="5" />
           <circle class="touch-trail-end ${modeClass}" cx="${p1.x}" cy="${p1.y}" r="6" />
         </svg>
-        <div class="touch-badge ${modeClass}" style="left:${p1.x}px;top:${Math.max(18, p1.y - 26)}px">${label}</div>
+        <div class="touch-badge ${modeClass}" style="left:${badge.x}px;top:${badge.y}px">${label}</div>
       `;
     }
   }
