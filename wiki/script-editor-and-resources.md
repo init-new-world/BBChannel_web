@@ -43,4 +43,23 @@
 - **自定义助战标签**：存于 `assets/assist/assist_tags/`，PNG 文件名编码源分辨率、裁切偏移与置信度阈值。被脚本引用时禁止删除。
 - **自定义指令卡标签（`specialKeys`）**：通过 Tag Maker 的 **Command Cards** 截屏裁切，存于 `assets/battle/customCommandCard/`，按绑定顺序映射为 `S0`、`S1`…；仅允许解绑末尾且未被任何策略/技能/白野组合引用的标签，绝不静默重排已有索引。
 - **掉落模板解析**：优先解析 `assets/drop/` 内的完整路径，仅当索引中文件名唯一时才允许裸文件名回退；路径遍历与越界软链接一律拒绝。
+- **助战礼装主识别遮罩**：`assets/assist/equip_main_mask.png`（`237×68`）仅暴露核心识别窗口 `(39, 0, 194, 56)`，在 `AssistRecognizer` 中通过显式遮罩走 `TM_CCOEFF_NORMED` 匹配，自动屏蔽左下角活动掉落加成角标（`+1`/`+2`）与右下角满破星差异。
 - **前端第三方许可**：本地工具栏图标来自 Lucide Static 1.43.0（许可见 `webapp/static/icons/LICENSE.txt`）；`jsonc-parser` 许可位于 `webapp/static/vendor/`。
+
+## Mooncell + Atlas 资源增量同步流水线
+
+版本更新或新活动开启时，可通过内置 CLI 或 Web 界面直接从 Mooncell Wiki（中文译名、技能、活动礼装与 `出场角色坐标`）及 Atlas Academy（指令卡贴图、多破无框头像与战斗状态立绘）增量拉取资源：
+
+```bash
+# 巡检未收录的新从者及国服/日服当期活动礼装
+python -m webapp.tools.wiki_sync check
+
+# 增量同步新从者元数据、技能图标、头像、指令卡与战斗状态切片（支持 --dry-run / --id / --since-id）
+python -m webapp.tools.wiki_sync sync-servants
+
+# 拉取当期活动礼装并按出场角色坐标自动裁切为 237x68 助战模板（可选同步保存 132x144 掉落图）
+python -m webapp.tools.wiki_sync sync-event-ces --server CH --activate --save-drop
+```
+
+日常活动也可直接在控制台 **Tools → 助战礼装模板 → 从 Mooncell 导入** 中切换国服/日服当期活动或按礼装名/序号搜索，实时拖动 `Y 轴微调` 预览 `237×68` 裁切框并一键导入启用。
+

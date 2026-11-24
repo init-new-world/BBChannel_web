@@ -74,6 +74,11 @@ class FrontlineServantRecognizer:
         self._class_icon_cache: dict[str, Any] = {}
         self._servant_catalog_cache: dict[str, dict[str, tuple[str, dict[str, Any]]]] = {}
 
+    def invalidate_cache(self) -> None:
+        self._status_info_cache = None
+        self._status_sheet_cache.clear()
+        self._servant_catalog_cache.clear()
+
     def has_assets(self) -> bool:
         assets_dir = getattr(self._resources, "assets_dir", None)
         if not isinstance(assets_dir, Path):

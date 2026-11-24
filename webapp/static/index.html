@@ -614,6 +614,52 @@
                   <span>Name</span>
                   <input id="equip-template-name" class="field" type="text" maxlength="100" autocomplete="off">
                 </label>
+                <details id="wiki-equip-details" class="sub-details">
+                  <summary>Import from Mooncell</summary>
+                  <div class="sub-details-body">
+                    <div class="equip-template-actions">
+                      <select id="wiki-equip-server" class="field" aria-label="Mooncell server">
+                        <option value="CH">CN Server</option>
+                        <option value="JP">JP Server</option>
+                      </select>
+                      <button id="wiki-load-events" class="ghost-button" type="button">Load Events</button>
+                    </div>
+                    <select id="wiki-event-select" class="field" aria-label="Mooncell event">
+                      <option value="">Patch &amp; Bonus CEs</option>
+                    </select>
+                    <div class="wiki-equip-search-row">
+                      <input id="wiki-ce-query" class="field" type="text" maxlength="80" placeholder="CE ID / Name / Alias" autocomplete="off">
+                      <button id="wiki-ce-search" class="ghost-button" type="button">Search</button>
+                    </div>
+                    <select id="wiki-ce-list" class="field" aria-label="Mooncell craft essence">
+                      <option value="">No CEs loaded</option>
+                    </select>
+                    <div class="equip-template-preview-frame wiki-equip-preview-frame">
+                      <div class="wiki-equip-preview-stage">
+                        <img id="wiki-ce-preview" alt="Mooncell craft essence crop preview" hidden>
+                        <div id="wiki-ce-match-box" class="wiki-ce-match-box" title="Core match region (ignores +1 drop &amp; MLB star)" hidden></div>
+                      </div>
+                      <span id="wiki-ce-preview-status" class="equip-template-preview-status">Select a CE</span>
+                    </div>
+                    <div class="wiki-offset-control">
+                      <div class="wiki-offset-header">
+                        <span>Y Offset</span>
+                        <span id="wiki-y-offset-value">0 px</span>
+                        <button id="wiki-reset-offset" class="ghost-button wiki-reset-button" type="button">Reset</button>
+                      </div>
+                      <input id="wiki-y-offset" class="wiki-offset-range" type="range" min="-200" max="200" step="2" value="0" aria-label="Y Offset">
+                    </div>
+                    <label class="toggle-row">
+                      <input id="wiki-equip-activate" type="checkbox" checked>
+                      <span>Activate immediately</span>
+                    </label>
+                    <label class="toggle-row">
+                      <input id="wiki-equip-save-drop" type="checkbox">
+                      <span>Also save drop icon</span>
+                    </label>
+                    <button id="wiki-import-ce" class="primary-button wide" type="button">Import CE Template</button>
+                  </div>
+                </details>
                 <button id="capture-equip-candidates" class="ghost-button wide" type="button">Extract Candidates</button>
                 <select id="equip-candidate-list" class="field" aria-label="Extracted equip candidate"></select>
                 <div class="equip-template-preview-frame">

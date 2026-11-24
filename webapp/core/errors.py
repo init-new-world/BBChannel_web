@@ -32,6 +32,7 @@ class ErrorCode(str, Enum):
     REPLAY_SESSION_NOT_FOUND = "replay_session_not_found"
     REPLAY_MANIFEST_INVALID = "replay_manifest_invalid"
     REPLAY_ACTION_MISMATCH = "replay_action_mismatch"
+    WIKI_UPSTREAM_FAILED = "wiki_upstream_failed"
 
 
 class AppError(Exception):

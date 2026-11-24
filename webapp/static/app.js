@@ -42,6 +42,14 @@ const state = {
   equipFullCandidate: null,
   equipNonFullCandidate: null,
   equipTemplateBusy: false,
+  wikiEquipBusy: false,
+  wikiEventsLoadedFor: "",
+  wikiEvents: [],
+  wikiPatchCes: [],
+  wikiCraftEssences: [],
+  wikiPreviewSequence: 0,
+  wikiPreviewTimer: null,
+  wikiPreviewReady: false,
   assistTags: [],
   assistTagMode: "assist",
   assistTagGeneration: 0,
@@ -331,6 +339,22 @@ const els = {
   runExpballStorage: document.querySelector("#run-expball-storage"),
   runExpballSell: document.querySelector("#run-expball-sell"),
   equipTemplateName: document.querySelector("#equip-template-name"),
+  wikiEquipDetails: document.querySelector("#wiki-equip-details"),
+  wikiEquipServer: document.querySelector("#wiki-equip-server"),
+  wikiLoadEvents: document.querySelector("#wiki-load-events"),
+  wikiEventSelect: document.querySelector("#wiki-event-select"),
+  wikiCeQuery: document.querySelector("#wiki-ce-query"),
+  wikiCeSearch: document.querySelector("#wiki-ce-search"),
+  wikiCeList: document.querySelector("#wiki-ce-list"),
+  wikiCePreview: document.querySelector("#wiki-ce-preview"),
+  wikiCeMatchBox: document.querySelector("#wiki-ce-match-box"),
+  wikiCePreviewStatus: document.querySelector("#wiki-ce-preview-status"),
+  wikiYOffset: document.querySelector("#wiki-y-offset"),
+  wikiYOffsetValue: document.querySelector("#wiki-y-offset-value"),
+  wikiResetOffset: document.querySelector("#wiki-reset-offset"),
+  wikiEquipActivate: document.querySelector("#wiki-equip-activate"),
+  wikiEquipSaveDrop: document.querySelector("#wiki-equip-save-drop"),
+  wikiImportCe: document.querySelector("#wiki-import-ce"),
   captureEquipCandidates: document.querySelector("#capture-equip-candidates"),
   equipCandidateList: document.querySelector("#equip-candidate-list"),
   equipCandidatePreview: document.querySelector("#equip-candidate-preview"),
@@ -968,6 +992,38 @@ function bindEvents() {
   els.runExpballStorage.addEventListener("click", runExpballStorage);
   els.runExpballSell.addEventListener("click", runExpballSell);
   els.equipTemplateName.addEventListener("input", updateControls);
+  if (els.wikiEquipDetails) {
+    els.wikiEquipDetails.addEventListener("toggle", () => {
+      if (els.wikiEquipDetails.open && !state.wikiEventsLoadedFor && !state.wikiEquipBusy) {
+        void loadWikiEvents();
+      }
+    });
+    els.wikiEquipServer.addEventListener("change", () => {
+      void loadWikiEvents();
+    });
+    els.wikiLoadEvents.addEventListener("click", () => {
+      void loadWikiEvents();
+    });
+    els.wikiEventSelect.addEventListener("change", () => {
+      void handleWikiEventChange();
+    });
+    els.wikiCeSearch.addEventListener("click", () => {
+      void searchWikiCraftEssences();
+    });
+    els.wikiCeQuery.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void searchWikiCraftEssences();
+      }
+    });
+    els.wikiCeList.addEventListener("change", handleWikiCeSelectionChange);
+    els.wikiCePreview.addEventListener("error", handleWikiCePreviewError);
+    els.wikiYOffset.addEventListener("input", handleWikiYOffsetInput);
+    els.wikiResetOffset.addEventListener("click", resetWikiYOffset);
+    els.wikiImportCe.addEventListener("click", () => {
+      void importWikiCeTemplate();
+    });
+  }
   els.captureEquipCandidates.addEventListener("click", captureEquipCandidates);
   els.equipCandidateList.addEventListener("change", renderSelectedEquipCandidate);
   els.equipCandidatePreview.addEventListener("error", handleEquipCandidatePreviewError);
@@ -1485,6 +1541,280 @@ function requestEquipTemplateMove(template, action, overwrite) {
     method: "POST",
     body: JSON.stringify({ overwrite }),
   });
+}
+
+function selectedWikiCraftEssence() {
+  if (!els.wikiCeList) return null;
+  const ceId = Number(els.wikiCeList.value || 0);
+  if (!Number.isInteger(ceId) || ceId <= 0) return null;
+  return state.wikiCraftEssences.find((item) => item.ce_id === ceId) || null;
+}
+
+function formatWikiYOffset(value) {
+  const numeric = Number(value || 0);
+  if (numeric > 0) return `+${numeric} px`;
+  return `${numeric} px`;
+}
+
+function populateWikiCeList(items) {
+  state.wikiCraftEssences = Array.isArray(items) ? items : [];
+  if (!els.wikiCeList) return;
+  if (!state.wikiCraftEssences.length) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = t("No matching CEs");
+    els.wikiCeList.replaceChildren(empty);
+    clearWikiCePreview();
+    updateControls();
+    return;
+  }
+  els.wikiCeList.replaceChildren(
+    ...state.wikiCraftEssences.map((item) => {
+      const option = document.createElement("option");
+      option.value = String(item.ce_id);
+      const statusBadge = item.local_status ? ` [${item.local_status}]` : "";
+      const typeLabel = item.type ? ` · ${item.type}` : "";
+      option.textContent = `#${item.ce_id} ${item.name}${typeLabel}${statusBadge}`;
+      return option;
+    }),
+  );
+  handleWikiCeSelectionChange();
+}
+
+async function loadWikiEvents() {
+  if (!els.wikiEquipServer || state.wikiEquipBusy) return;
+  const server = els.wikiEquipServer.value || "CH";
+  state.wikiEquipBusy = true;
+  updateControls();
+  try {
+    const payload = await api(`/api/wiki/events?server=${encodeURIComponent(server)}`);
+    state.wikiEventsLoadedFor = server;
+    state.wikiEvents = Array.isArray(payload.events) ? payload.events : [];
+    state.wikiPatchCes = Array.isArray(payload.patch_craft_essences) ? payload.patch_craft_essences : [];
+
+    const defaultOpt = document.createElement("option");
+    defaultOpt.value = "";
+    defaultOpt.textContent = t("Patch & Bonus CEs");
+    const eventOptions = state.wikiEvents.map((ev) => {
+      const opt = document.createElement("option");
+      opt.value = ev.title;
+      const prefix = ev.active ? "★ " : "";
+      const countNote = Array.isArray(ev.craft_essences) && ev.craft_essences.length
+        ? ` (${ev.craft_essences.length})`
+        : "";
+      opt.textContent = `${prefix}${ev.title}${countNote}`;
+      return opt;
+    });
+    els.wikiEventSelect.replaceChildren(defaultOpt, ...eventOptions);
+    const firstActiveWithCes = state.wikiEvents.find(
+      (ev) => ev.active && Array.isArray(ev.craft_essences) && ev.craft_essences.length,
+    );
+    if (firstActiveWithCes) {
+      els.wikiEventSelect.value = firstActiveWithCes.title;
+      populateWikiCeList(firstActiveWithCes.craft_essences);
+    } else {
+      els.wikiEventSelect.value = "";
+      populateWikiCeList(state.wikiPatchCes);
+    }
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.wikiEquipBusy = false;
+    updateControls();
+  }
+}
+
+async function handleWikiEventChange() {
+  const title = els.wikiEventSelect.value;
+  const query = els.wikiCeQuery.value.trim();
+  if (query) {
+    await searchWikiCraftEssences();
+    return;
+  }
+  if (!title) {
+    populateWikiCeList(state.wikiPatchCes);
+    return;
+  }
+  const cachedEvent = state.wikiEvents.find((ev) => ev.title === title);
+  if (cachedEvent && Array.isArray(cachedEvent.craft_essences) && cachedEvent.craft_essences.length) {
+    populateWikiCeList(cachedEvent.craft_essences);
+    return;
+  }
+  await searchWikiCraftEssences();
+}
+
+async function searchWikiCraftEssences() {
+  if (!els.wikiEquipServer || state.wikiEquipBusy) return;
+  const server = els.wikiEquipServer.value || "CH";
+  const query = els.wikiCeQuery.value.trim();
+  const eventTitle = els.wikiEventSelect.value;
+  const params = new URLSearchParams({ server, limit: "40" });
+  if (query) params.set("query", query);
+  if (eventTitle) params.set("event_title", eventTitle);
+  state.wikiEquipBusy = true;
+  updateControls();
+  try {
+    const payload = await api(`/api/wiki/craft-essences?${params.toString()}`);
+    populateWikiCeList(payload.items || []);
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.wikiEquipBusy = false;
+    updateControls();
+  }
+}
+
+function clearWikiCePreview(statusText = t("Select a CE")) {
+  state.wikiPreviewSequence += 1;
+  state.wikiPreviewReady = false;
+  if (state.wikiPreviewTimer) {
+    clearTimeout(state.wikiPreviewTimer);
+    state.wikiPreviewTimer = null;
+  }
+  if (els.wikiCePreview) {
+    els.wikiCePreview.hidden = true;
+    els.wikiCePreview.removeAttribute("src");
+  }
+  if (els.wikiCeMatchBox) {
+    els.wikiCeMatchBox.hidden = true;
+  }
+  if (els.wikiCePreviewStatus) {
+    els.wikiCePreviewStatus.hidden = false;
+    els.wikiCePreviewStatus.textContent = statusText;
+  }
+}
+
+function handleWikiCeSelectionChange() {
+  const selected = selectedWikiCraftEssence();
+  if (!selected) {
+    clearWikiCePreview();
+    updateControls();
+    return;
+  }
+  els.wikiYOffset.value = "0";
+  els.wikiYOffsetValue.textContent = formatWikiYOffset(0);
+  els.equipTemplateName.value = selected.recommended_name || selected.name || "";
+  void requestWikiCePreview();
+  updateControls();
+}
+
+function handleWikiYOffsetInput() {
+  const offset = Number(els.wikiYOffset.value || 0);
+  els.wikiYOffsetValue.textContent = formatWikiYOffset(offset);
+  if (state.wikiPreviewTimer) {
+    clearTimeout(state.wikiPreviewTimer);
+  }
+  state.wikiPreviewTimer = setTimeout(() => {
+    state.wikiPreviewTimer = null;
+    void requestWikiCePreview();
+  }, 160);
+  updateControls();
+}
+
+function resetWikiYOffset() {
+  if (Number(els.wikiYOffset.value || 0) === 0) return;
+  els.wikiYOffset.value = "0";
+  els.wikiYOffsetValue.textContent = formatWikiYOffset(0);
+  void requestWikiCePreview();
+  updateControls();
+}
+
+async function requestWikiCePreview() {
+  const selected = selectedWikiCraftEssence();
+  if (!selected) {
+    clearWikiCePreview();
+    return;
+  }
+  const sequence = ++state.wikiPreviewSequence;
+  const offset = Number(els.wikiYOffset.value || 0);
+  els.wikiCePreviewStatus.hidden = false;
+  els.wikiCePreviewStatus.textContent = t("Loading preview...");
+  updateControls();
+  try {
+    const payload = await api(
+      `/api/wiki/craft-essences/${encodeURIComponent(selected.ce_id)}/preview?y_offset=${encodeURIComponent(offset)}`,
+    );
+    if (sequence !== state.wikiPreviewSequence) return;
+    state.wikiPreviewReady = true;
+    els.wikiCePreview.src = `data:image/png;base64,${payload.preview_base64}`;
+    els.wikiCePreview.hidden = false;
+    els.wikiCeMatchBox.hidden = false;
+    els.wikiCePreviewStatus.hidden = false;
+    els.wikiCePreviewStatus.textContent = `Y=${payload.crop?.effective_center_y ?? payload.focus_y}`;
+    if (!els.equipTemplateName.value.trim() && payload.recommended_name) {
+      els.equipTemplateName.value = payload.recommended_name;
+    }
+  } catch (error) {
+    if (sequence !== state.wikiPreviewSequence) return;
+    clearWikiCePreview(t("Preview unavailable"));
+    showError(error);
+  } finally {
+    if (sequence === state.wikiPreviewSequence) {
+      updateControls();
+    }
+  }
+}
+
+function handleWikiCePreviewError() {
+  clearWikiCePreview(t("Preview unavailable"));
+  updateControls();
+}
+
+async function importWikiCeTemplate() {
+  const selected = selectedWikiCraftEssence();
+  if (!selected || state.wikiEquipBusy || state.equipTemplateBusy) return;
+  const targetName = (els.equipTemplateName.value.trim() || selected.recommended_name || selected.name).trim();
+  if (!targetName) return;
+
+  const baseBody = {
+    name: targetName,
+    y_offset: Number(els.wikiYOffset.value || 0),
+    activate: Boolean(els.wikiEquipActivate.checked),
+    save_drop: Boolean(els.wikiEquipSaveDrop.checked),
+    overwrite: false,
+  };
+
+  state.wikiEquipBusy = true;
+  state.equipTemplateBusy = true;
+  updateControls();
+  try {
+    let imported;
+    try {
+      imported = await api(`/api/wiki/craft-essences/${encodeURIComponent(selected.ce_id)}/import`, {
+        method: "POST",
+        body: JSON.stringify(baseBody),
+      });
+    } catch (error) {
+      const conflict = error?.payload?.error?.code === "data_file_conflict";
+      if (!conflict || !window.confirm(t("Replace existing template {name}?", { name: targetName }))) {
+        throw error;
+      }
+      imported = await api(`/api/wiki/craft-essences/${encodeURIComponent(selected.ce_id)}/import`, {
+        method: "POST",
+        body: JSON.stringify({ ...baseBody, overwrite: true }),
+      });
+    }
+    const tpl = imported.template;
+    const matchedItem = state.wikiCraftEssences.find((item) => item.ce_id === selected.ce_id);
+    if (matchedItem && tpl?.location) {
+      matchedItem.local_status = tpl.location;
+    }
+    if (state.presetEditor) {
+      state.presetEditor.equipCatalog = null;
+      state.presetEditor.dropCatalog = null;
+    }
+    await Promise.all([
+      loadEquipTemplates(tpl.name, tpl.location),
+      loadTemplates(),
+    ]);
+    showNotice(t("Imported CE template: {name}", { name: tpl.name }));
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.wikiEquipBusy = false;
+    state.equipTemplateBusy = false;
+    updateControls();
+  }
 }
 
 async function openAssistTagMaker() {
@@ -6175,7 +6505,24 @@ function updateControls() {
   els.editStrategy.disabled = !els.strategySelect.value;
   els.duplicateStrategy.disabled = !els.strategySelect.value;
   els.deleteStrategy.disabled = !els.strategySelect.value;
-  els.equipTemplateName.disabled = state.equipTemplateBusy;
+  els.equipTemplateName.disabled = state.equipTemplateBusy || state.wikiEquipBusy;
+  if (els.wikiEquipDetails) {
+    const selectedWikiCe = selectedWikiCraftEssence();
+    const wikiBusy = state.wikiEquipBusy || state.equipTemplateBusy;
+    els.wikiEquipServer.disabled = wikiBusy;
+    els.wikiLoadEvents.disabled = wikiBusy;
+    els.wikiEventSelect.disabled = wikiBusy;
+    els.wikiCeQuery.disabled = wikiBusy;
+    els.wikiCeSearch.disabled = wikiBusy;
+    els.wikiCeList.disabled = wikiBusy || !state.wikiCraftEssences.length;
+    els.wikiYOffset.disabled = wikiBusy || !selectedWikiCe;
+    els.wikiResetOffset.disabled = wikiBusy || !selectedWikiCe || Number(els.wikiYOffset.value || 0) === 0;
+    els.wikiEquipActivate.disabled = wikiBusy;
+    els.wikiEquipSaveDrop.disabled = wikiBusy;
+    els.wikiImportCe.disabled = wikiBusy
+      || !selectedWikiCe
+      || !els.equipTemplateName.value.trim();
+  }
   els.captureEquipCandidates.disabled = state.equipTemplateBusy
     || !els.settingSelect.value
     || (!state.connected && !state.screenshotBase64);

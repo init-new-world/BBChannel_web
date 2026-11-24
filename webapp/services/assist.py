@@ -16,6 +16,7 @@ ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 ASSIST_LEVEL_DIGIT_SCALES = (1.0, 0.8, 0.78, 0.75, 2 / 3, 0.5)
 ASSIST_LIMIT_BREAK_SCALES = (1.25, 1.1, 1.0, 0.9, 0.75, 2 / 3, 0.5)
 ASSIST_FACE_MASK_PATH = "assist/servant_face_mask.png"
+ASSIST_EQUIP_MASK_PATH = "assist/equip_main_mask.png"
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
 NORMALIZED_FRAME_SCALE = 2 / 3
@@ -164,6 +165,11 @@ class AssistRecognizer:
                 else None
             )
         )
+        equip_mask_path = (
+            ASSIST_EQUIP_MASK_PATH
+            if (self._resources.assets_dir / ASSIST_EQUIP_MASK_PATH).is_file()
+            else None
+        )
         equip_matches = {
             equip_name: [
                 match
@@ -174,6 +180,7 @@ class AssistRecognizer:
                     threshold=threshold,
                     roi=equip_roi,
                     scales=ASSIST_EQUIP_SCALES,
+                    mask_path=equip_mask_path,
                     max_results=20,
                 )
             ]

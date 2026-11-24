@@ -2104,6 +2104,10 @@ class ScriptDataService:
         self._skill_details_cache = result
         return result
 
+    def invalidate_catalog_cache(self) -> None:
+        with self._lock:
+            self._skill_details_cache = None
+
     def _servant_summary(self, name: str, details: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "name": name,
