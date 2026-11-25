@@ -416,7 +416,7 @@ export function createPresetWizard({
 
   function masterMatchesFilters(master) {
     if (state.masterFilter === "swap") {
-      if (!Array.isArray(master.skill_types) || !master.skill_types.includes(3)) return false;
+      if (!Array.isArray(master.skill_types) || !master.skill_types.includes(2)) return false;
     }
     const q = state.masterSearchQuery.trim().toLowerCase();
     if (!q) return true;
@@ -428,7 +428,7 @@ export function createPresetWizard({
         if (d?.detail) parts.push(d.detail);
       }
     }
-    if (Array.isArray(master.skill_types) && master.skill_types.includes(3)) {
+    if (Array.isArray(master.skill_types) && master.skill_types.includes(2)) {
       parts.push("换人 order change swap");
     }
     return parts.join(" ").toLowerCase().includes(q);
@@ -490,7 +490,7 @@ export function createPresetWizard({
           skillStrip.append(skImg);
         }
       }
-      if (Array.isArray(m.skill_types) && m.skill_types.includes(3)) {
+      if (Array.isArray(m.skill_types) && m.skill_types.includes(2)) {
         const swapPill = document.createElement("span");
         swapPill.className = "wizard-master-swap-badge";
         swapPill.textContent = t("Order Change");
@@ -1351,10 +1351,10 @@ export function createPresetWizard({
       btn.append(textWrap);
       btn.title = `${mTitle.textContent} · M${sk + 1} ${display.title}${display.note ? `\n${display.note}` : ""}`;
       btn.addEventListener("click", () => {
-        if (skType === 3) {
+        if (skType === 2) {
           state.pendingTargetSkill = { skillNum, isSwap: true, front: 1, reserve: 4, label: `${display.title} (M${sk + 1})` };
           render();
-        } else if (skType === 1) {
+        } else if (skType === 1 || skType === 3) {
           state.pendingTargetSkill = { skillNum, isSwap: false, label: `${mTitle.textContent} · ${display.title}` };
           render();
         } else {

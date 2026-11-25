@@ -75,7 +75,7 @@ def _seed_visual_assets(directory):
                 "决战用迦勒底制服": {
                     "SN": 7,
                     "skill_name": ["加攻", "眩晕", "换人"],
-                    "skill_type": [0, 0, 3],
+                    "skill_type": [0, 0, 2],
                 },
             },
             ensure_ascii=False,

@@ -179,7 +179,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
         }
         const info = bySn.get(opt.value);
         const badges = [];
-        if (Array.isArray(info?.skill_types) && info.skill_types.includes(3)) {
+        if (Array.isArray(info?.skill_types) && info.skill_types.includes(2)) {
           badges.push({ text: t("Order Change"), className: "swap-tag" });
         }
         const skillIcons = [];
@@ -201,7 +201,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
           if (skName) skillSearchParts.push(skName);
           if (skDetail) skillSearchParts.push(skDetail);
         }
-        if (Array.isArray(info?.skill_types) && info.skill_types.includes(3)) {
+        if (Array.isArray(info?.skill_types) && info.skill_types.includes(2)) {
           skillSearchParts.push("换人 order change swap");
         }
         return {
