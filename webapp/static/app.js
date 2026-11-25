@@ -1849,11 +1849,22 @@ async function requestWikiCePreview() {
     );
     if (sequence !== state.wikiPreviewSequence) return;
     state.wikiPreviewReady = true;
+    const maxOffset = Number(payload.crop?.max_y_offset) || 200;
+    const isEquipFace = payload.crop?.art_source === "equip_face";
+    els.wikiYOffset.min = String(-maxOffset);
+    els.wikiYOffset.max = String(maxOffset);
+    els.wikiYOffset.step = isEquipFace ? "1" : "2";
+    const clampedOffset = Math.max(-maxOffset, Math.min(maxOffset, offset));
+    if (clampedOffset !== offset) {
+      els.wikiYOffset.value = String(clampedOffset);
+      els.wikiYOffsetValue.textContent = formatWikiYOffset(clampedOffset);
+    }
     els.wikiCePreview.src = `data:image/png;base64,${payload.preview_base64}`;
     els.wikiCePreview.hidden = false;
     els.wikiCeMatchBox.hidden = false;
     els.wikiCePreviewStatus.hidden = false;
-    els.wikiCePreviewStatus.textContent = `Y=${payload.crop?.effective_center_y ?? payload.focus_y}`;
+    const sourceBadge = isEquipFace ? t("Official banner") : t("Card crop");
+    els.wikiCePreviewStatus.textContent = `${sourceBadge} · Y=${payload.crop?.effective_center_y ?? payload.focus_y}`;
     if (!els.equipTemplateName.value.trim() && payload.recommended_name) {
       els.equipTemplateName.value = payload.recommended_name;
     }

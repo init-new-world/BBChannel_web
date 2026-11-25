@@ -204,6 +204,28 @@ def test_crop_ce_banner_respects_focus_y_and_clamps_offsets() -> None:
 
     _, meta_bottom = crop_ce_banner(card, focus_y=850, y_offset=200)
     assert meta_bottom["crop_box"] == [6, 875 - 144, 506, 875]
+    assert meta_bottom["art_source"] == "card_art"
+
+
+def test_crop_ce_banner_scales_and_center_crops_official_equip_face() -> None:
+    equip_face = _make_patterned_png((150, 68), seed=9)
+    png_center, meta_center = crop_ce_banner(equip_face, y_offset=0)
+    with Image.open(BytesIO(png_center)) as cropped:
+        assert cropped.size == TEMPLATE_SIZE
+        assert cropped.mode == "RGB"
+    assert meta_center["art_source"] == "equip_face"
+    assert meta_center["normalized_size"] == [237, 107]
+    assert meta_center["crop_box"] == [0, 19, 237, 87]
+    assert meta_center["max_y_offset"] == 20
+
+    _, meta_shifted = crop_ce_banner(equip_face, y_offset=5, art_source="equip_face")
+    assert meta_shifted["crop_box"] == [0, 24, 237, 92]
+
+    _, meta_clamped_top = crop_ce_banner(equip_face, y_offset=-200, art_source="equip_face")
+    assert meta_clamped_top["crop_box"] == [0, 0, 237, 68]
+
+    _, meta_clamped_bottom = crop_ce_banner(equip_face, y_offset=200, art_source="equip_face")
+    assert meta_clamped_bottom["crop_box"] == [0, 39, 237, 107]
 
 
 def test_wiki_client_rejects_html_challenge_responses() -> None:

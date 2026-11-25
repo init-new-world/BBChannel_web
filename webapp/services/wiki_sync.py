@@ -656,6 +656,7 @@ def crop_ce_banner(
     *,
     focus_y: int = DEFAULT_CE_FOCUS_Y,
     y_offset: int = 0,
+    art_source: str = "auto",
 ) -> tuple[bytes, dict[str, Any]]:
     try:
         with Image.open(BytesIO(card_bytes)) as src:
@@ -670,6 +671,36 @@ def crop_ce_banner(
         ) from exc
 
     source_size = [rgb.width, rgb.height]
+    resolved_source = (
+        art_source
+        if art_source in {"equip_face", "card_art"}
+        else ("equip_face" if rgb.width > rgb.height else "card_art")
+    )
+
+    if resolved_source == "equip_face":
+        target_w, target_h = TEMPLATE_SIZE
+        scaled_height = max(target_h, round(rgb.height * target_w / rgb.width))
+        resized = rgb.resize((target_w, scaled_height), Image.Resampling.LANCZOS)
+        base_top = (scaled_height - target_h) // 2
+        max_top = scaled_height - target_h
+        top = max(0, min(max_top, base_top + y_offset))
+        crop_box = (0, top, target_w, top + target_h)
+        cropped = resized.crop(crop_box)
+        out = BytesIO()
+        cropped.save(out, format="PNG")
+        return out.getvalue(), {
+            "art_source": "equip_face",
+            "source_size": source_size,
+            "normalized_size": [target_w, scaled_height],
+            "crop_box": list(crop_box),
+            "focus_y": round(scaled_height / 2),
+            "y_offset": int(y_offset),
+            "max_y_offset": max(base_top, max_top - base_top),
+            "effective_center_y": round(top + target_h / 2),
+            "template_size": list(TEMPLATE_SIZE),
+            "main_match_box": list(MAIN_MATCH_BOX),
+        }
+
     if rgb.width != CE_REFERENCE_WIDTH:
         scaled_height = max(CE_CROP_HEIGHT, round(rgb.height * CE_REFERENCE_WIDTH / rgb.width))
         rgb = rgb.resize((CE_REFERENCE_WIDTH, scaled_height), Image.Resampling.LANCZOS)
@@ -686,11 +717,13 @@ def crop_ce_banner(
     out = BytesIO()
     cropped.save(out, format="PNG")
     return out.getvalue(), {
+        "art_source": "card_art",
         "source_size": source_size,
         "normalized_size": [rgb.width, rgb.height],
         "crop_box": list(crop_box),
         "focus_y": int(focus_y),
         "y_offset": int(y_offset),
+        "max_y_offset": 200,
         "effective_center_y": round(top + CE_CROP_HEIGHT / 2),
         "template_size": list(TEMPLATE_SIZE),
         "main_match_box": list(MAIN_MATCH_BOX),
@@ -940,6 +973,7 @@ class WikiSyncService:
             card_bytes,
             focus_y=detail["focus_y"],
             y_offset=y_offset,
+            art_source=str(detail.get("art_source") or "auto"),
         )
         recommended_name = sanitize_template_name(detail["name"])
         local_map = self._local_equip_status_map()
@@ -990,6 +1024,7 @@ class WikiSyncService:
                 card_bytes,
                 focus_y=detail["focus_y"],
                 y_offset=y_offset,
+                art_source=str(detail.get("art_source") or "auto"),
             )
             prepared_drop_png: bytes | None = None
             if save_drop:
@@ -1404,17 +1439,42 @@ class WikiSyncService:
         detail = parse_ce_wikitext(wikitext, fallback)
 
         card_bytes: bytes | None = None
+        art_source = "card_art"
+        equip_sn = str(detail.get("equip_sn") or "").strip()
+
+        # Prefer FGO's official in-game support banner sprite (EquipFaces, 150x68)
+        # from Atlas Academy, which matches real game support rows far more accurately
+        # than cropping the full 512x875 card illustration.
+        if equip_sn.isdigit():
+            direct_equip_face_url = f"https://static.atlasacademy.io/JP/EquipFaces/f_{equip_sn}0.png"
+            try:
+                card_bytes = self._client.fetch_bytes(direct_equip_face_url)
+                art_source = "equip_face"
+            except AppError:
+                try:
+                    atlas_equip = self._client.atlas_json(f"/nice/JP/equip/{equip_sn}?lore=false")
+                    ef_map = ((atlas_equip.get("extraAssets") or {}).get("equipFace") or {}).get("equip") or {}
+                    ef_url = next((str(v) for v in ef_map.values() if v), None)
+                    if ef_url:
+                        card_bytes = self._client.fetch_bytes(ef_url)
+                        art_source = "equip_face"
+                except AppError:
+                    card_bytes = None
+
         image_filename = f"{detail['image_name']}.png"
-        urls = self._client.mw_image_urls([image_filename])
-        url = urls.get(image_filename) or urls.get(image_filename.replace(" ", "_"))
-        if url:
-            card_bytes = self._client.fetch_bytes(url)
-        elif detail.get("equip_sn"):
-            atlas_equip = self._client.atlas_json(f"/nice/JP/equip/{detail['equip_sn']}?lore=false")
-            cg_map = ((atlas_equip.get("extraAssets") or {}).get("charaGraph") or {}).get("equip") or {}
-            atlas_url = next((str(v) for v in cg_map.values() if v), None)
-            if atlas_url:
-                card_bytes = self._client.fetch_bytes(atlas_url)
+        if card_bytes is None:
+            urls = self._client.mw_image_urls([image_filename])
+            url = urls.get(image_filename) or urls.get(image_filename.replace(" ", "_"))
+            if url:
+                card_bytes = self._client.fetch_bytes(url)
+                art_source = "card_art"
+            elif equip_sn.isdigit():
+                atlas_equip = self._client.atlas_json(f"/nice/JP/equip/{equip_sn}?lore=false")
+                cg_map = ((atlas_equip.get("extraAssets") or {}).get("charaGraph") or {}).get("equip") or {}
+                atlas_url = next((str(v) for v in cg_map.values() if v), None)
+                if atlas_url:
+                    card_bytes = self._client.fetch_bytes(atlas_url)
+                    art_source = "card_art"
 
         if card_bytes is None:
             raise AppError(
@@ -1422,6 +1482,7 @@ class WikiSyncService:
                 f"Could not locate card illustration for CE #{ce_id} ({detail['name']}).",
                 {"ce_id": ce_id, "image_name": image_filename},
             )
+        detail["art_source"] = art_source
         return detail, card_bytes
 
     def _prepare_ce_drop_icon_png(

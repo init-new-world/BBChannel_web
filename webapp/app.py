@@ -293,6 +293,26 @@ class ImportWikiEquipRequest(BaseModel):
     overwrite: StrictBool = False
 
 
+class _RevalidatingStaticFiles(StaticFiles):
+    """Serve static frontend assets with Cache-Control: no-cache on HTML/JS/CSS
+    so browsers revalidate ETag/Last-Modified instead of serving stale ES sub-modules
+    from heuristic disk cache."""
+
+    _REVALIDATE_SUFFIXES = (".html", ".js", ".mjs", ".css")
+
+    async def get_response(self, path: str, scope: Any) -> Response:
+        response = await super().get_response(path, scope)
+        normalized = path.lower()
+        media_type = (response.media_type or "").lower()
+        if (
+            normalized in {"", "/"}
+            or normalized.endswith(self._REVALIDATE_SUFFIXES)
+            or media_type.startswith(("text/html", "text/javascript", "application/javascript", "text/css"))
+        ):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -1279,7 +1299,7 @@ def create_app(
 
     static_dir = Path(__file__).with_name("static")
     if static_dir.exists():
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+        app.mount("/", _RevalidatingStaticFiles(directory=static_dir, html=True), name="static")
 
     return app
 

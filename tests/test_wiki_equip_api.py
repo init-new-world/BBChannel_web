@@ -69,7 +69,12 @@ def _png_bytes(size: tuple[int, int], color: tuple[int, int, int]) -> bytes:
     return buf.getvalue()
 
 
-def _build_fake_wiki_service(tmp_path: Path, *, fail_upstream: bool = False) -> tuple[Path, Path, WikiSyncService]:
+def _build_fake_wiki_service(
+    tmp_path: Path,
+    *,
+    fail_upstream: bool = False,
+    serve_equip_face: bool = False,
+) -> tuple[Path, Path, WikiSyncService]:
     assets = tmp_path / "assets"
     data = tmp_path / "data"
     assets.mkdir(parents=True, exist_ok=True)
@@ -78,6 +83,7 @@ def _build_fake_wiki_service(tmp_path: Path, *, fail_upstream: bool = False) -> 
         (data / f"servant_info_{srv}.json").write_text("{}", encoding="utf-8")
 
     now = int(time.time())
+    equip_face = _png_bytes((150, 68), (120, 180, 140))
     card_art = _png_bytes((512, 875), (80, 120, 200))
     drop_icon = _png_bytes((132, 144), (200, 140, 60))
 
@@ -174,6 +180,10 @@ def _build_fake_wiki_service(tmp_path: Path, *, fail_upstream: bool = False) -> 
             }
             return 200, {"Content-Type": "application/json"}, json.dumps({"query": {"pages": pages}}).encode("utf-8")
 
+        if "atlasacademy.io" in url:
+            if serve_equip_face and "EquipFaces/f_94096900.png" in url:
+                return 200, {"Content-Type": "image/png"}, equip_face
+            return 404, {"Content-Type": "text/plain"}, b"Not Found"
         if url == "https://cdn.test/ce2713_art.png":
             return 200, {"Content-Type": "image/png"}, card_art
         if url == "https://cdn.test/ce2713_drop.jpg":
@@ -281,3 +291,25 @@ def test_wiki_sync_cli_commands_execute_cleanly(tmp_path: Path, capsys) -> None:
     ce_out = json.loads(capsys.readouterr().out)
     assert ce_out["count"] == 1
     assert (assets / "assist" / "assist_equip" / "堂堂正正，川中岛决胜？！.png").is_file()
+
+
+def test_wiki_equip_preview_prefers_atlas_equip_face_and_static_js_sends_no_cache(tmp_path: Path) -> None:
+    assets, data, wiki_sync = _build_fake_wiki_service(tmp_path, serve_equip_face=True)
+    app = create_app(
+        assets_dir=assets,
+        data_dir=data,
+        runtime_db_path=tmp_path / "runtime.db",
+        wiki_sync=wiki_sync,
+    )
+    with TestClient(app) as client:
+        preview_resp = client.get("/api/wiki/craft-essences/2713/preview?y_offset=0")
+        assert preview_resp.status_code == 200
+        preview = preview_resp.json()
+        assert preview["art_source"] == "equip_face"
+        assert preview["crop"]["art_source"] == "equip_face"
+        assert preview["crop"]["crop_box"] == [0, 19, 237, 87]
+        assert preview["crop"]["normalized_size"] == [237, 107]
+
+        js_resp = client.get("/skill-variants-model.js")
+        assert js_resp.status_code == 200
+        assert js_resp.headers.get("cache-control") == "no-cache"

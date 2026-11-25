@@ -1515,6 +1515,16 @@ export function createPresetWizard({
       }
       bar.append(prompt);
 
+      const commitSpecialCommand = (spec, optionValue, target = null) => {
+        try {
+          pushSkillCommand(buildWizardSpecialCommand(spec, optionValue, target));
+        } catch (err) {
+          console.error("Failed to build special skill command:", err);
+          state.pendingTargetSkill = null;
+          render();
+        }
+      };
+
       if (pending.mode === "special" && pending.spec) {
         const spec = pending.spec;
         if (spec.kind === "kukulkan" && spec.needsTarget) {
@@ -1538,7 +1548,7 @@ export function createPresetWizard({
             btn.className = "primary-button";
             btn.textContent = nm ? `${s}·${nm}` : t("Servant {slot}", { slot: s });
             btn.addEventListener("click", () => {
-              pushSkillCommand(buildWizardSpecialCommand(spec, Number(optSel.value), s));
+              commitSpecialCommand(spec, Number(optSel.value), s);
             });
             bar.append(btn);
           }
@@ -1548,7 +1558,7 @@ export function createPresetWizard({
           castOnceBtn.className = "primary-button";
           castOnceBtn.textContent = t("Cast Once");
           castOnceBtn.addEventListener("click", () => {
-            pushSkillCommand(buildWizardSpecialCommand(spec, []));
+            commitSpecialCommand(spec, []);
           });
           const hint = document.createElement("span");
           hint.className = "wizard-picker-count";
@@ -1561,7 +1571,7 @@ export function createPresetWizard({
             btn.className = "primary-button";
             btn.textContent = t(optDef.labelKey);
             btn.addEventListener("click", () => {
-              pushSkillCommand(buildWizardSpecialCommand(spec, optDef.value));
+              commitSpecialCommand(spec, optDef.value);
             });
             bar.append(btn);
           }

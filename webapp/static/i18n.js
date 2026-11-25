@@ -906,6 +906,8 @@ const zh = {
   "No CEs loaded": "尚未加载礼装",
   "No matching CEs": "未找到匹配礼装",
   "Mooncell craft essence crop preview": "Mooncell 礼装裁切预览",
+  "Official banner": "官方横幅",
+  "Card crop": "立绘裁切",
   "Core match region (ignores +1 drop & MLB star)": "核心识别区（自动屏蔽左下角加成与右下角满破星）",
   "Select a CE": "请选择礼装",
   "Loading preview...": "正在加载预览…",
