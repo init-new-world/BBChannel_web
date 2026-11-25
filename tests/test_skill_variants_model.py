@@ -9,7 +9,10 @@ NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is not installed.")
 MODULE = Path(__file__).resolve().parents[1] / "webapp" / "static" / "skill-variants-model.js"
 RULES = {"VanGoghMiner": (1, ["Q", "A", "B"]), "Dante": (2, ["A", "B"]), "Gyokuto": (2, ["All", "One"]),
-         "Charlotte": (3, ["\u6280", "\u66b4", "\u5b9d"]), "Flora": (3, ["T", "D"])}
+         "Charlotte": (3, ["\u6280", "\u66b4", "\u5b9d"]), "Flora": (3, ["T", "D"]),
+         "Prelati": (1, ["\u4e0d\u66ff\u6362", "\u66ff\u6362"]),
+         "Lilith": (3, ["\u4e0d\u4ed8\u4e0e\u5373\u6b7b", "\u4ed8\u4e0e\u5373\u6b7b"]),
+         "Masi": (1, ["\u65e0\u654c", "\u6bc5\u529b"])}
 
 
 def _run(action, **payload):
@@ -63,7 +66,15 @@ def test_only_chinese_and_japanese_servers_offer_new_charlotte_variant_selection
     assert _run("decode", command=["Charlotte", 3, "\u6280"])["result"] is not None
 
 
-@pytest.mark.parametrize("named", ["VanGoghMiner", "Dante", "Gyokuto", "Flora"])
+@pytest.mark.parametrize("server,expected", [("JP", True), ("jp", True), ("CH", False), ("ch", False),
+                                           ("CNTW", False), ("cntw", False), (" JP ", False),
+                                           ("Future", False), ("", False), (None, False), (0, False), ([], False)])
+def test_only_japanese_server_offers_new_masi_variant_selection(server, expected):
+    assert _run("available", named="Masi", server=server)["result"] is expected
+    assert _run("decode", command=["Masi", 1, "\u65e0\u654c"])["result"] is not None
+
+
+@pytest.mark.parametrize("named", ["VanGoghMiner", "Dante", "Gyokuto", "Flora", "Prelati", "Lilith"])
 @pytest.mark.parametrize("server", ["CH", "JP", "CNTW", None])
 def test_other_original_variant_routes_have_no_server_condition(named, server):
     assert _run("available", named=named, server=server)["result"] is True

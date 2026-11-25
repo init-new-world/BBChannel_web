@@ -187,15 +187,17 @@
         "star":3,
         "class":"Assassin",
         "SN":"600700",
-        "command_card_types":3,
-        "graph_types":5,
-        "servant_face_types":6,
+        "command_card_types":6,
+        "graph_types":6,
+        "servant_face_types":8,
         "other_name":[
             "杰基尔",
             "化身博士"
         ],
-        "graph":3,
-        "NPcolor":"B"
+        "graph":4,
+        "NPcolor":"B",
+        "command_card":1,
+        "servant_face":1
     },
     "伊丽莎白·巴托里〔万圣节〕":{
         "skill_name":[
@@ -599,7 +601,8 @@
             "加雷斯"
         ],
         "graph":1,
-        "NPcolor":"B"
+        "NPcolor":"B",
+        "command_card":1
     },
     "卑弥呼":{
         "skill_name":[
@@ -842,7 +845,8 @@
             "姑妈"
         ],
         "graph":2,
-        "NPcolor":"B"
+        "NPcolor":"B",
+        "command_card":1
     },
     "坂本龙马":{
         "skill_name":[
@@ -865,7 +869,8 @@
             "龙马"
         ],
         "graph":1,
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "command_card":1
     },
     "坂田金时(Rider)":{
         "skill_name":[
@@ -1291,7 +1296,8 @@
             "一千零一夜"
         ],
         "graph":1,
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "command_card":1
     },
     "崔斯坦":{
         "skill_name":[
@@ -2094,9 +2100,9 @@
         "star":4,
         "class":"Saber",
         "SN":"104700",
-        "command_card_types":3,
-        "graph_types":5,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":6,
+        "servant_face_types":5,
         "other_name":[
             "渡边纲"
         ],
@@ -2415,7 +2421,8 @@
             "小麻雀"
         ],
         "graph":3,
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "command_card":1
     },
     "织田信长":{
         "skill_name":[
@@ -2540,7 +2547,7 @@
         "skill_type":[
             0,
             0,
-            1
+            0
         ],
         "star":3,
         "class":"Caster",
@@ -2856,9 +2863,9 @@
         "star":3,
         "class":"Saber",
         "SN":"101200",
-        "command_card_types":4,
-        "graph_types":6,
-        "servant_face_types":5,
+        "command_card_types":5,
+        "graph_types":7,
+        "servant_face_types":6,
         "other_name":[
             "小贝"
         ],
@@ -3179,7 +3186,8 @@
             "水弓呆",
             "泳装弓呆毛"
         ],
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "graph":2
     },
     "阿尔托莉雅·潘德拉贡(Ruler)":{
         "skill_name":[
@@ -3936,7 +3944,8 @@
             "咒腕"
         ],
         "graph":2,
-        "NPcolor":"Q"
+        "NPcolor":"Q",
+        "command_card":1
     },
     "土方岁三":{
         "skill_name":[
@@ -4181,6 +4190,7 @@
         "graph_types":5,
         "servant_face_types":4,
         "other_name":[
+            "王哈",
             "爷爷"
         ],
         "graph":1,
@@ -4991,7 +5001,8 @@
             "贞德"
         ],
         "graph":4,
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "command_card":1
     },
     "贞德〔Alter〕(Berserker)":{
         "skill_name":[
@@ -5254,7 +5265,8 @@
             "弓大王"
         ],
         "graph":3,
-        "NPcolor":"Q"
+        "NPcolor":"Q",
+        "command_card":1
     },
     "风魔小太郎":{
         "skill_name":[
@@ -5394,7 +5406,8 @@
             "伊莉雅"
         ],
         "graph":1,
-        "NPcolor":"B"
+        "NPcolor":"B",
+        "command_card":1
     },
     "克娄巴特拉":{
         "skill_name":[
@@ -5756,7 +5769,8 @@
             "大姐"
         ],
         "graph":2,
-        "NPcolor":"B"
+        "NPcolor":"B",
+        "command_card":1
     },
     "李书文":{
         "skill_name":[
@@ -5801,7 +5815,8 @@
         "other_name":[
             "梅菲"
         ],
-        "NPcolor":"B"
+        "NPcolor":"B",
+        "command_card":1
     },
     "沃尔夫冈·阿马德乌斯·莫扎特":{
         "skill_name":[
@@ -6280,7 +6295,9 @@
             "老邢",
             "绿拐"
         ],
-        "NPcolor":"Q"
+        "NPcolor":"Q",
+        "command_card":1,
+        "graph":5
     },
     "司马懿〔莱妮丝〕":{
         "skill_name":[
@@ -6393,9 +6410,9 @@
         "star":5,
         "class":"Assassin",
         "SN":"600500",
-        "command_card_types":3,
-        "graph_types":5,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":6,
+        "servant_face_types":5,
         "other_name":[
             "杰克",
             "女儿"
@@ -6613,7 +6630,9 @@
         "other_name":[
             "枪呆"
         ],
-        "NPcolor":"B"
+        "NPcolor":"B",
+        "graph":3,
+        "command_card":1
     },
     "阿维斯布隆":{
         "skill_name":[
@@ -6757,7 +6776,9 @@
         "other_name":[
             "布妈"
         ],
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "graph":3,
+        "command_card":1
     },
     "机械伊丽亲":{
         "skill_name":[
@@ -6872,7 +6893,8 @@
         "other_name":[
             "医神"
         ],
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "command_card":1
     },
     "兰斯洛特(Saber)":{
         "skill_name":[
@@ -7036,7 +7058,8 @@
             "百貌"
         ],
         "graph":4,
-        "NPcolor":"A"
+        "NPcolor":"A",
+        "command_card":1
     },
     "彭忒西勒亚":{
         "skill_name":[
@@ -7295,9 +7318,9 @@
         "star":4,
         "class":"Archer",
         "SN":"204300",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "妖崔",
             "崔高兴",
@@ -8922,9 +8945,9 @@
         "star":5,
         "class":"Foreigner",
         "SN":"2501100",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "库库尔坎",
             "外星羽蛇神",
@@ -8975,9 +8998,9 @@
         "star":5,
         "class":"Archer",
         "SN":"204700",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "高杉",
             "矮杉"
@@ -9824,9 +9847,9 @@
         "star":4,
         "class":"Assassin",
         "SN":"605000",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "耀星哈桑"
         ],
@@ -10277,9 +10300,9 @@
         "star":5,
         "class":"Archer",
         "SN":"205300",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "图坦卡蒙"
         ],
@@ -10510,9 +10533,9 @@
         "star":5,
         "class":"Pretender",
         "SN":"2801000",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "但丁"
         ],
@@ -10610,9 +10633,9 @@
         "star":5,
         "class":"Shielder",
         "SN":"800102",
-        "command_card_types":1,
-        "graph_types":2,
-        "servant_face_types":2,
+        "command_card_types":2,
+        "graph_types":3,
+        "servant_face_types":3,
         "other_name":[
             "玛修",
             "学妹"
@@ -11194,9 +11217,9 @@
         "star":5,
         "class":"Lancer",
         "SN":"306400",
-        "command_card_types":3,
-        "graph_types":4,
-        "servant_face_types":4,
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
         "other_name":[
             "农神"
         ],
@@ -11224,6 +11247,578 @@
         "servant_face_types":4,
         "other_name":[
             "男团长"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "弗朗索瓦·普勒拉蒂":{
+        "skill_name":[
+            "无敌",
+            "充能",
+            "特攻"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Caster",
+        "SN":"505600",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":8,
+        "other_name":[
+            "弗朗索瓦",
+            "男横飞姬"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "弗兰切斯卡·普勒拉蒂":{
+        "skill_name":[
+            "无敌",
+            "充能",
+            "特攻"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Caster",
+        "SN":"505700",
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":10,
+        "other_name":[
+            "弗兰切斯卡",
+            "女横飞姬"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "希波吕忒":{
+        "skill_name":[
+            "加攻",
+            "红放",
+            "宝具威力提升"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Rider",
+        "SN":"405600",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":2,
+        "other_name":[
+            "希波吕忒"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "无地王约翰":{
+        "skill_name":[
+            "加攻",
+            "红放",
+            "充能"
+        ],
+        "skill_type":[
+            0,
+            1,
+            0
+        ],
+        "star":5,
+        "class":"Avenger",
+        "SN":"1102000",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "黑狮子"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "乌尔德":{
+        "skill_name":[
+            "蓝放",
+            "减冷却",
+            "秒表回复"
+        ],
+        "skill_type":[
+            0,
+            1,
+            0
+        ],
+        "star":5,
+        "class":"Archer",
+        "SN":"205500",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "兀尔德",
+            "终末的Archer"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "阿斯卡拉福斯":{
+        "skill_name":[
+            "回避",
+            "蓝放",
+            "毅力"
+        ],
+        "skill_type":[
+            0,
+            0,
+            1
+        ],
+        "star":5,
+        "class":"Alterego",
+        "SN":"1002200",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "阿斯卡拉福斯",
+            "猫头鹰"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "格蕾·Lily":{
+        "skill_name":[
+            "红绿放",
+            "宝具威力提升",
+            "充能"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Saber",
+        "SN":"106700",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":2,
+        "other_name":[
+            "格蕾·Lily",
+            "剑格蕾"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "格蕾·Lily(Lancer)":{
+        "skill_name":[
+            "红绿放",
+            "宝具威力提升",
+            "充能"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Lancer",
+        "SN":"306300",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":2,
+        "other_name":[
+            "格蕾·Lily(Lancer)",
+            "枪格蕾"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "哈桑·萨巴赫":{
+        "skill_name":[
+            "加攻",
+            "减冷却",
+            "死之干渴"
+        ],
+        "skill_type":[
+            0,
+            1,
+            0
+        ],
+        "star":5,
+        "class":"Assassin",
+        "SN":"605300",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "哈桑·萨巴赫",
+            "亚兹拉尔",
+            "王哈Lily",
+            "山中小人"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "红阎魔(Berserker)":{
+        "skill_name":[
+            "回转膳食_1",
+            "红蓝放",
+            "宝具威力提升"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Berserker",
+        "SN":"705300",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "泳装小麻雀",
+            "狂麻雀"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "Kingprotea(MoonCancer)":{
+        "skill_name":[
+            "血量上升",
+            "必中",
+            "弱化无效"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"MoonCancer",
+        "SN":"2301200",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "泳装帝王花",
+            "白花花"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "比肖内(Caster)":{
+        "skill_name":[
+            "充能",
+            "蓝放",
+            "毒"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Caster",
+        "SN":"506000",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "比肖内(Caster)",
+            "泳装比肖内"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "莉莉丝(Rider)":{
+        "skill_name":[
+            "回避",
+            "蓝绿放",
+            "魅惑"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Rider",
+        "SN":"405900",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "莉莉丝(Rider)",
+            "泳装莉莉丝"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"Q"
+    },
+    "Kingprotea·Alter":{
+        "skill_name":[
+            "充能",
+            "红放",
+            "弱化无效"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Avenger",
+        "SN":"1102300",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "泳装帝王花Alter",
+            "黑花花"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "小野小町(Archer)":{
+        "skill_name":[
+            "蓝绿放",
+            "宝具威力提升",
+            "无敌"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Archer",
+        "SN":"205600",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "泳装小野小町"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"Q"
+    },
+    "哈贝特洛特(Pretender)":{
+        "skill_name":[
+            "目标集中",
+            "特攻",
+            "红绿放"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Pretender",
+        "SN":"2801300",
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":3,
+        "other_name":[
+            "泳装哈贝喵"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "代达罗斯":{
+        "skill_name":[
+            "减冷却",
+            "充能阶段上升",
+            "充能"
+        ],
+        "skill_type":[
+            1,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Berserker",
+        "SN":"705400",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "代达罗斯"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "玉藻艾莉亚":{
+        "skill_name":[
+            "蓝绿放",
+            "魅惑",
+            "充能阶段上升"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":5,
+        "class":"Rider",
+        "SN":"406000",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "玉藻艾莉亚",
+            "骑狐"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "卑弥呼＆壹与":{
+        "skill_name":[
+            "红蓝放",
+            "宝具威力提升",
+            "特攻"
+        ],
+        "skill_type":[
+            0,
+            1,
+            0
+        ],
+        "star":5,
+        "class":"Pretender",
+        "SN":"2801400",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "卑弥呼＆壹与",
+            "水一杯"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"A"
+    },
+    "杂贺孙一(Rider)":{
+        "skill_name":[
+            "回避",
+            "蓝绿放",
+            "宝具威力提升"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Rider",
+        "SN":"406100",
+        "command_card_types":3,
+        "graph_types":4,
+        "servant_face_types":4,
+        "other_name":[
+            "杂贺孙一(Rider)",
+            "泳装杂贺",
+            "水杂贺"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"Q"
+    },
+    "松永久秀":{
+        "skill_name":[
+            "红蓝放",
+            "封印",
+            "充能"
+        ],
+        "skill_type":[
+            0,
+            0,
+            0
+        ],
+        "star":4,
+        "class":"Berserker",
+        "SN":"705500",
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":3,
+        "other_name":[
+            "松永久秀",
+            "松永弹正"
+        ],
+        "graph":1,
+        "command_card":1,
+        "servant_face":1,
+        "NPcolor":"B"
+    },
+    "炸药利休":{
+        "skill_name":[
+            "红放",
+            "灭气",
+            "减冷却"
+        ],
+        "skill_type":[
+            0,
+            0,
+            1
+        ],
+        "star":5,
+        "class":"Foreigner",
+        "SN":"2501700",
+        "command_card_types":4,
+        "graph_types":5,
+        "servant_face_types":5,
+        "other_name":[
+            "炸药利休",
+            "可爱驹",
+            "泳装千利休",
+            "水利休"
         ],
         "graph":1,
         "command_card":1,

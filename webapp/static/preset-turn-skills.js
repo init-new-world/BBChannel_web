@@ -15,13 +15,25 @@ const HAKUNO_NEEDS_PREFIX = "HakunoNeeds:";
 
 const THIRD_SKILL_LABELS = { Barghest: "UDK-Barghest", BBDubai: "BB Dubai", Soujyuro: "Soujyuro", Hakuno: "Hakuno" };
 const THIRD_OPTION_LABELS = { Q: "Quick", A: "Arts", B: "Buster", T: "Sky", D: "Earth", R: "Human" };
-const VARIANT_LABELS = { VanGoghMiner: "Van Gogh (Miner)", Dante: "Dante", Gyokuto: "Gyokuto", Charlotte: "Charlotte Corday", Flora: "Flora" };
+const VARIANT_LABELS = {
+  VanGoghMiner: "Van Gogh (Miner)",
+  Dante: "Dante",
+  Gyokuto: "Gyokuto",
+  Charlotte: "Charlotte Corday",
+  Flora: "Flora",
+  Prelati: "Prelati",
+  Lilith: "Lilith (Rider)",
+  Masi: "Ashwatthaman",
+};
 const VARIANT_OPTION_LABELS = {
   VanGoghMiner: { Q: "Quick", A: "Arts", B: "Buster" },
   Dante: { A: "Paradiso (Arts Up)", B: "Inferno (Buster Up)" },
   Gyokuto: { All: "Moonlight (AoE NP)", One: "Sun (Single-Target NP)" },
   Charlotte: { "\u6280": "Skill Up", "\u66b4": "Critical Damage Up", "\u5b9d": "NP Damage Up" },
   Flora: { T: "Normal", D: "Underworld Garden" },
+  Prelati: { "\u4e0d\u66ff\u6362": "Keep Saint Graph", "\u66ff\u6362": "Swap Saint Graph" },
+  Lilith: { "\u4e0d\u4ed8\u4e0e\u5373\u6b7b": "No Instant Death", "\u4ed8\u4e0e\u5373\u6b7b": "Apply Instant Death" },
+  Masi: { "\u65e0\u654c": "Invincible", "\u6bc5\u529b": "Guts" },
 };
 
 function namedOptions(named) {

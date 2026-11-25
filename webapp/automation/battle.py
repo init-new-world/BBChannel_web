@@ -74,6 +74,9 @@ NAMED_SKILL_COMMANDS = {
     "Gyokuto",
     "Charlotte",
     "Flora",
+    "Prelati",
+    "Lilith",
+    "Masi",
 }
 
 

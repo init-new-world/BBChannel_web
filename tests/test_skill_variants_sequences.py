@@ -15,7 +15,7 @@ def test_skill_variants_share_and_reorder_sequences_with_other_named_skills():
     read = _run("read", value=commands)
     assert read["error"] is None
     assert read["result"] == commands
-    assert _run("edit", value=commands, edit={"type": "move", "index": 0, "to": 8})["result"] == commands[1:] + commands[:1]
+    assert _run("edit", value=commands, edit={"type": "move", "index": 0, "to": len(commands) - 1})["result"] == commands[1:] + commands[:1]
 
 
 @pytest.mark.parametrize("named,skill,option", [(name, first, option) for name, (first, options) in RULES.items() for option in options])

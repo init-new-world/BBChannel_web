@@ -1503,6 +1503,27 @@ def test_setting_program_rejects_unhashable_skill_command_without_server_error(t
                 {"type": "tap", "role": "Flora_option_D", "x": 960, "y": 423},
             ],
         ),
+        (
+            ["Prelati", 1, "替换"],
+            [
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 0.5},
+                {"type": "tap", "role": "Prelati_option_替换", "x": 960, "y": 423},
+            ],
+        ),
+        (
+            ["Lilith", 3, "付与即死"],
+            [
+                {"type": "tap", "role": "servant_skill_3", "x": 256, "y": 590, "wait_after_seconds": 0.5},
+                {"type": "tap", "role": "Lilith_option_付与即死", "x": 960, "y": 423},
+            ],
+        ),
+        (
+            ["Masi", 1, "毅力"],
+            [
+                {"type": "tap", "role": "servant_skill_1", "x": 70, "y": 590, "wait_after_seconds": 0.5},
+                {"type": "tap", "role": "Masi_option_毅力", "x": 960, "y": 423},
+            ],
+        ),
     ],
 )
 def test_setting_program_compiles_named_servant_skill_options(

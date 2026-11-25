@@ -4,6 +4,9 @@ const RULES = {
   Gyokuto: { first: 2, options: ["All", "One"] },
   Charlotte: { first: 3, options: ["\u6280", "\u66b4", "\u5b9d"], servers: ["CH", "JP"] },
   Flora: { first: 3, options: ["T", "D"] },
+  Prelati: { first: 1, options: ["\u4e0d\u66ff\u6362", "\u66ff\u6362"] },
+  Lilith: { first: 3, options: ["\u4e0d\u4ed8\u4e0e\u5373\u6b7b", "\u4ed8\u4e0e\u5373\u6b7b"] },
+  Masi: { first: 1, options: ["\u65e0\u654c", "\u6bc5\u529b"], servers: ["JP"] },
 };
 
 export const SKILL_VARIANT_NAMES = Object.freeze(Object.keys(RULES));

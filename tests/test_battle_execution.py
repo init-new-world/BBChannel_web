@@ -1998,6 +1998,26 @@ def test_compile_battle_program_supports_crawl_tower_script_and_autonomous_modes
         ["Hakuno", 9, "R"],
     ]
 
+    v395_commands = build_autonomous_skill_commands(
+        ["弗朗索瓦·普勒拉蒂", "莉莉丝(Rider)", "马嘶"],
+        default_target=2,
+    )
+    assert v395_commands == [
+        ["Prelati", 1, "不替换"],
+        [2, 2],
+        [3, 2],
+        [4, 2],
+        [5, 2],
+        ["Lilith", 6, "不付与即死"],
+        ["Masi", 7, "无敌"],
+        [8, 2],
+        [9, 2],
+    ]
+    assert build_autonomous_skill_commands(
+        ["弗兰切斯卡·普勒拉蒂", "", ""],
+        default_target=1,
+    )[:3] == [["Prelati", 1, "不替换"], [2, 1], [3, 1]]
+
     autonomous_program = compile_battle_program(
         {**plan, "rounds": []},
         crawl_tower_mode="autonomous",

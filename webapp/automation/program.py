@@ -54,6 +54,9 @@ NAMED_SERVANT_OPTION_POINTS: dict[str, dict[Any, tuple[int, int]]] = {
     "Gyokuto": {"All": (640, 423), "One": (960, 423)},
     "Charlotte": {"技": (537, 422), "暴": (767, 422), "宝": (1000, 422)},
     "Flora": {"T": (640, 423), "D": (960, 423)},
+    "Prelati": {"不替换": (640, 423), "替换": (960, 423)},
+    "Lilith": {"不付与即死": (640, 423), "付与即死": (960, 423)},
+    "Masi": {"无敌": (640, 423), "毅力": (960, 423)},
 }
 
 
@@ -162,6 +165,12 @@ def build_autonomous_skill_commands(
             commands.append(["Charlotte", skill, "技"])
         elif servant_name == "芙萝拉" and remainder == 2:
             commands.append(["Flora", skill, "T"])
+        elif servant_name in ("弗朗索瓦·普勒拉蒂", "弗兰切斯卡·普勒拉蒂") and remainder == 0:
+            commands.append(["Prelati", skill, "不替换"])
+        elif servant_name == "莉莉丝(Rider)" and remainder == 2:
+            commands.append(["Lilith", skill, "不付与即死"])
+        elif servant_name == "马嘶" and remainder == 0:
+            commands.append(["Masi", skill, "无敌"])
         else:
             commands.append([skill, default_target])
     return commands
