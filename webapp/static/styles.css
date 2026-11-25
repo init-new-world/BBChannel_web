@@ -601,6 +601,10 @@ select:disabled {
   gap: 4px;
 }
 
+.wiki-offset-control[hidden] {
+  display: none;
+}
+
 .wiki-offset-header {
   display: flex;
   align-items: center;

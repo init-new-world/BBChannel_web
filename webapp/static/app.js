@@ -56,6 +56,7 @@ const state = {
   wikiPreviewSequence: 0,
   wikiPreviewTimer: null,
   wikiPreviewReady: false,
+  wikiPreviewArtSource: null,
   assistTags: [],
   assistTagMode: "assist",
   assistTagGeneration: 0,
@@ -361,6 +362,7 @@ const els = {
   wikiCePreview: document.querySelector("#wiki-ce-preview"),
   wikiCeMatchBox: document.querySelector("#wiki-ce-match-box"),
   wikiCePreviewStatus: document.querySelector("#wiki-ce-preview-status"),
+  wikiOffsetControl: document.querySelector("#wiki-offset-control"),
   wikiYOffset: document.querySelector("#wiki-y-offset"),
   wikiYOffsetValue: document.querySelector("#wiki-y-offset-value"),
   wikiResetOffset: document.querySelector("#wiki-reset-offset"),
@@ -1780,9 +1782,13 @@ async function searchWikiCraftEssences() {
 function clearWikiCePreview(statusText = t("Select a CE")) {
   state.wikiPreviewSequence += 1;
   state.wikiPreviewReady = false;
+  state.wikiPreviewArtSource = null;
   if (state.wikiPreviewTimer) {
     clearTimeout(state.wikiPreviewTimer);
     state.wikiPreviewTimer = null;
+  }
+  if (els.wikiOffsetControl) {
+    els.wikiOffsetControl.hidden = true;
   }
   if (els.wikiCePreview) {
     els.wikiCePreview.hidden = true;
@@ -1849,22 +1855,33 @@ async function requestWikiCePreview() {
     );
     if (sequence !== state.wikiPreviewSequence) return;
     state.wikiPreviewReady = true;
-    const maxOffset = Number(payload.crop?.max_y_offset) || 200;
-    const isEquipFace = payload.crop?.art_source === "equip_face";
-    els.wikiYOffset.min = String(-maxOffset);
-    els.wikiYOffset.max = String(maxOffset);
-    els.wikiYOffset.step = isEquipFace ? "1" : "2";
-    const clampedOffset = Math.max(-maxOffset, Math.min(maxOffset, offset));
-    if (clampedOffset !== offset) {
-      els.wikiYOffset.value = String(clampedOffset);
-      els.wikiYOffsetValue.textContent = formatWikiYOffset(clampedOffset);
+    const artSource = payload.crop?.art_source || "card_art";
+    state.wikiPreviewArtSource = artSource;
+    const isEquipFace = artSource === "equip_face";
+    if (els.wikiOffsetControl) {
+      els.wikiOffsetControl.hidden = isEquipFace;
+    }
+    if (isEquipFace) {
+      els.wikiYOffset.value = "0";
+      els.wikiYOffsetValue.textContent = formatWikiYOffset(0);
+    } else {
+      const maxOffset = Number(payload.crop?.max_y_offset) || 200;
+      els.wikiYOffset.min = String(-maxOffset);
+      els.wikiYOffset.max = String(maxOffset);
+      els.wikiYOffset.step = "2";
+      const clampedOffset = Math.max(-maxOffset, Math.min(maxOffset, offset));
+      if (clampedOffset !== offset) {
+        els.wikiYOffset.value = String(clampedOffset);
+        els.wikiYOffsetValue.textContent = formatWikiYOffset(clampedOffset);
+      }
     }
     els.wikiCePreview.src = `data:image/png;base64,${payload.preview_base64}`;
     els.wikiCePreview.hidden = false;
     els.wikiCeMatchBox.hidden = false;
     els.wikiCePreviewStatus.hidden = false;
-    const sourceBadge = isEquipFace ? t("Official banner") : t("Card crop");
-    els.wikiCePreviewStatus.textContent = `${sourceBadge} · Y=${payload.crop?.effective_center_y ?? payload.focus_y}`;
+    els.wikiCePreviewStatus.textContent = isEquipFace
+      ? t("Official banner")
+      : `${t("Card crop")} · Y=${payload.crop?.effective_center_y ?? payload.focus_y}`;
     if (!els.equipTemplateName.value.trim() && payload.recommended_name) {
       els.equipTemplateName.value = payload.recommended_name;
     }
@@ -1892,7 +1909,7 @@ async function importWikiCeTemplate() {
 
   const baseBody = {
     name: targetName,
-    y_offset: Number(els.wikiYOffset.value || 0),
+    y_offset: state.wikiPreviewArtSource === "equip_face" ? 0 : Number(els.wikiYOffset.value || 0),
     activate: Boolean(els.wikiEquipActivate.checked),
     save_drop: Boolean(els.wikiEquipSaveDrop.checked),
     overwrite: false,
