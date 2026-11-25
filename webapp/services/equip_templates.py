@@ -121,7 +121,7 @@ class EquipTemplateService:
             else:
                 for path in check_paths:
                     path.unlink(missing_ok=True)
-            self._resources.refresh_template_index()
+            self._resources.sync_template_paths([image_path, *check_paths])
             return self._describe(normalized_name, location, check_dir)
 
     def activate(self, name: str, *, overwrite: bool = False) -> dict[str, object]:
@@ -399,7 +399,13 @@ class EquipTemplateService:
                 for _destination_path, backup_path in backups:
                     backup_path.unlink(missing_ok=True)
 
-            self._resources.refresh_template_index()
+            source_checks = [
+                source_check_dir / f"{normalized_name}{suffix}"
+                for suffix in ("_0.png", "_1.png")
+            ]
+            self._resources.sync_template_paths(
+                [source_image, *source_checks, *destination_files]
+            )
             return self._describe(normalized_name, destination, destination_check_dir)
 
     def _describe(

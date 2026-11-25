@@ -621,10 +621,28 @@ const materialVisualSelect = createVisualSelect(els.materialName, {
 });
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+  const { timeoutMs = 0, headers, ...fetchOptions } = options;
+  let controller = null;
+  let timer = null;
+  if (timeoutMs > 0 && !fetchOptions.signal) {
+    controller = new AbortController();
+    fetchOptions.signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+  }
+  let response;
+  try {
+    response = await fetch(path, {
+      headers: { "Content-Type": "application/json", ...(headers || {}) },
+      ...fetchOptions,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(t("Request timed out."));
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   if (!response.ok) {
     let payload = null;
     try {
@@ -1636,10 +1654,8 @@ async function moveEquipTemplate(action) {
       }
       moved = await requestEquipTemplateMove(template, action, true);
     }
-    await Promise.all([
-      loadEquipTemplates(moved.name, moved.location),
-      loadTemplates(),
-    ]);
+    await loadEquipTemplates(moved.name, moved.location);
+    void loadTemplates();
   } catch (error) {
     showError(error);
   } finally {
@@ -1697,9 +1713,10 @@ async function loadWikiEvents() {
   if (!els.wikiEquipServer || state.wikiEquipBusy) return;
   const server = els.wikiEquipServer.value || "CH";
   state.wikiEquipBusy = true;
+  if (els.wikiLoadEvents) els.wikiLoadEvents.textContent = t("Loading...");
   updateControls();
   try {
-    const payload = await api(`/api/wiki/events?server=${encodeURIComponent(server)}`);
+    const payload = await api(`/api/wiki/events?server=${encodeURIComponent(server)}`, { timeoutMs: 25000 });
     state.wikiEventsLoadedFor = server;
     state.wikiEvents = Array.isArray(payload.events) ? payload.events : [];
     state.wikiPatchCes = Array.isArray(payload.patch_craft_essences) ? payload.patch_craft_essences : [];
@@ -1732,6 +1749,7 @@ async function loadWikiEvents() {
     showError(error);
   } finally {
     state.wikiEquipBusy = false;
+    if (els.wikiLoadEvents) els.wikiLoadEvents.textContent = t("Load Events");
     updateControls();
   }
 }
@@ -1767,14 +1785,16 @@ async function searchWikiCraftEssences() {
   if (query) params.set("query", query);
   if (eventTitle) params.set("event_title", eventTitle);
   state.wikiEquipBusy = true;
+  if (els.wikiCeSearch) els.wikiCeSearch.textContent = t("Loading...");
   updateControls();
   try {
-    const payload = await api(`/api/wiki/craft-essences?${params.toString()}`);
+    const payload = await api(`/api/wiki/craft-essences?${params.toString()}`, { timeoutMs: 25000 });
     populateWikiCeList(payload.items || []);
   } catch (error) {
     showError(error);
   } finally {
     state.wikiEquipBusy = false;
+    if (els.wikiCeSearch) els.wikiCeSearch.textContent = t("Search");
     updateControls();
   }
 }
@@ -1852,6 +1872,7 @@ async function requestWikiCePreview() {
   try {
     const payload = await api(
       `/api/wiki/craft-essences/${encodeURIComponent(selected.ce_id)}/preview?y_offset=${encodeURIComponent(offset)}`,
+      { timeoutMs: 20000 },
     );
     if (sequence !== state.wikiPreviewSequence) return;
     state.wikiPreviewReady = true;
@@ -1917,12 +1938,14 @@ async function importWikiCeTemplate() {
 
   state.wikiEquipBusy = true;
   state.equipTemplateBusy = true;
+  if (els.wikiImportCe) els.wikiImportCe.textContent = t("Importing...");
   updateControls();
   try {
     let imported;
     try {
       imported = await api(`/api/wiki/craft-essences/${encodeURIComponent(selected.ce_id)}/import`, {
         method: "POST",
+        timeoutMs: 30000,
         body: JSON.stringify(baseBody),
       });
     } catch (error) {
@@ -1932,6 +1955,7 @@ async function importWikiCeTemplate() {
       }
       imported = await api(`/api/wiki/craft-essences/${encodeURIComponent(selected.ce_id)}/import`, {
         method: "POST",
+        timeoutMs: 30000,
         body: JSON.stringify({ ...baseBody, overwrite: true }),
       });
     }
@@ -1945,16 +1969,15 @@ async function importWikiCeTemplate() {
         opt.textContent = `#${matchedItem.ce_id} ${matchedItem.name}${eventTag} [${tpl.location}]`;
       }
     }
-    await Promise.all([
-      loadEquipTemplates(tpl.name, tpl.location),
-      loadTemplates(),
-    ]);
+    await loadEquipTemplates(tpl.name, tpl.location);
+    void loadTemplates();
     showNotice(t("Imported CE template: {name}", { name: tpl.name }));
   } catch (error) {
     showError(error);
   } finally {
     state.wikiEquipBusy = false;
     state.equipTemplateBusy = false;
+    if (els.wikiImportCe) els.wikiImportCe.textContent = t("Import CE Template");
     updateControls();
   }
 }

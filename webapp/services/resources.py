@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 import os
 from pathlib import Path
 from threading import RLock
@@ -82,6 +83,56 @@ class ResourceService:
             self._prefix_entries.clear()
             self._template_entries = self._build_index()
             return len(self._template_entries)
+
+    def sync_template_paths(self, paths: Iterable[Path | str]) -> None:
+        normalized_items: list[tuple[str, Path]] = []
+        for item in paths:
+            raw_path = Path(item)
+            candidate = (
+                raw_path.resolve()
+                if raw_path.is_absolute()
+                else (self.assets_dir / raw_path).resolve()
+            )
+            if not self._is_inside_assets(candidate):
+                continue
+            rel = candidate.relative_to(self.assets_dir).as_posix()
+            normalized_items.append((rel, candidate))
+        if not normalized_items:
+            return
+
+        with self._index_lock:
+            for rel, candidate in normalized_items:
+                self._resolved_templates.pop(rel, None)
+                stale_prefixes = [
+                    prefix
+                    for prefix in self._prefix_entries
+                    if rel == prefix or rel.startswith(f"{prefix}/")
+                ]
+                for prefix in stale_prefixes:
+                    self._prefix_entries.pop(prefix, None)
+
+            if self._template_entries is None:
+                return
+
+            entries_by_path = {
+                str(entry["path"]): entry for entry in self._template_entries
+            }
+            for rel, candidate in normalized_items:
+                extension = candidate.suffix.lower()
+                if candidate.is_file() and extension in IMAGE_EXTENSIONS:
+                    try:
+                        size = candidate.stat().st_size
+                    except OSError:
+                        entries_by_path.pop(rel, None)
+                        continue
+                    entries_by_path[rel] = self._entry_for(rel, extension, size)
+                else:
+                    entries_by_path.pop(rel, None)
+
+            self._template_entries = sorted(
+                entries_by_path.values(),
+                key=lambda item: str(item["path"]),
+            )
 
     def resolve_template(self, template_path: str) -> Path:
         cached = self._resolved_templates.get(template_path)

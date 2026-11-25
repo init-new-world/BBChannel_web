@@ -187,7 +187,7 @@ class ImageTagService:
                     {"name": name},
                 )
             path.unlink()
-            self._resources.refresh_template_index()
+            self._resources.sync_template_paths([path])
             return {"name": name, "deleted": True}
 
     def _save(
@@ -218,7 +218,7 @@ class ImageTagService:
                     {"name": name},
                 )
             _save_png_atomic(image, path)
-            self._resources.refresh_template_index()
+            self._resources.sync_template_paths([path])
             return self._describe(path)
 
     def _describe(self, path: Path) -> dict[str, object]:

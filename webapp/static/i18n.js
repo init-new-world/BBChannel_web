@@ -916,6 +916,8 @@ const zh = {
   "Activate immediately": "导入后立即启用",
   "Also save drop icon": "同步保存掉落检测图",
   "Import CE Template": "导入礼装模板",
+  "Importing...": "导入中…",
+  "Request timed out.": "请求超时，请重试。",
   "Imported CE template: {name}": "已导入礼装模板：{name}",
   "Replace existing template {name}?": "覆盖已有礼装模板 {name}？",
 };

@@ -146,3 +146,40 @@ def test_template_index_prefix_scans_only_requested_subtree(tmp_path: Path):
     assert service._template_entries is None
     assert service.template_index(prefix="../outside")["total"] == 0
     assert service.template_index(prefix="assist/a.png")["total"] == 1
+
+
+def test_sync_template_paths_updates_cached_index_incrementally_without_full_rescan(
+    tmp_path: Path,
+    monkeypatch,
+):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "assist" / "assist_equip").mkdir(parents=True)
+    (assets / "equipmaker" / "assist_equip_store").mkdir(parents=True)
+    data.mkdir()
+
+    existing = assets / "assist" / "assist_equip" / "old.png"
+    existing.write_bytes(b"old")
+    service = ResourceService(assets, data)
+    assert service.list_templates() == ["assist/assist_equip/old.png"]
+    assert service.template_index(prefix="assist")["total"] == 1
+
+    def fail_full_rescan(*_args, **_kwargs):
+        raise AssertionError("sync_template_paths must not trigger a full directory rescan")
+
+    monkeypatch.setattr(service, "_build_index", fail_full_rescan)
+
+    moved = assets / "equipmaker" / "assist_equip_store" / "old.png"
+    existing.replace(moved)
+    added = assets / "assist" / "assist_equip" / "new.png"
+    added.write_bytes(b"new-bytes")
+
+    service.sync_template_paths([existing, moved, added])
+
+    assert service.list_templates() == [
+        "assist/assist_equip/new.png",
+        "equipmaker/assist_equip_store/old.png",
+    ]
+    assert [e["path"] for e in service.template_index(prefix="assist")["entries"]] == [
+        "assist/assist_equip/new.png",
+    ]

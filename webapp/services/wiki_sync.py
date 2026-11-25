@@ -995,12 +995,24 @@ class WikiSyncService:
         save_drop: bool = False,
         overwrite: bool = False,
     ) -> dict[str, Any]:
+        # Perform network fetches and image cropping outside the write lock
+        # so slow upstream responses never stall other local operations.
+        detail, card_bytes = self._fetch_ce_detail_and_art(ce_id)
+        target_name = validate_equip_name(
+            name.strip() if isinstance(name, str) and name.strip() else sanitize_template_name(detail["name"])
+        )
+        target_location = "active" if activate else "archive"
+        cropped_png, crop_meta = crop_ce_banner(
+            card_bytes,
+            focus_y=detail["focus_y"],
+            y_offset=y_offset,
+            art_source=str(detail.get("art_source") or "auto"),
+        )
+        prepared_drop_png: bytes | None = None
+        if save_drop:
+            prepared_drop_png = self._prepare_ce_drop_icon_png(detail["ce_id"], card_bytes)
+
         with self._lock:
-            detail, card_bytes = self._fetch_ce_detail_and_art(ce_id)
-            target_name = validate_equip_name(
-                name.strip() if isinstance(name, str) and name.strip() else sanitize_template_name(detail["name"])
-            )
-            target_location = "active" if activate else "archive"
             if not overwrite:
                 target_dir = (
                     self._resources.assets_dir / "assist" / "assist_equip"
@@ -1020,16 +1032,6 @@ class WikiSyncService:
                         {"name": target_name, "path": f"drop/{target_name}.png"},
                     )
 
-            cropped_png, crop_meta = crop_ce_banner(
-                card_bytes,
-                focus_y=detail["focus_y"],
-                y_offset=y_offset,
-                art_source=str(detail.get("art_source") or "auto"),
-            )
-            prepared_drop_png: bytes | None = None
-            if save_drop:
-                prepared_drop_png = self._prepare_ce_drop_icon_png(detail["ce_id"], card_bytes)
-
             template_desc = self._equip_templates.build(
                 target_name,
                 full_image=cropped_png,
@@ -1042,10 +1044,11 @@ class WikiSyncService:
             if save_drop and prepared_drop_png is not None:
                 drop_dir = self._resources.assets_dir / "drop"
                 drop_dir.mkdir(parents=True, exist_ok=True)
-                _write_bytes_atomic(drop_dir / f"{target_name}.png", prepared_drop_png)
+                drop_file = drop_dir / f"{target_name}.png"
+                _write_bytes_atomic(drop_file, prepared_drop_png)
                 drop_path_rel = f"drop/{target_name}.png"
+                self._resources.sync_template_paths([drop_file])
 
-            self._resources.refresh_template_index()
             return {
                 "ce_id": detail["ce_id"],
                 "ce_name": detail["name"],
