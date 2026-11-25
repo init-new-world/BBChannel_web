@@ -2028,7 +2028,7 @@ select:disabled {
 }
 
 .preset-dialog-actions {
-  justify-content: flex-end;
+  justify-content: space-between;
   position: sticky;
   bottom: calc(-1 * var(--preset-padding));
   z-index: 1;
@@ -2036,10 +2036,28 @@ select:disabled {
   padding-top: 10px;
   padding-bottom: var(--preset-padding);
   margin-bottom: calc(-1 * var(--preset-padding));
+  border-top: 1px solid var(--line);
+}
+
+.preset-dialog-actions-left,
+.preset-dialog-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .preset-dialog-actions button {
   min-width: 92px;
+}
+
+.preset-subflow-banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+  background: rgba(36, 104, 213, 0.08);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .status-line {

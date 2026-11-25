@@ -761,6 +761,7 @@
             <button id="close-preset" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
           </div>
         </div>
+        <div id="preset-subflow-banner" class="preset-subflow-banner" role="status" hidden></div>
         <label class="field-stack">
           <span>Name</span>
           <input id="preset-name" class="field" type="text" autocomplete="off" required>
@@ -1026,8 +1027,14 @@
         </label>
         <div id="preset-error" class="preset-error" role="alert" hidden></div>
         <div class="preset-dialog-actions">
-          <button id="cancel-preset" class="ghost-button" type="button">Cancel</button>
-          <button id="save-preset" class="primary-button" type="submit">Save</button>
+          <div class="preset-dialog-actions-left">
+            <button id="cancel-preset" class="ghost-button" type="button">Cancel</button>
+            <button id="wizard-prev-step" class="ghost-button" type="button" hidden>Previous</button>
+          </div>
+          <div class="preset-dialog-actions-right">
+            <button id="wizard-next-step" class="primary-button" type="button" hidden>Next Step</button>
+            <button id="save-preset" class="primary-button" type="submit">Save</button>
+          </div>
         </div>
       </form>
     </dialog>

@@ -207,6 +207,7 @@ export function createPresetWizard({
   onChange,
   onSwitchToPro,
   onEditStrategy = null,
+  onStepChange = null,
 }) {
   const state = {
     step: 0,
@@ -230,6 +231,7 @@ export function createPresetWizard({
     equipsError: false,
     loadingServer: null,
     autoNamedValue: "",
+    selectedStrategyByWave: {},
   };
 
   function readConfig() {
@@ -1674,11 +1676,15 @@ export function createPresetWizard({
       opt.textContent = st.name;
       stratSel.append(opt);
     }
+    const rememberedStrat = state.selectedStrategyByWave[wave] || "";
+    if (rememberedStrat && stratList.some((st) => st.name === rememberedStrat)) {
+      stratSel.value = rememberedStrat;
+    }
     const applyBtn = document.createElement("button");
     applyBtn.type = "button";
     applyBtn.className = "ghost-button";
     applyBtn.textContent = t("Apply");
-    applyBtn.disabled = !stratList.length;
+    applyBtn.disabled = !stratSel.value;
     applyBtn.addEventListener("click", async () => {
       if (!stratSel.value) return;
       try {
@@ -1688,6 +1694,7 @@ export function createPresetWizard({
           .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry) && entry.strategy && typeof entry.strategy === "object" ? entry.strategy : entry))
           .filter((item) => item && typeof item === "object" && !Array.isArray(item) && item.card1 && item.card2 && item.card3);
         if (!unwrapped.length) return;
+        state.selectedStrategyByWave[wave] = stratSel.value;
         writeConfig((draft) => {
           draft[`round${wave}_turns`] = Math.max(1, Number(draft[`round${wave}_turns`] || 0));
           draft[stratKey] = unwrapped;
@@ -1697,6 +1704,7 @@ export function createPresetWizard({
       }
     });
     stratRow.append(stratSel, applyBtn);
+    let editStratBtn = null;
     if (typeof onEditStrategy === "function") {
       const newStratBtn = document.createElement("button");
       newStratBtn.type = "button";
@@ -1705,20 +1713,22 @@ export function createPresetWizard({
       newStratBtn.addEventListener("click", () => {
         onEditStrategy({ mode: "new", name: "", wave, stratKey });
       });
-      const editStratBtn = document.createElement("button");
+      editStratBtn = document.createElement("button");
       editStratBtn.type = "button";
       editStratBtn.className = "chip-button";
       editStratBtn.textContent = t("Edit");
       editStratBtn.disabled = !stratSel.value;
-      stratSel.addEventListener("change", () => {
-        editStratBtn.disabled = !stratSel.value;
-      });
       editStratBtn.addEventListener("click", () => {
         if (!stratSel.value) return;
         onEditStrategy({ mode: "edit", name: stratSel.value, wave, stratKey });
       });
       stratRow.append(newStratBtn, editStratBtn);
     }
+    stratSel.addEventListener("change", () => {
+      state.selectedStrategyByWave[wave] = stratSel.value;
+      applyBtn.disabled = !stratSel.value;
+      if (editStratBtn) editStratBtn.disabled = !stratSel.value;
+    });
     const currentStrat = Array.isArray(config[stratKey]) && config[stratKey].length
       ? t("{count} strategy entries applied", { count: config[stratKey].length })
       : "";
@@ -1990,33 +2000,6 @@ export function createPresetWizard({
     container.append(card);
   }
 
-  function renderNavFooter(container) {
-    const footer = document.createElement("div");
-    footer.className = "wizard-nav-footer";
-    const prevBtn = document.createElement("button");
-    prevBtn.type = "button";
-    prevBtn.className = "ghost-button";
-    prevBtn.textContent = t("Previous");
-    prevBtn.disabled = state.step === 0;
-    prevBtn.addEventListener("click", () => {
-      state.step = Math.max(0, state.step - 1);
-      state.pendingTargetSkill = null;
-      render();
-    });
-    const nextBtn = document.createElement("button");
-    nextBtn.type = "button";
-    nextBtn.className = "primary-button";
-    nextBtn.textContent = t("Next Step");
-    nextBtn.hidden = state.step >= 3;
-    nextBtn.addEventListener("click", () => {
-      state.step = Math.min(3, state.step + 1);
-      state.pendingTargetSkill = null;
-      render();
-    });
-    footer.append(prevBtn, nextBtn);
-    container.append(footer);
-  }
-
   function render() {
     const editor = getEditor();
     const visible = Boolean(editor && editor.kind === "settings" && editor.uiMode === "wizard");
@@ -2040,8 +2023,8 @@ export function createPresetWizard({
     else if (state.step === 2) renderStep3Timeline(body, config, servants, server);
     else renderStep4Review(body, config, servants, server);
     frag.append(body);
-    renderNavFooter(frag);
     root.replaceChildren(frag);
+    if (typeof onStepChange === "function") onStepChange(state.step);
   }
 
   function reset() {
@@ -2060,14 +2043,36 @@ export function createPresetWizard({
     state.autoNamedValue = "";
     state.equips = null;
     state.equipsError = false;
+    state.selectedStrategyByWave = {};
   }
 
-  function restoreWaveStep(step, wave) {
-    if (Number.isInteger(step) && step >= 0 && step <= 3) state.step = step;
-    if (Number.isInteger(wave) && wave >= 1) state.activeWave = wave;
+  function getStep() {
+    return state.step;
+  }
+
+  function goPrevStep() {
+    if (state.step <= 0) return;
+    state.step -= 1;
     state.pendingTargetSkill = null;
     render();
   }
 
-  return { render, reset, restoreWaveStep };
+  function goNextStep() {
+    if (state.step >= 3) return;
+    state.step += 1;
+    state.pendingTargetSkill = null;
+    render();
+  }
+
+  function restoreWaveStep(step, wave, savedStrategyName = null) {
+    if (Number.isInteger(step) && step >= 0 && step <= 3) state.step = step;
+    if (Number.isInteger(wave) && wave >= 1) state.activeWave = wave;
+    if (savedStrategyName && Number.isInteger(wave) && wave >= 1) {
+      state.selectedStrategyByWave[wave] = savedStrategyName;
+    }
+    state.pendingTargetSkill = null;
+    render();
+  }
+
+  return { render, reset, getStep, goPrevStep, goNextStep, restoreWaveStep };
 }

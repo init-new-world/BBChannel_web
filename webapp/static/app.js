@@ -204,6 +204,9 @@ const els = {
   closePreset: document.querySelector("#close-preset"),
   cancelPreset: document.querySelector("#cancel-preset"),
   savePreset: document.querySelector("#save-preset"),
+  wizardPrevStep: document.querySelector("#wizard-prev-step"),
+  wizardNextStep: document.querySelector("#wizard-next-step"),
+  presetSubflowBanner: document.querySelector("#preset-subflow-banner"),
   snapshotButton: document.querySelector("#snapshot-button"),
   clearScreenshot: document.querySelector("#clear-screenshot"),
   templateSelect: document.querySelector("#template-select"),
@@ -788,6 +791,7 @@ function bindEvents() {
     if (state.presetEditor) {
       els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
       presetWizard.render();
+      syncPresetDialogFooter();
     }
   });
   els.jobTabs.forEach((tab) => {
@@ -2764,7 +2768,59 @@ const presetWizard = createPresetWizard({
   },
   onSwitchToPro: () => setPresetEditorUiMode("pro"),
   onEditStrategy: (opts) => openStrategyFromWizard(opts),
+  onStepChange: () => syncPresetDialogFooter(),
 });
+
+els.wizardPrevStep?.addEventListener("click", () => presetWizard.goPrevStep());
+els.wizardNextStep?.addEventListener("click", () => presetWizard.goNextStep());
+
+function syncPresetDialogFooter() {
+  const editor = state.presetEditor;
+  const isWizard = Boolean(editor && editor.kind === "settings" && editor.uiMode === "wizard");
+  const isStrategy = editor?.kind === "strategies";
+  const inWizardSubflow = Boolean(isStrategy && state.returnToWizard);
+
+  if (els.presetSubflowBanner) {
+    els.presetSubflowBanner.hidden = !inWizardSubflow;
+    if (inWizardSubflow) {
+      els.presetSubflowBanner.textContent = t(
+        "Editing card strategy for Wave {round} — saving will return to the script wizard and apply it.",
+        { round: state.returnToWizard.wave },
+      );
+    }
+  }
+
+  if (isWizard) {
+    const step = presetWizard.getStep();
+    if (els.wizardPrevStep) {
+      els.wizardPrevStep.hidden = false;
+      els.wizardPrevStep.disabled = step <= 0;
+      els.wizardPrevStep.textContent = t("Previous");
+    }
+    if (els.wizardNextStep) {
+      els.wizardNextStep.hidden = step >= 3;
+      els.wizardNextStep.textContent = t("Next Step");
+    }
+    els.savePreset.hidden = step < 3;
+    els.savePreset.textContent = t("Save Script");
+    els.cancelPreset.textContent = t("Cancel");
+    return;
+  }
+
+  if (els.wizardPrevStep) els.wizardPrevStep.hidden = true;
+  if (els.wizardNextStep) els.wizardNextStep.hidden = true;
+  els.savePreset.hidden = false;
+  if (inWizardSubflow) {
+    els.savePreset.textContent = t("Save Strategy & Return");
+    els.cancelPreset.textContent = t("Back to Wizard");
+  } else if (isStrategy) {
+    els.savePreset.textContent = t("Save Strategy");
+    els.cancelPreset.textContent = t("Cancel");
+  } else {
+    els.savePreset.textContent = t("Save Script");
+    els.cancelPreset.textContent = t("Cancel");
+  }
+}
 
 const visualStrategyEnhancer = createVisualStrategyEnhancer({
   fieldset: els.presetStrategyRules,
@@ -2869,6 +2925,7 @@ function setPresetEditorUiMode(mode) {
     if (els.presetWizardRoot) els.presetWizardRoot.hidden = true;
     renderPresetFields();
   }
+  syncPresetDialogFooter();
 }
 
 async function openPresetEditor(kind, mode, options = {}) {
@@ -3004,8 +3061,9 @@ async function closePresetEditor({ savedStrategyName = null } = {}) {
     els.presetJson.value = nextJson;
     if (!els.presetDialog.open) els.presetDialog.showModal();
     setPresetEditorUiMode("wizard");
-    presetWizard.restoreWaveStep(saved.wizardStep, saved.wave);
+    presetWizard.restoreWaveStep(saved.wizardStep, saved.wave, savedStrategyName);
     renderPresetFields();
+    syncPresetDialogFooter();
     setPresetError("");
     return;
   }
@@ -3014,6 +3072,7 @@ async function closePresetEditor({ savedStrategyName = null } = {}) {
   state.presetEditor = null;
   els.presetForm.classList.remove("wizard-mode", "strategy-mode");
   els.presetDialog.classList.remove("wizard-mode");
+  if (els.presetSubflowBanner) els.presetSubflowBanner.hidden = true;
   if (els.presetWizardRoot) els.presetWizardRoot.hidden = true;
   if (els.presetModeSwitch) els.presetModeSwitch.hidden = true;
   updatePresetSaveState();
@@ -3945,6 +4004,9 @@ async function savePreset(event) {
   if (!editor || editor.saving || editor.strategyApplyBusy) {
     return;
   }
+  if (editor.kind === "settings" && editor.uiMode === "wizard" && presetWizard.getStep() < 3) {
+    return;
+  }
   if (editor.kind === "settings" && editor.uiMode !== "wizard" && !presetAssist.validate()) return;
   const invalidRunField = editor.kind === "settings" && Object.keys(editor.runOptionDrafts || {}).find((field) => editor.runOptionDrafts[field]?.error);
   if (invalidRunField) {
@@ -3964,7 +4026,8 @@ async function savePreset(event) {
   }
   const name = els.presetName.value.trim();
   if (!name) {
-    setPresetError("Name is required.");
+    setPresetError(t("Name is required."));
+    els.presetName.focus();
     return;
   }
   try {
