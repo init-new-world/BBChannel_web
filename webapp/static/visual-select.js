@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { matchesNormalizedQuery } from "./search-normalize.js";
 
 let activePopoverClose = null;
 
@@ -225,8 +226,8 @@ export function createVisualSelect(selectEl, {
       }
     }
     if (!query) return true;
-    const haystack = `${item.label || ""} ${item.subtitle || ""} ${item.searchText || ""}`.toLowerCase();
-    return haystack.includes(query);
+    const haystack = `${item.label || ""} ${item.subtitle || ""} ${item.searchText || ""}`;
+    return matchesNormalizedQuery(haystack, query);
   }
 
   function buildOptionRow(item, currentVal, currentDisabled) {

@@ -176,3 +176,31 @@ def test_wizard_lineup_handles_turn_replace_and_ignores_conditional_swaps():
     )
     assert result["w1_end"] == [0, 1, 2, 3, 4, 5]
     assert result["w2_start"] == [3, 1, 2, None, 4, 5]
+
+
+def test_wizard_special_skills_resolve_by_sn_and_search_normalizer_handles_variants():
+    search_module = Path(__file__).resolve().parents[1] / "webapp" / "static" / "search-normalize.js"
+    result = _run(
+        f"""
+        const search = await import({json.dumps(search_module.as_uri())});
+        const bySn = wizardSkills.resolveWizardSpecialSkill({{ sn: "505600", name: "Localized Prelati" }}, 0, 0, "CH");
+        const bySnMasi = wizardSkills.resolveWizardSpecialSkill({{ sn: "203300", name: "Ashwatthaman" }}, 0, 0, "JP");
+        process.stdout.write(JSON.stringify({{
+            bySnNamed: bySn?.named,
+            bySnMasiNamed: bySnMasi?.named,
+            castoria: search.matchesNormalizedQuery("阿尔托莉雅·Caster", "阿尔托莉雅·卡斯特"),
+            skadi: search.matchesNormalizedQuery("斯卡哈·斯卡蒂", "斯卡哈=丝卡蒂"),
+            summerSkadi: search.matchesNormalizedQuery("斯卡哈·斯卡蒂(Ruler)", "丝卡蒂（ruler）"),
+            vanGogh: search.matchesNormalizedQuery("梵高〔矿工〕", "梵高(矿工)"),
+            olga: search.matchesNormalizedQuery("U－奥尔加玛丽", "u-奥尔加玛丽"),
+        }}));
+        """,
+        {},
+    )
+    assert result["bySnNamed"] == "Prelati"
+    assert result["bySnMasiNamed"] == "Masi"
+    assert result["castoria"] is True
+    assert result["skadi"] is True
+    assert result["summerSkadi"] is True
+    assert result["vanGogh"] is True
+    assert result["olga"] is True

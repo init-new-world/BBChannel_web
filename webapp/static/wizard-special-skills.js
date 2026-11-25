@@ -26,14 +26,48 @@ function optionsFromMap(labelMap, orderedKeys) {
   return orderedKeys.map((value) => ({ value, labelKey: labelMap[value] }));
 }
 
-export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skillIndex, server = "CH") {
-  if (typeof canonicalServantName !== "string" || !canonicalServantName) return null;
+const SPECIAL_SERVANT_SN = {
+  SpaceIshtar: "1100900",
+  Emiya: "200100",
+  Kukulkan: "2501100",
+  Barghest: "204900",
+  Soujyuro: "704900",
+  BBDubai: "2300600",
+  HakunoFemale: "2300800",
+  HakunoMale: "2300700",
+  VanGoghMiner: "305600",
+  Dante: "2801000",
+  Gyokuto: "2301100",
+  Charlotte: "603800",
+  Flora: "1002000",
+  PrelatiFrancois: "505600",
+  PrelatiFrancesca: "505700",
+  Lilith: "405900",
+  Masi: "203300",
+};
+
+function matchesServantIdentity(sn, name, expectedSns, expectedNames) {
+  if (sn && expectedSns.includes(sn)) return true;
+  if (name && expectedNames.includes(name)) return true;
+  return false;
+}
+
+export function resolveWizardSpecialSkill(servantOrName, slotIndex, skillIndex, server = "CH") {
+  let canonicalServantName = "";
+  let servantSn = "";
+  if (typeof servantOrName === "string") {
+    canonicalServantName = servantOrName;
+  } else if (servantOrName && typeof servantOrName === "object") {
+    if (typeof servantOrName.name === "string") canonicalServantName = servantOrName.name;
+    if (servantOrName.sn != null) servantSn = String(servantOrName.sn);
+  }
+  if (!canonicalServantName && !servantSn) return null;
   if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 2) return null;
   if (!Number.isInteger(skillIndex) || skillIndex < 0 || skillIndex > 2) return null;
 
   const skillNum = slotIndex * 3 + skillIndex + 1;
 
-  if (canonicalServantName === "太空伊什塔尔" && skillIndex === 1) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.SpaceIshtar], ["太空伊什塔尔"]) && skillIndex === 1) {
     return {
       kind: "special-np",
       skillNum,
@@ -45,7 +79,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       ],
     };
   }
-  if (canonicalServantName === "卫宫" && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Emiya], ["卫宫"]) && skillIndex === 2) {
     return {
       kind: "special-np",
       skillNum,
@@ -56,7 +90,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       ],
     };
   }
-  if (canonicalServantName === "库库尔坎") {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Kukulkan], ["库库尔坎"])) {
     return {
       kind: "kukulkan",
       named: KUKULKAN_SKILL,
@@ -68,7 +102,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       ],
     };
   }
-  if (canonicalServantName === "UDK-巴格斯特" && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Barghest], ["UDK-巴格斯特"]) && skillIndex === 2) {
     return {
       kind: "third",
       named: "Barghest",
@@ -76,7 +110,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(THIRD_OPTION_LABEL_KEYS.Barghest, [0, 1]),
     };
   }
-  if (canonicalServantName === "静希草十郎" && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Soujyuro], ["静希草十郎"]) && skillIndex === 2) {
     return {
       kind: "third",
       named: "Soujyuro",
@@ -84,7 +118,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(THIRD_OPTION_LABEL_KEYS.Soujyuro, ["Q", "A", "B"]),
     };
   }
-  if (canonicalServantName === "BB迪拜" && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.BBDubai], ["BB迪拜"]) && skillIndex === 2) {
     return {
       kind: "third",
       named: "BBDubai",
@@ -92,7 +126,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(THIRD_OPTION_LABEL_KEYS.BBDubai, [0, 1]),
     };
   }
-  if ((canonicalServantName === "岸波白野(女性)" || canonicalServantName === "岸波白野(男性)") && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.HakunoFemale, SPECIAL_SERVANT_SN.HakunoMale], ["岸波白野(女性)", "岸波白野(男性)"]) && skillIndex === 2) {
     return {
       kind: "third",
       named: "Hakuno",
@@ -100,7 +134,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(THIRD_OPTION_LABEL_KEYS.Hakuno, ["T", "D", "R"]),
     };
   }
-  if ((canonicalServantName === "岸波白野(女性)" || canonicalServantName === "岸波白野(男性)") && skillIndex === 0) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.HakunoFemale, SPECIAL_SERVANT_SN.HakunoMale], ["岸波白野(女性)", "岸波白野(男性)"]) && skillIndex === 0) {
     return {
       kind: "hakuno-needs",
       named: HAKUNO_SKILL,
@@ -108,7 +142,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: [{ value: "once", labelKey: "Cast Once" }],
     };
   }
-  if (canonicalServantName === "梵高〔矿工〕" && skillIndex === 0) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.VanGoghMiner], ["梵高〔矿工〕"]) && skillIndex === 0) {
     return {
       kind: "variant",
       named: "VanGoghMiner",
@@ -116,7 +150,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.VanGoghMiner, ["Q", "A", "B"]),
     };
   }
-  if (canonicalServantName === "但丁·阿利吉耶里" && skillIndex === 1) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Dante], ["但丁·阿利吉耶里"]) && skillIndex === 1) {
     return {
       kind: "variant",
       named: "Dante",
@@ -124,7 +158,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.Dante, ["A", "B"]),
     };
   }
-  if (canonicalServantName === "玉兔" && skillIndex === 1) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Gyokuto], ["玉兔"]) && skillIndex === 1) {
     return {
       kind: "variant",
       named: "Gyokuto",
@@ -132,7 +166,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.Gyokuto, ["All", "One"]),
     };
   }
-  if (canonicalServantName === "夏洛特·科黛" && skillIndex === 2 && skillVariantAvailable("Charlotte", server)) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Charlotte], ["夏洛特·科黛"]) && skillIndex === 2 && skillVariantAvailable("Charlotte", server)) {
     return {
       kind: "variant",
       named: "Charlotte",
@@ -140,7 +174,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.Charlotte, ["\u6280", "\u66b4", "\u5b9d"]),
     };
   }
-  if (canonicalServantName === "芙萝拉" && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Flora], ["芙萝拉"]) && skillIndex === 2) {
     return {
       kind: "variant",
       named: "Flora",
@@ -148,7 +182,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.Flora, ["T", "D"]),
     };
   }
-  if ((canonicalServantName === "弗朗索瓦·普勒拉蒂" || canonicalServantName === "弗兰切斯卡·普勒拉蒂") && skillIndex === 0) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.PrelatiFrancois, SPECIAL_SERVANT_SN.PrelatiFrancesca], ["弗朗索瓦·普勒拉蒂", "弗兰切斯卡·普勒拉蒂"]) && skillIndex === 0) {
     return {
       kind: "variant",
       named: "Prelati",
@@ -156,7 +190,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.Prelati, ["\u4e0d\u66ff\u6362", "\u66ff\u6362"]),
     };
   }
-  if (canonicalServantName === "莉莉丝(Rider)" && skillIndex === 2) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Lilith], ["莉莉丝(Rider)"]) && skillIndex === 2) {
     return {
       kind: "variant",
       named: "Lilith",
@@ -164,7 +198,7 @@ export function resolveWizardSpecialSkill(canonicalServantName, slotIndex, skill
       options: optionsFromMap(VARIANT_OPTION_LABEL_KEYS.Lilith, ["\u4e0d\u4ed8\u4e0e\u5373\u6b7b", "\u4ed8\u4e0e\u5373\u6b7b"]),
     };
   }
-  if (canonicalServantName === "马嘶" && skillIndex === 0 && skillVariantAvailable("Masi", server)) {
+  if (matchesServantIdentity(servantSn, canonicalServantName, [SPECIAL_SERVANT_SN.Masi], ["马嘶"]) && skillIndex === 0 && skillVariantAvailable("Masi", server)) {
     return {
       kind: "variant",
       named: "Masi",

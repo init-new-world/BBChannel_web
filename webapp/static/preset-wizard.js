@@ -1,4 +1,5 @@
 import { t } from "./i18n.js";
+import { matchesNormalizedQuery, normalizeSearchText } from "./search-normalize.js";
 import {
   applyOrderChange,
   buildWizardSpecialCommand,
@@ -24,19 +25,19 @@ const STANDARD_CLASSES = new Set([
   "Saber", "Archer", "Lancer", "Rider", "Caster", "Assassin", "Berserker",
 ]);
 
-const POPULAR_SUPPORT_NAMES = [
-  "光之高扬斯卡娅",
-  "阿尔托莉雅·Caster",
-  "奥伯龙",
-  "斯卡哈·斯卡蒂(Ruler)",
-  "斯卡哈·斯卡蒂",
-  "司马懿〔莱妮丝〕",
-  "暗之高扬斯卡娅",
-  "诸葛孔明〔埃尔梅罗Ⅱ世〕",
-  "梅林",
-  "阿瓦隆女士",
-  "摩根",
-  "库库尔坎",
+const POPULAR_SUPPORT_SNS = [
+  "604200", // 光之高扬斯卡娅
+  "504500", // 阿尔托莉雅·Caster
+  "2800100", // 奥伯龙
+  "901400", // 斯卡哈·斯卡蒂(Ruler)
+  "503900", // 斯卡哈·斯卡蒂
+  "403200", // 司马懿〔莱妮丝〕
+  "2500900", // 暗之高扬斯卡娅
+  "501900", // 诸葛孔明〔埃尔梅罗Ⅱ世〕
+  "500800", // 梅林
+  "2800300", // 阿瓦隆女士
+  "704000", // 摩根
+  "2501100", // 库库尔坎
 ];
 
 const GRAND_MODES = new Set(["冠位助战", "冠位助战仅礼装"]);
@@ -341,9 +342,20 @@ export function createPresetWizard({
 
   function findServant(servants, name) {
     if (!name) return null;
-    return servants.find((s) => s.name === name)
-      || servants.find((s) => Array.isArray(s.aliases) && s.aliases.includes(name))
+    const exact = servants.find((s) => s.name === name)
+      || servants.find((s) => Array.isArray(s.aliases) && s.aliases.includes(name));
+    if (exact) return exact;
+    const norm = normalizeSearchText(name);
+    if (!norm) return null;
+    return servants.find((s) => normalizeSearchText(s.name) === norm)
+      || servants.find((s) => Array.isArray(s.aliases) && s.aliases.some((a) => normalizeSearchText(a) === norm))
       || null;
+  }
+
+  function findServantBySn(servants, sn) {
+    if (sn == null || sn === "") return null;
+    const target = String(sn);
+    return servants.find((s) => s?.sn != null && String(s.sn) === target) || null;
   }
 
   function servantMatchesFilters(servant) {
@@ -365,13 +377,14 @@ export function createPresetWizard({
     if (state.npFilter !== "all" && servant.np_color !== state.npFilter) {
       return false;
     }
-    const q = state.searchQuery.trim().toLowerCase();
+    const q = state.searchQuery.trim();
     if (q) {
-      const inName = String(servant.name || "").toLowerCase().includes(q);
-      const inClass = String(servant.class || "").toLowerCase().includes(q);
-      const inAlias = Array.isArray(servant.aliases)
-        && servant.aliases.some((alias) => String(alias || "").toLowerCase().includes(q));
-      if (!inName && !inClass && !inAlias) return false;
+      const haystack = [
+        String(servant.name || ""),
+        String(servant.class || ""),
+        ...(Array.isArray(servant.aliases) ? servant.aliases.map((alias) => String(alias || "")) : []),
+      ].join(" ");
+      if (!matchesNormalizedQuery(haystack, q)) return false;
     }
     return true;
   }
@@ -459,7 +472,7 @@ export function createPresetWizard({
     if (state.masterFilter === "swap") {
       if (!Array.isArray(master.skill_types) || !master.skill_types.includes(2)) return false;
     }
-    const q = state.masterSearchQuery.trim().toLowerCase();
+    const q = state.masterSearchQuery.trim();
     if (!q) return true;
     const parts = [String(master.name || "")];
     if (Array.isArray(master.skills)) parts.push(...master.skills);
@@ -472,7 +485,7 @@ export function createPresetWizard({
     if (Array.isArray(master.skill_types) && master.skill_types.includes(2)) {
       parts.push("换人 order change swap");
     }
-    return parts.join(" ").toLowerCase().includes(q);
+    return matchesNormalizedQuery(parts.join(" "), q);
   }
 
   function renderMasterOutfitGrid(gridWrap, countLabel, masters, selectedSn, masterSexVal) {
@@ -824,9 +837,9 @@ export function createPresetWizard({
     pickerTop.append(slotHint, searchInput, countLabel);
     pickerBox.append(pickerTop);
 
-    // Popular quick-pick chips
-    const popularAvailable = POPULAR_SUPPORT_NAMES
-      .map((n) => findServant(servants, n))
+    // Popular quick-pick chips (resolved by immutable servant SN so name/i18n variants never break)
+    const popularAvailable = POPULAR_SUPPORT_SNS
+      .map((sn) => findServantBySn(servants, sn))
       .filter(Boolean);
     if (popularAvailable.length) {
       const popRow = document.createElement("div");
@@ -1374,7 +1387,7 @@ export function createPresetWizard({
         const skillNum = slot * 3 + sk + 1;
         const display = resolveSkillDisplay(info, sk, t("Skill {index}", { index: sk + 1 }));
         const skType = info?.skill_types?.[sk];
-        const specialSpec = resolveWizardSpecialSkill(canonicalName, slot, sk, server);
+        const specialSpec = resolveWizardSpecialSkill(info || canonicalName, slot, sk, server);
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "wizard-skill-btn";
@@ -1794,12 +1807,12 @@ export function createPresetWizard({
         const origSlot = lineup[pos - 1];
         const info = origSlot != null ? findServant(servants, config[`servant_${origSlot}_name`]) : null;
         const official = info?.skill_details?.[sk - 1]?.name;
-        return official ? `${slotLabel(pos)} ${official}` : `${slotLabel(pos)} 技${sk}`;
+        return official ? `${slotLabel(pos)} ${official}` : `${slotLabel(pos)} ${t("Skill {index}", { index: sk })}`;
       }
       if (num >= 10 && num <= 12) {
         const mInfo = (state.masters || []).find((m) => String(m.sn) === String(config.master_equip));
         const official = mInfo?.skill_details?.[num - 10]?.name;
-        return official ? `${t("Master")} ${official}` : `${t("Master")} 技${num - 9}`;
+        return official ? `${t("Master")} ${official}` : `${t("Master")} ${t("Skill {index}", { index: num - 9 })}`;
       }
       if (num === 13) return t("Enemy target");
       return String(num);
