@@ -2780,6 +2780,7 @@ function setPresetEditorUiMode(mode) {
   }
   els.presetForm.classList.toggle("wizard-mode", resolved === "wizard");
   els.presetDialog.classList.toggle("wizard-mode", resolved === "wizard");
+  els.presetForm.noValidate = resolved === "wizard";
   if (resolved === "wizard") {
     presetWizard.render();
   } else {
@@ -3822,7 +3823,7 @@ async function savePreset(event) {
   if (!editor || editor.saving || editor.strategyApplyBusy) {
     return;
   }
-  if (editor.kind === "settings" && !presetAssist.validate()) return;
+  if (editor.kind === "settings" && editor.uiMode !== "wizard" && !presetAssist.validate()) return;
   const invalidRunField = editor.kind === "settings" && Object.keys(editor.runOptionDrafts || {}).find((field) => editor.runOptionDrafts[field]?.error);
   if (invalidRunField) {
     const input = els.presetRunInputs.find((input) => input.dataset.runOption === invalidRunField);
@@ -6716,10 +6717,12 @@ function renderSettingPlan(plan) {
     .filter((servant) => servant.name)
     .map((servant) => `${servant.slot + 1}:${servant.name}${servant.active ? "*" : ""}`)
     .join(" / ");
+  const masterGender = plan.master.sex === 1 ? t("Male") : plan.master.sex === 0 ? t("Female") : "-";
+  const masterLabel = plan.master.name || (plan.master.equip ?? "-");
   const lines = [
     `${plan.server || t("Unknown")} · ${plan.name}`,
     `${t("Servants")}: ${servantText || t("None")}`,
-    `${t("Master")}: ${plan.master.equip ?? "-"} · ${t("sex")} ${plan.master.sex ?? "-"}`,
+    `${t("Master")}: ${masterLabel} · ${masterGender}`,
   ];
   const preRun = plan.pre_run;
   if (preRun?.assist_report) {
@@ -6753,7 +6756,7 @@ function renderSettingPlan(plan) {
     lines.push(`R${round.round}: ${round.turns.length} ${t("turns")}`);
     for (const turn of round.turns) {
       const actions = turn.actions.map(formatPlanAction).join(", ") || t("No actions");
-      lines.push(`  T${turn.turn}: ${actions}`);
+      lines.push(`  T${Number(turn.turn) + 1}: ${actions}`);
     }
   }
   els.settingPlan.textContent = lines.join("\n");

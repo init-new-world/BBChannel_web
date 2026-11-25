@@ -1905,3 +1905,22 @@ def test_screen_rotation_routes_get_and_post_calibration(tmp_path: Path):
     invalid = client.post("/api/screen/rotation", json={"rotation": 45})
     assert invalid.status_code == 422
 
+
+def test_servant_image_endpoint_resolves_aliases(tmp_path: Path):
+    from PIL import Image
+
+    client = _client(tmp_path)
+    data = Path(client.app.state.resources.data_dir)
+    assets = Path(client.app.state.resources.assets_dir)
+    _write_json(
+        data / "servant_info_CH.json",
+        {"阿拉什": {"SN": "201300", "class": "Archer", "other_name": ["大英雄"], "servant_face": 2}},
+    )
+    face_dir = assets / "servantface"
+    face_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (32, 32), (100, 120, 140, 255)).save(face_dir / "阿拉什_2.png")
+
+    resp = client.get("/api/servants/image", params={"name": "大英雄", "server": "CH"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+

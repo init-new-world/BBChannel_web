@@ -1161,24 +1161,37 @@ def create_app(
             or any(ch in cleaned for ch in ("/", "\\", ":", "\x00"))
         ):
             raise AppError(ErrorCode.TEMPLATE_NOT_FOUND, "Servant portrait not found.")
+        resolved_name = cleaned
         face_candidates: list[int] = []
         if face is not None:
             face_candidates.append(face)
-        else:
-            try:
-                catalog = script_data.list_servants(server)["servants"]
-                match = next((item for item in catalog if item.get("name") == cleaned), None)
-                if match and isinstance(match.get("face_index"), int):
+        try:
+            catalog = script_data.list_servants(server)["servants"]
+            match = next((item for item in catalog if item.get("name") == cleaned), None)
+            if match is None:
+                match = next(
+                    (
+                        item
+                        for item in catalog
+                        if isinstance(item.get("aliases"), list)
+                        and cleaned in item["aliases"]
+                    ),
+                    None,
+                )
+            if match:
+                if isinstance(match.get("name"), str) and match["name"]:
+                    resolved_name = match["name"]
+                if face is None and isinstance(match.get("face_index"), int):
                     face_candidates.append(match["face_index"])
-            except AppError:
-                pass
+        except AppError:
+            pass
         for fallback in (1, 2, 3):
             if fallback not in face_candidates:
                 face_candidates.append(fallback)
         face_root = (resources.assets_dir / "servantface").resolve()
         for idx in face_candidates:
             try:
-                path = resources.resolve_template(f"servantface/{cleaned}_{idx}.png")
+                path = resources.resolve_template(f"servantface/{resolved_name}_{idx}.png")
             except AppError:
                 continue
             if path.is_relative_to(face_root):

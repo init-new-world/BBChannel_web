@@ -151,3 +151,28 @@ def test_wizard_lineup_tracks_order_change_across_waves_and_within_wave():
     assert result["w1_before_swap"] == [0, 1, 2, 3, 4, 5]
     assert result["w1_after_swap"] == [3, 1, 2, 0, 4, 5]
     assert result["w2_start"] == [3, 1, 2, 0, 4, 5]
+
+
+def test_wizard_lineup_handles_turn_replace_and_ignores_conditional_swaps():
+    config = {
+        "round1_turns": 1,
+        "round1_turn0_skill": [
+            ["Start", 1, [1]],
+            [12, 2, 5],
+            ["End"],
+            1,
+        ],
+        "round1_turn0_replace": {"1": 4, "4": None},
+        "round2_turns": 1,
+        "round2_turn0_skill": [1],
+    }
+    result = _run(
+        """
+        const w1_end = wizardSkills.computeLineupBefore(input.config, 1, 4);
+        const w2_start = wizardSkills.computeLineupBefore(input.config, 2, 0);
+        process.stdout.write(JSON.stringify({ w1_end, w2_start }));
+        """,
+        {"config": config},
+    )
+    assert result["w1_end"] == [0, 1, 2, 3, 4, 5]
+    assert result["w2_start"] == [3, 1, 2, None, 4, 5]

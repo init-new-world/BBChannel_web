@@ -1206,6 +1206,47 @@ def test_all_real_settings_and_strategies_in_repo_validate_and_compile_cleanly()
         assert detail["validation"]["ok"] is True, f"{item['name']}: {detail['validation']}"
 
 
+def test_pre_run_report_and_plan_assist_handle_normal_nulls_grand_ce_only_dict_and_lowercase_cntw(tmp_path: Path):
+    _write_json(tmp_path / "servant_info_CNTW.json", {"Servant A": {"SN": "100", "class": "Caster", "other_name": []}})
+    _write_json(
+        tmp_path / "settings" / "normal_trailing_null.json",
+        {
+            "server": "cntw",
+            "assistMode": "从者礼装",
+            "assistIdx": 2,
+            "servant_2_name": "Servant A",
+            "assistEquip": ["CE1", "CE2", None],
+            "skillsLevel": [10, 10, 10, 10, 10, 0, 10, 10],
+            "round1_turns": 1,
+        },
+    )
+    _write_json(
+        tmp_path / "settings" / "grand_ce_only.json",
+        {
+            "server": "CH",
+            "assistMode": "冠位助战仅礼装",
+            "assistIdx": 2,
+            "servant_2_name": "Servant A",
+            "onlyFriendAssist": 1,
+            "assistEquip": {"normal": ["CE1"], "kizuna": "BondCE", "houshuu": ["RewardCE"]},
+            "round1_turns": 1,
+        },
+    )
+    _write_json(tmp_path / "servant_info_CH.json", {"Servant A": {"SN": "100", "class": "Caster", "other_name": []}})
+    service = ScriptDataService(tmp_path)
+
+    normal_report = service.get_setting_pre_run_report("normal_trailing_null")
+    assert normal_report["assist_report"]["equip_slots"] == [["CE1", "CE2"], [], []]
+    normal_plan = service.get_setting_plan("normal_trailing_null")
+    assert len(normal_plan["assist"]["append_skill_levels"]) == 3
+
+    grand_report = service.get_setting_pre_run_report("grand_ce_only")
+    assert grand_report["assist_report"]["friend_only_effective"] is False
+    assert grand_report["assist_report"]["equip_slots"] == [["CE1"], ["BondCE"], ["RewardCE"]]
+    grand_plan = service.get_setting_plan("grand_ce_only")
+    assert grand_plan["assist"]["equip_names"] == ["CE1", "BondCE", "RewardCE"]
+
+
 
 
 

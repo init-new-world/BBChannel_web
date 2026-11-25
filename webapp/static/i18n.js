@@ -177,6 +177,8 @@ const zh = {
   "Grand + CE": "冠位与礼装",
   "Grand CE only": "仅冠位礼装",
   "Grand bond CE": "冠位羁绊礼装",
+  "Failed to load catalog.": "加载目录失败。",
+  "This wave has additional turns or extra-turn actions — edit them in Pro Mode.": "本面包含多回合或补刀操作，请在专业模式中编辑。",
   "Idle": "空闲",
   "Ignore bond positions": "忽略羁绊位置",
   "Inactive for this recognition mode.": "当前识别模式不使用礼装。",

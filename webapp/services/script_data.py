@@ -327,20 +327,25 @@ class ScriptDataService:
             else "未指定"
         )
 
+        is_grand_mode = mode in {"冠位助战", "冠位助战仅礼装"}
         if mode in {"仅从者", "不识别"}:
             equip_slots = [[], [], []]
         else:
             raw_equip = config.get("assistEquip")
             if isinstance(raw_equip, dict):
-                equip_slots = [
-                    self._assist_equip_names(raw_equip.get(slot_key))
-                    for slot_key in ("normal", "kizuna", "houshuu")
-                ]
+                if is_grand_mode:
+                    equip_slots = [
+                        self._assist_equip_names(raw_equip.get(slot_key))
+                        for slot_key in ("normal", "kizuna", "houshuu")
+                    ]
+                else:
+                    equip_slots = [self._assist_equip_names(raw_equip), [], []]
             elif isinstance(raw_equip, list):
                 if not raw_equip:
                     equip_slots = [[], [], []]
                 elif isinstance(raw_equip[0], list) or (
-                    len(raw_equip) >= 3
+                    is_grand_mode
+                    and len(raw_equip) >= 3
                     and any(isinstance(item, list) or item is None for item in raw_equip)
                 ):
                     equip_slots = [
@@ -384,9 +389,7 @@ class ScriptDataService:
         )
 
         friend_only = bool(config.get("onlyFriendAssist", 0))
-        friend_only_effective = (
-            mode not in {"仅礼装", "不识别"} and configured_servant_name is not None
-        )
+        friend_only_effective = servant_specified
         friend_only_warning = (
             "(从者未指定不生效)" if not friend_only_effective else None
         )
@@ -1254,7 +1257,7 @@ class ScriptDataService:
             "np_level": config.get("NPlevel"),
             "servant_level": config.get("servantLevel", 1),
             "skill_levels": skill_levels[:3],
-            "append_skill_levels": skill_levels[3:6] if server == "CNTW" else skill_levels[3:8],
+            "append_skill_levels": skill_levels[3:6] if isinstance(server, str) and server.upper() == "CNTW" else skill_levels[3:8],
             "scroll_limit": config.get("scrollLimit"),
             "interval_after_swipe": config.get("intervalAFswipeAssist", 0.5),
             "no_grand_refresh": bool(config.get("noGrandRefresh")),
@@ -1306,6 +1309,14 @@ class ScriptDataService:
             if isinstance(entry, list):
                 for item in entry:
                     collect(item)
+                return
+            if isinstance(entry, dict):
+                for key in ("normal", "kizuna", "houshuu"):
+                    if key in entry:
+                        collect(entry[key])
+                for key, item in entry.items():
+                    if key not in ("normal", "kizuna", "houshuu"):
+                        collect(item)
 
         collect(value)
         return names

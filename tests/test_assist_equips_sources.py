@@ -132,3 +132,25 @@ def test_invalid_ce_edits_never_guess_actions_or_coerce_names(edit):
 def test_ce_source_inspection_and_edits_require_a_strict_json_object(source):
     assert _run("inspect", source)["error"] == "Invalid script JSON."
     assert _run("edit", source, edit={"type": "clear"})["error"] == "Invalid script JSON."
+
+
+def test_grand_mode_preserves_three_slot_layout_and_normal_mode_ignores_trailing_null():
+    script = f"""
+        import * as equips from {json.dumps(MODULE.as_uri())};
+        const normalSrc = JSON.stringify({{ assistMode: "从者礼装", assistEquip: ["午茶", "ZHIXUSHAN", null] }});
+        const grandSrc = JSON.stringify({{ assistMode: "冠位助战", assistEquip: [["黑杯"], "羁绊礼装", ["福尔摩斯"]] }});
+        const removed = JSON.parse(equips.editAssistEquipSource(grandSrc, {{ type: "remove", name: "羁绊礼装" }}));
+        const added = JSON.parse(equips.editAssistEquipSource(grandSrc, {{ type: "add", name: "新礼装" }}));
+        process.stdout.write(JSON.stringify({{
+            normalSlots: equips.inspectAssistEquipGrandSlots(normalSrc),
+            grandSlots: equips.inspectAssistEquipGrandSlots(grandSrc),
+            removedEquip: removed.assistEquip,
+            addedEquip: added.assistEquip,
+        }}));
+    """
+    res = subprocess.run([NODE, "--input-type=module", "-e", script], text=True, capture_output=True, timeout=10, check=True)
+    out = json.loads(res.stdout)
+    assert out["normalSlots"] is None
+    assert out["grandSlots"] == {"黑杯": ["normal"], "羁绊礼装": ["kizuna"], "福尔摩斯": ["houshuu"]}
+    assert out["removedEquip"] == [["黑杯"], None, ["福尔摩斯"]]
+    assert out["addedEquip"] == [["黑杯", "新礼装"], "羁绊礼装", ["福尔摩斯"]]

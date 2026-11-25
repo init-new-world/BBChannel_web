@@ -26,12 +26,24 @@ function document(source) {
   return readJsonField(source, "assistEquip", "Ambiguous CE field.");
 }
 
+const GRAND_MODES = new Set(["\u51a0\u4f4d\u52a9\u6218", "\u51a0\u4f4d\u52a9\u6218\u4ec5\u793c\u88c5"]);
 const GRAND_SLOT_LABELS = ["normal", "kizuna", "houshuu"];
 
+function isGrandAssistMode(source) {
+  try {
+    const modeEntry = readJsonField(source, "assistMode", "Ambiguous assist field.");
+    return typeof modeEntry.value === "string" && GRAND_MODES.has(modeEntry.value);
+  } catch {
+    return false;
+  }
+}
+
+function isGrandSlotArray(value) {
+  return Array.isArray(value) && value.length === 3 && value.some((item) => item === null || Array.isArray(item));
+}
+
 function collectGrandSlots(value) {
-  if (!Array.isArray(value) || value.length !== 3) return null;
-  const hasSlotStructure = value.some((item) => item === null || Array.isArray(item));
-  if (!hasSlotStructure) return null;
+  if (!isGrandSlotArray(value)) return null;
   const slotsByName = {};
   value.forEach((slotValue, slotIndex) => {
     const slotKey = GRAND_SLOT_LABELS[slotIndex];
@@ -47,6 +59,7 @@ function collectGrandSlots(value) {
 
 export function inspectAssistEquipGrandSlots(source) {
   try {
+    if (!isGrandAssistMode(source)) return null;
     const entry = document(source);
     return collectGrandSlots(entry.value);
   } catch {
@@ -75,6 +88,25 @@ function removeName(value, name) {
   return value.filter((item) => item !== name).map((item) => removeName(item, name));
 }
 
+function removeNameGrand(slots, name) {
+  return slots.map((slot) => {
+    if (slot === name) return null;
+    if (Array.isArray(slot)) return removeName(slot, name);
+    return slot;
+  });
+}
+
+function addNameGrand(slots, name, slotIndex = 0) {
+  const targetIdx = Number.isInteger(slotIndex) && slotIndex >= 0 && slotIndex < 3 ? slotIndex : 0;
+  return slots.map((slot, idx) => {
+    if (idx !== targetIdx) return slot;
+    if (slot == null || slot === "") return [name];
+    if (typeof slot === "string") return [slot, name];
+    if (Array.isArray(slot)) return [...slot, name];
+    return [name];
+  });
+}
+
 export function editAssistEquipSource(source, edit) {
   if (!edit || !["add", "remove", "clear"].includes(edit.type)
       || (edit.type !== "clear" && (typeof edit.name !== "string" || !edit.name))) {
@@ -85,12 +117,17 @@ export function editAssistEquipSource(source, edit) {
     return !entry.node || (Array.isArray(entry.value) && !entry.value.length) ? source : entry.replace([]);
   }
   const names = readAssistEquipNames(entry.value);
+  const grandStructured = isGrandAssistMode(source) && isGrandSlotArray(entry.value);
   if (edit.type === "remove") {
-    return names.includes(edit.name) ? entry.replace(removeName(entry.value, edit.name)) : source;
+    if (!names.includes(edit.name)) return source;
+    const next = grandStructured ? removeNameGrand(entry.value, edit.name) : removeName(entry.value, edit.name);
+    return entry.replace(next);
   }
   if (names.includes(edit.name)) return source;
   const current = entry.value;
-  const next = Array.isArray(current) ? [...current, edit.name] : current ? [current, edit.name] : [edit.name];
+  const next = grandStructured
+    ? addNameGrand(current, edit.name, edit.slot)
+    : Array.isArray(current) ? [...current, edit.name] : current ? [current, edit.name] : [edit.name];
   readAssistEquipNames(next);
   return entry.replace(next);
 }

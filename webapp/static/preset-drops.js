@@ -144,17 +144,22 @@ export function createPresetDropEditor({ getEditor, source, request, onChange, o
     };
     const paths = catalog.paths || [];
     const resolved = catalog.state === "ready" ? catalog.resolved : null;
+    const hasConfiguredDrop = Object.hasOwn(config, "dropImage")
+      && config.dropImage !== null
+      && config.dropImage !== "";
     const choices = [option("", t("None")), ...paths.map((path) => option(path, path.slice(5)))];
-    if (Object.hasOwn(config, "dropImage") && !resolved) {
-      choices.push(option("__current__", t("{name} (current)", { name: JSON.stringify(config.dropImage) })));
+    if (hasConfiguredDrop && !resolved) {
+      const curOpt = option("__current__", t("{name} (current)", { name: JSON.stringify(config.dropImage) }));
+      curOpt.disabled = true;
+      choices.push(curOpt);
     }
     picker.replaceChildren(...choices);
-    picker.value = resolved || (Object.hasOwn(config, "dropImage") ? "__current__" : "");
+    picker.value = resolved || (hasConfiguredDrop ? "__current__" : "");
     picker.title = picker.selectedOptions[0]?.textContent || "";
     refresh.disabled = catalog.state === "loading";
     status.textContent = catalog.state === "loading" ? t("Loading drop catalog...")
       : catalog.state === "error" ? catalog.error
-        : Object.hasOwn(config, "dropImage") && !resolved ? t("Drop image unavailable or ambiguous.")
+        : hasConfiguredDrop && !resolved ? t("Drop image unavailable or ambiguous.")
           : t("{count} drop templates", { count: paths.length });
     renderPreview(editor, resolved);
     visualPicker.sync();

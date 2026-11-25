@@ -277,6 +277,20 @@ export function applyOrderChange(lineup, cmd) {
   }
 }
 
+export function applyTurnReplace(lineup, replaceMap) {
+  if (!replaceMap || typeof replaceMap !== "object" || Array.isArray(replaceMap)) return;
+  const snapshot = [...lineup];
+  for (const [rawKey, rawValue] of Object.entries(replaceMap)) {
+    const targetIdx = Number(rawKey) - 1;
+    if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx > 5) continue;
+    if (rawValue === null) {
+      lineup[targetIdx] = null;
+    } else if (typeof rawValue === "number" && Number.isInteger(rawValue) && rawValue >= 1 && rawValue <= 6) {
+      lineup[targetIdx] = snapshot[rawValue - 1];
+    }
+  }
+}
+
 export function computeLineupBefore(config, targetWave, stopBeforeSkillIndex = Infinity) {
   const lineup = [0, 1, 2, 3, 4, 5];
   if (!config || typeof config !== "object") return lineup;
@@ -285,18 +299,48 @@ export function computeLineupBefore(config, targetWave, stopBeforeSkillIndex = I
     const maxTurn = w < targetWave ? turns : 1;
     for (let turn = 0; turn < maxTurn; turn += 1) {
       const skills = config[`round${w}_turn${turn}_skill`];
-      if (!Array.isArray(skills)) continue;
-      const limit = w === targetWave && turn === 0
-        ? Math.min(skills.length, stopBeforeSkillIndex)
-        : skills.length;
-      for (let i = 0; i < limit; i += 1) {
-        applyOrderChange(lineup, skills[i]);
+      if (Array.isArray(skills)) {
+        const limit = w === targetWave && turn === 0
+          ? Math.min(skills.length, stopBeforeSkillIndex)
+          : skills.length;
+        let conditionDepth = 0;
+        for (let i = 0; i < limit; i += 1) {
+          const cmd = skills[i];
+          if (Array.isArray(cmd) && cmd[0] === "Start") {
+            conditionDepth += 1;
+            continue;
+          }
+          if (Array.isArray(cmd) && cmd[0] === "End") {
+            conditionDepth = Math.max(0, conditionDepth - 1);
+            continue;
+          }
+          if (conditionDepth === 0) {
+            applyOrderChange(lineup, cmd);
+          }
+        }
+      }
+      if (w < targetWave || turn < maxTurn - 1) {
+        applyTurnReplace(lineup, config[`round${w}_turn${turn}_replace`]);
       }
     }
-    if (w < targetWave && Array.isArray(config[`round${w}_extraSkill`])) {
-      for (const cmd of config[`round${w}_extraSkill`]) {
-        applyOrderChange(lineup, cmd);
+    if (w < targetWave) {
+      if (Array.isArray(config[`round${w}_extraSkill`])) {
+        let conditionDepth = 0;
+        for (const cmd of config[`round${w}_extraSkill`]) {
+          if (Array.isArray(cmd) && cmd[0] === "Start") {
+            conditionDepth += 1;
+            continue;
+          }
+          if (Array.isArray(cmd) && cmd[0] === "End") {
+            conditionDepth = Math.max(0, conditionDepth - 1);
+            continue;
+          }
+          if (conditionDepth === 0) {
+            applyOrderChange(lineup, cmd);
+          }
+        }
       }
+      applyTurnReplace(lineup, config[`round${w}_extraReplace`]);
     }
   }
   return lineup;

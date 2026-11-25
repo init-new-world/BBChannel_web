@@ -26,10 +26,10 @@ const STANDARD_CLASSES = new Set([
 
 const POPULAR_SUPPORT_NAMES = [
   "光之高扬斯卡娅",
-  "阿尔托莉雅·卡斯特",
+  "阿尔托莉雅·Caster",
   "奥伯龙",
-  "丝卡蒂(Ruler)",
-  "斯卡哈=丝卡蒂",
+  "斯卡哈·斯卡蒂(Ruler)",
+  "斯卡哈·斯卡蒂",
   "司马懿〔莱妮丝〕",
   "暗之高扬斯卡娅",
   "诸葛孔明〔埃尔梅罗Ⅱ世〕",
@@ -83,32 +83,36 @@ function resolveSkillDisplay(info, skillIndex, fallbackLabel) {
   };
 }
 
-function normalizeAssistEquipArray(value, isGrand) {
-  if (isGrand) {
-    if (Array.isArray(value) && value.length === 3 && value.some((v) => v === null || Array.isArray(v))) {
-      return value.map((slot) => {
-        if (Array.isArray(slot)) return slot.filter((item) => typeof item === "string" && item);
-        if (typeof slot === "string" && slot) return [slot];
-        return [];
-      });
-    }
-    const flat = [];
-    const stack = [value];
-    while (stack.length) {
-      const item = stack.pop();
-      if (typeof item === "string" && item && !flat.includes(item)) flat.push(item);
-      else if (Array.isArray(item)) for (let i = item.length - 1; i >= 0; i -= 1) stack.push(item[i]);
-    }
-    return [flat, [], []];
-  }
+function collectFlatEquipNames(value) {
   const flat = [];
   const stack = [value];
   while (stack.length) {
     const item = stack.pop();
-    if (typeof item === "string" && item && !flat.includes(item)) flat.push(item);
-    else if (Array.isArray(item)) for (let i = item.length - 1; i >= 0; i -= 1) stack.push(item[i]);
+    if (typeof item === "string") {
+      if (item && !flat.includes(item)) flat.push(item);
+    } else if (Array.isArray(item)) {
+      for (let i = item.length - 1; i >= 0; i -= 1) stack.push(item[i]);
+    } else if (item && typeof item === "object") {
+      const keys = [...GRAND_SLOT_KEYS, ...Object.keys(item).filter((k) => !GRAND_SLOT_KEYS.includes(k))];
+      for (let i = keys.length - 1; i >= 0; i -= 1) {
+        if (Object.hasOwn(item, keys[i])) stack.push(item[keys[i]]);
+      }
+    }
   }
   return flat;
+}
+
+function normalizeAssistEquipArray(value, isGrand, wasGrand = isGrand) {
+  if (isGrand) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return GRAND_SLOT_KEYS.map((slotKey) => collectFlatEquipNames(value[slotKey]));
+    }
+    if (wasGrand && Array.isArray(value) && value.length === 3 && value.some((v) => v === null || Array.isArray(v))) {
+      return value.map((slot) => collectFlatEquipNames(slot));
+    }
+    return [collectFlatEquipNames(value), [], []];
+  }
+  return collectFlatEquipNames(value);
 }
 
 function extractWaveCount(config) {
@@ -216,8 +220,12 @@ export function createPresetWizard({
     activeWave: 1,
     pendingTargetSkill: null, // { skillNum, isSwap, label }
     servantsByServer: new Map(),
+    servantsError: new Map(),
     masters: null,
+    mastersError: false,
     equips: null,
+    equipsLoading: false,
+    equipsError: false,
     loadingServer: null,
     autoNamedValue: "",
   };
@@ -274,46 +282,52 @@ export function createPresetWizard({
       ? String(server).toUpperCase()
       : "CH";
     const promises = [];
-    if (!state.servantsByServer.has(normalizedServer) && state.loadingServer !== normalizedServer) {
+    if (!state.servantsByServer.has(normalizedServer) && state.loadingServer !== normalizedServer && !state.servantsError.get(normalizedServer)) {
       state.loadingServer = normalizedServer;
       promises.push(
         request(`/api/servants?server=${encodeURIComponent(normalizedServer)}`)
           .then((payload) => {
+            state.servantsError.delete(normalizedServer);
             state.servantsByServer.set(normalizedServer, Array.isArray(payload.servants) ? payload.servants : []);
           })
           .catch(() => {
-            state.servantsByServer.set(normalizedServer, []);
+            state.servantsError.set(normalizedServer, true);
           })
           .finally(() => {
             if (state.loadingServer === normalizedServer) state.loadingServer = null;
           }),
       );
     }
-    if (state.masters === null && !state.mastersLoading) {
+    if (state.masters === null && !state.mastersLoading && !state.mastersError) {
       state.mastersLoading = true;
       promises.push(
         request("/api/masters")
           .then((payload) => {
+            state.mastersError = false;
             state.masters = Array.isArray(payload.masters) ? payload.masters : [];
           })
           .catch(() => {
-            state.masters = [];
+            state.mastersError = true;
           })
           .finally(() => {
             state.mastersLoading = false;
           }),
       );
     }
-    if (state.equips === null) {
-      state.equips = [];
+    if (state.equips === null && !state.equipsLoading && !state.equipsError) {
+      state.equipsLoading = true;
       promises.push(
         request("/api/equip-templates")
           .then((payload) => {
+            state.equipsError = false;
             const list = Array.isArray(payload.templates) ? payload.templates : [];
             state.equips = [...new Set(list.filter((item) => item.location === "active" && item.name).map((item) => item.name))];
           })
           .catch(() => {
-            state.equips = [];
+            state.equipsError = true;
+          })
+          .finally(() => {
+            state.equipsLoading = false;
           }),
       );
     }
@@ -362,17 +376,36 @@ export function createPresetWizard({
     return true;
   }
 
+  function syncUsedServant(draft, { includeSlot = null } = {}) {
+    const assistIdx = Number.isInteger(draft.assistIdx) ? draft.assistIdx : 2;
+    const existing = Array.isArray(draft.usedServant) ? draft.usedServant : [];
+    const used = [];
+    const addIfValid = (idx) => {
+      if (
+        Number.isInteger(idx)
+        && idx >= 0
+        && idx < 6
+        && idx !== assistIdx
+        && draft[`servant_${idx}_name`]
+        && !used.includes(idx)
+      ) {
+        used.push(idx);
+      }
+    };
+    for (let i = 0; i < 3; i += 1) addIfValid(i);
+    for (const idx of existing) {
+      if (Number.isInteger(idx) && idx >= 3 && idx < 6) addIfValid(idx);
+    }
+    if (includeSlot !== null) addIfValid(includeSlot);
+    draft.usedServant = used;
+  }
+
   function selectServantForSlot(slotIndex, servantName) {
     const config = readConfig();
     const shouldAutoName = !nameInput.value.trim() || nameInput.value.trim() === state.autoNamedValue;
     writeConfig((draft) => {
       draft[`servant_${slotIndex}_name`] = servantName || null;
-      const assistIdx = Number.isInteger(draft.assistIdx) ? draft.assistIdx : 2;
-      const used = [];
-      for (let i = 0; i < 3; i += 1) {
-        if (i !== assistIdx && draft[`servant_${i}_name`]) used.push(i);
-      }
-      draft.usedServant = used;
+      syncUsedServant(draft);
       if (shouldAutoName) {
         const suggested = buildSuggestedName(draft);
         if (suggested) {
@@ -444,6 +477,24 @@ export function createPresetWizard({
 
   function renderMasterOutfitGrid(gridWrap, countLabel, masters, selectedSn, masterSexVal) {
     if (masters === null) {
+      if (state.mastersError) {
+        countLabel.textContent = "";
+        gridWrap.replaceChildren();
+        const err = document.createElement("div");
+        err.className = "wizard-empty-hint";
+        err.textContent = `${t("Failed to load catalog.")} `;
+        const retryBtn = document.createElement("button");
+        retryBtn.type = "button";
+        retryBtn.className = "chip-button";
+        retryBtn.textContent = t("Retry");
+        retryBtn.addEventListener("click", () => {
+          state.mastersError = false;
+          render();
+        });
+        err.append(retryBtn);
+        gridWrap.append(err);
+        return;
+      }
       countLabel.textContent = t("Loading...");
       gridWrap.innerHTML = `<div class="wizard-empty-hint">${t("Loading master outfits...")}</div>`;
       return;
@@ -551,7 +602,13 @@ export function createPresetWizard({
     }
     serverSel.value = server;
     serverSel.addEventListener("change", () => {
-      writeConfig((draft) => { draft.server = serverSel.value; });
+      writeConfig((draft) => {
+        draft.server = serverSel.value;
+        if (serverSel.value === "CNTW" && Array.isArray(draft.skillsLevel)) {
+          if (draft.skillsLevel.length > 6) draft.skillsLevel[6] = 0;
+          if (draft.skillsLevel.length > 7) draft.skillsLevel[7] = 0;
+        }
+      });
     });
     serverField.append(serverSel);
 
@@ -722,11 +779,7 @@ export function createPresetWizard({
         ev.stopPropagation();
         writeConfig((draft) => {
           draft.assistIdx = i;
-          const used = [];
-          for (let s = 0; s < 3; s += 1) {
-            if (s !== i && draft[`servant_${s}_name`]) used.push(s);
-          }
-          draft.usedServant = used;
+          syncUsedServant(draft);
         });
       });
       actions.append(setAssistBtn);
@@ -856,7 +909,25 @@ export function createPresetWizard({
   }
 
   function renderServantGrid(gridWrap, countLabel, servants, server) {
-    if (!servants.length) {
+    if (!state.servantsByServer.has(server)) {
+      if (state.servantsError.get(server)) {
+        countLabel.textContent = "";
+        gridWrap.replaceChildren();
+        const err = document.createElement("div");
+        err.className = "wizard-empty-hint";
+        err.textContent = `${t("Failed to load catalog.")} `;
+        const retryBtn = document.createElement("button");
+        retryBtn.type = "button";
+        retryBtn.className = "chip-button";
+        retryBtn.textContent = t("Retry");
+        retryBtn.addEventListener("click", () => {
+          state.servantsError.delete(server);
+          render();
+        });
+        err.append(retryBtn);
+        gridWrap.append(err);
+        return;
+      }
       countLabel.textContent = t("Loading...");
       gridWrap.innerHTML = `<div class="wizard-empty-hint">${t("Loading servant catalog...")}</div>`;
       return;
@@ -938,6 +1009,7 @@ export function createPresetWizard({
     for (const [val, labelKey] of [
       ["从者礼装", "Servant + CE"],
       ["冠位助战", "Grand + CE"],
+      ["冠位助战仅礼装", "Grand CE only"],
       ["仅从者", "Servant only"],
       ["仅礼装", "CE only"],
       ["不识别", "First support"],
@@ -948,14 +1020,16 @@ export function createPresetWizard({
       btn.textContent = t(labelKey);
       btn.addEventListener("click", () => {
         writeConfig((draft) => {
+          const wasGrand = GRAND_MODES.has(draft.assistMode);
           draft.assistMode = val;
           if (GRAND_MODES.has(val)) {
-            draft.assistEquip = normalizeAssistEquipArray(draft.assistEquip, true);
+            const slots = normalizeAssistEquipArray(draft.assistEquip, true, wasGrand);
+            draft.assistEquip = slots.map((slot) => (slot.length ? slot : null));
             draft.jbType = draft.jbType || "任意";
           } else if (val === "仅从者" || val === "不识别") {
             draft.assistEquip = [];
           } else {
-            draft.assistEquip = normalizeAssistEquipArray(draft.assistEquip, false);
+            draft.assistEquip = normalizeAssistEquipArray(draft.assistEquip, false, wasGrand);
           }
         });
       });
@@ -963,74 +1037,76 @@ export function createPresetWizard({
     }
     container.append(modeRow);
 
-    if (usesServant) {
+    if (usesServant || usesEquip || isGrand) {
       const reqCard = document.createElement("div");
       reqCard.className = "wizard-card-block";
-      const skills = Array.isArray(config.skillsLevel) ? [...config.skillsLevel] : [10, 10, 10, 0, 0, 0, 0, 0];
-      while (skills.length < 8) skills.push(0);
+      if (usesServant) {
+        const skills = Array.isArray(config.skillsLevel) ? [...config.skillsLevel] : [10, 10, 10, 0, 0, 0, 0, 0];
+        while (skills.length < 8) skills.push(0);
 
-      // Skill quick presets
-      const skillPresetRow = document.createElement("div");
-      skillPresetRow.className = "wizard-filter-row";
-      const spLbl = document.createElement("span");
-      spLbl.className = "wizard-filter-label";
-      spLbl.textContent = t("Skill preset");
-      skillPresetRow.append(spLbl);
-      for (const [lbl, preset] of [
-        [t("Any"), [0, 0, 0, 0, 0, 0, 0, 0]],
-        ["310", [10, 10, 10, 0, 0, 0, 0, 0]],
-        [t("310 + Append 2 Lv.10"), [10, 10, 10, 0, 10, 0, 0, 0]],
-      ]) {
-        const isCurrent = preset.every((v, idx) => Number(skills[idx] || 0) === v);
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = `chip-button${isCurrent ? " active" : ""}`;
-        btn.textContent = lbl;
-        btn.addEventListener("click", () => {
-          writeConfig((draft) => { draft.skillsLevel = [...preset]; });
-        });
-        skillPresetRow.append(btn);
-      }
-      reqCard.append(skillPresetRow);
+        // Skill quick presets
+        const skillPresetRow = document.createElement("div");
+        skillPresetRow.className = "wizard-filter-row";
+        const spLbl = document.createElement("span");
+        spLbl.className = "wizard-filter-label";
+        spLbl.textContent = t("Skill preset");
+        skillPresetRow.append(spLbl);
+        for (const [lbl, preset] of [
+          [t("Any"), [0, 0, 0, 0, 0, 0, 0, 0]],
+          ["310", [10, 10, 10, 0, 0, 0, 0, 0]],
+          [t("310 + Append 2 Lv.10"), [10, 10, 10, 0, 10, 0, 0, 0]],
+        ]) {
+          const isCurrent = preset.every((v, idx) => Number(skills[idx] || 0) === v);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = `chip-button${isCurrent ? " active" : ""}`;
+          btn.textContent = lbl;
+          btn.addEventListener("click", () => {
+            writeConfig((draft) => { draft.skillsLevel = [...preset]; });
+          });
+          skillPresetRow.append(btn);
+        }
+        reqCard.append(skillPresetRow);
 
-      // NP level + Servant level quick chips
-      const npRow = document.createElement("div");
-      npRow.className = "wizard-filter-row";
-      const npLbl = document.createElement("span");
-      npLbl.className = "wizard-filter-label";
-      npLbl.textContent = t("Min NP");
-      npRow.append(npLbl);
-      for (const lv of [1, 2, 3, 4, 5]) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = `chip-button${Number(config.NPlevel || 1) === lv ? " active" : ""}`;
-        btn.textContent = lv === 1 ? t("Any") : `${lv}`;
-        btn.addEventListener("click", () => {
-          writeConfig((draft) => { draft.NPlevel = lv; });
-        });
-        npRow.append(btn);
+        // NP level + Servant level quick chips
+        const npRow = document.createElement("div");
+        npRow.className = "wizard-filter-row";
+        const npLbl = document.createElement("span");
+        npLbl.className = "wizard-filter-label";
+        npLbl.textContent = t("Min NP");
+        npRow.append(npLbl);
+        for (const lv of [1, 2, 3, 4, 5]) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = `chip-button${Number(config.NPlevel || 1) === lv ? " active" : ""}`;
+          btn.textContent = lv === 1 ? t("Any") : `${lv}`;
+          btn.addEventListener("click", () => {
+            writeConfig((draft) => { draft.NPlevel = lv; });
+          });
+          npRow.append(btn);
+        }
+        const lvLbl = document.createElement("span");
+        lvLbl.className = "wizard-filter-label wizard-filter-sep";
+        lvLbl.textContent = t("Min Lv.");
+        npRow.append(lvLbl);
+        for (const lv of [1, 90, 100, 120]) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = `chip-button${Number(config.servantLevel || 1) === lv ? " active" : ""}`;
+          btn.textContent = lv === 1 ? t("Any") : String(lv);
+          btn.addEventListener("click", () => {
+            writeConfig((draft) => { draft.servantLevel = lv; });
+          });
+          npRow.append(btn);
+        }
+        reqCard.append(npRow);
       }
-      const lvLbl = document.createElement("span");
-      lvLbl.className = "wizard-filter-label wizard-filter-sep";
-      lvLbl.textContent = t("Min Lv.");
-      npRow.append(lvLbl);
-      for (const lv of [1, 90, 100, 120]) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = `chip-button${Number(config.servantLevel || 1) === lv ? " active" : ""}`;
-        btn.textContent = lv === 1 ? t("Any") : String(lv);
-        btn.addEventListener("click", () => {
-          writeConfig((draft) => { draft.servantLevel = lv; });
-        });
-        npRow.append(btn);
-      }
-      reqCard.append(npRow);
 
       // Toggles
       const toggleRow = document.createElement("div");
       toggleRow.className = "wizard-toggle-strip";
       for (const [key, labelKey] of [
-        ["onlyFriendAssist", "Friends only"],
+        ...(usesServant ? [["onlyFriendAssist", "Friends only"]] : []),
         ...(usesEquip ? [["fullEquip", "Max limit break CE"]] : []),
         ...(isGrand ? [["noGrandRefresh", "Refresh at grand boundary"]] : []),
       ]) {
@@ -1228,6 +1304,7 @@ export function createPresetWizard({
     addWaveBtn.addEventListener("click", () => {
       const nextWave = waveCount + 1;
       state.activeWave = nextWave;
+      state.pendingTargetSkill = null;
       writeConfig((draft) => {
         draft[`round${nextWave}_turns`] = 1;
         draft[`round${nextWave}_turn0_skill`] = [];
@@ -1237,21 +1314,35 @@ export function createPresetWizard({
     waveBar.append(addWaveBtn);
     container.append(waveBar);
 
-    const pushSkillCommand = (command) => {
+    const hasExtraWaveTurns = Number(config[`round${wave}_turns`] || 1) > 1
+      || (Array.isArray(config[`round${wave}_extraSkill`]) && config[`round${wave}_extraSkill`].length > 0)
+      || (Array.isArray(config[`round${wave}_extraStrategy`]) && config[`round${wave}_extraStrategy`].length > 0);
+    if (hasExtraWaveTurns) {
+      const note = document.createElement("div");
+      note.className = "wizard-empty-hint";
+      note.textContent = t("This wave has additional turns or extra-turn actions — edit them in Pro Mode.");
+      container.append(note);
+    }
+
+    const pushSkillCommand = (command, { includeUsedSlot = null } = {}) => {
       state.pendingTargetSkill = null;
       writeConfig((draft) => {
         draft[`round${wave}_turns`] = Math.max(1, Number(draft[`round${wave}_turns`] || 0));
         const arr = Array.isArray(draft[skillKey]) ? [...draft[skillKey]] : [];
         arr.push(command);
         draft[skillKey] = arr;
+        if (includeUsedSlot !== null) {
+          syncUsedServant(draft, { includeSlot: includeUsedSlot });
+        }
       });
     };
 
-    // Compute current battlefield lineup after any Order Change swaps up to this point
+    // Compute current battlefield lineup after any Order Change swaps or replacements up to this point
     const waveStartLineup = computeLineupBefore(config, wave, 0);
     const activeLineup = computeLineupBefore(config, wave, skillList.length);
     const lineupServantName = (lineup, posIndex) => {
       const origSlot = lineup[posIndex];
+      if (origSlot == null) return "";
       const raw = config[`servant_${origSlot}_name`];
       return typeof raw === "string" ? raw : "";
     };
@@ -1487,7 +1578,12 @@ export function createPresetWizard({
         okBtn.className = "primary-button";
         okBtn.textContent = t("Add");
         okBtn.addEventListener("click", () => {
-          pushSkillCommand([pending.skillNum, Number(frontSel.value), Number(resSel.value)]);
+          const frontPos = Number(frontSel.value);
+          const reservePos = Number(resSel.value);
+          const reserveOrigSlot = activeLineup[reservePos - 1];
+          pushSkillCommand([pending.skillNum, frontPos, reservePos], {
+            includeUsedSlot: Number.isInteger(reserveOrigSlot) ? reserveOrigSlot : null,
+          });
         });
         bar.append(frontSel, arrow, resSel, okBtn);
       } else {
@@ -1573,9 +1669,14 @@ export function createPresetWizard({
         if (!stratSel.value) return;
         try {
           const detail = await request(`/api/strategies/${encodeURIComponent(stratSel.value)}`);
+          if (detail?.validation?.ok === false) return;
+          const unwrapped = (Array.isArray(detail?.entries) ? detail.entries : [])
+            .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry) && entry.strategy && typeof entry.strategy === "object" ? entry.strategy : entry))
+            .filter((item) => item && typeof item === "object" && !Array.isArray(item) && item.card1 && item.card2 && item.card3);
+          if (!unwrapped.length) return;
           writeConfig((draft) => {
             draft[`round${wave}_turns`] = Math.max(1, Number(draft[`round${wave}_turns`] || 0));
-            draft[stratKey] = detail.entries || [];
+            draft[stratKey] = unwrapped;
           });
         } catch {
           // Ignore failed strategy load.
@@ -1589,7 +1690,14 @@ export function createPresetWizard({
         const badge = document.createElement("span");
         badge.className = "wizard-picker-count";
         badge.textContent = currentStrat;
-        stratRow.append(badge);
+        const clearStratBtn = document.createElement("button");
+        clearStratBtn.type = "button";
+        clearStratBtn.className = "chip-button";
+        clearStratBtn.textContent = t("Clear");
+        clearStratBtn.addEventListener("click", () => {
+          writeConfig((draft) => { delete draft[stratKey]; });
+        });
+        stratRow.append(badge, clearStratBtn);
       }
       npBox.append(stratRow);
     }
@@ -1622,6 +1730,7 @@ export function createPresetWizard({
       chipsWrap.append(empty);
     } else {
       const chipLineup = [...waveStartLineup];
+      let chipCondDepth = 0;
       skillList.forEach((cmd, idx) => {
         const chip = document.createElement("span");
         chip.className = "wizard-action-chip";
@@ -1644,7 +1753,9 @@ export function createPresetWizard({
         });
         chip.append(lbl, del);
         chipsWrap.append(chip);
-        applyOrderChange(chipLineup, cmd);
+        if (Array.isArray(cmd) && cmd[0] === "Start") chipCondDepth += 1;
+        else if (Array.isArray(cmd) && cmd[0] === "End") chipCondDepth = Math.max(0, chipCondDepth - 1);
+        else if (chipCondDepth === 0) applyOrderChange(chipLineup, cmd);
       });
     }
     timeline.append(chipsWrap);
@@ -1656,7 +1767,8 @@ export function createPresetWizard({
     if (svtNum !== null) {
       const pos = Math.floor((svtNum - 1) / 3);
       const sk = (svtNum - 1) % 3;
-      const origSlot = lineup[pos] ?? pos;
+      const origSlot = lineup[pos];
+      if (origSlot == null) return "";
       const info = findServant(servants, config[`servant_${origSlot}_name`]);
       return info?.skills?.[sk] || "";
     }
@@ -1670,7 +1782,8 @@ export function createPresetWizard({
 
   function formatSkillChip(cmd, config, servants = [], lineup = [0, 1, 2, 3, 4, 5]) {
     const slotLabel = (pos) => {
-      const origSlot = lineup[pos - 1] ?? (pos - 1);
+      const origSlot = lineup[pos - 1];
+      if (origSlot == null) return `S${pos}`;
       const nm = config[`servant_${origSlot}_name`];
       return nm ? `${pos}·${nm.slice(0, 6)}` : `S${pos}`;
     };
@@ -1678,8 +1791,8 @@ export function createPresetWizard({
       if (num >= 1 && num <= 9) {
         const pos = Math.floor((num - 1) / 3) + 1;
         const sk = ((num - 1) % 3) + 1;
-        const origSlot = lineup[pos - 1] ?? (pos - 1);
-        const info = findServant(servants, config[`servant_${origSlot}_name`]);
+        const origSlot = lineup[pos - 1];
+        const info = origSlot != null ? findServant(servants, config[`servant_${origSlot}_name`]) : null;
         const official = info?.skill_details?.[sk - 1]?.name;
         return official ? `${slotLabel(pos)} ${official}` : `${slotLabel(pos)} 技${sk}`;
       }
@@ -1695,6 +1808,15 @@ export function createPresetWizard({
     if (specialFormatted) return specialFormatted;
     if (typeof cmd === "number") return skillName(cmd);
     if (Array.isArray(cmd)) {
+      if (cmd.length === 2 && cmd[0] === 13) {
+        return `${t("Enemy target")} → ${t("Enemy {slot}", { slot: cmd[1] })}`;
+      }
+      if (cmd.length === 2 && cmd[0] === "\u4ee4\u5492\u00b7\u5b9d\u5177\u89e3\u653e") {
+        return `${t("Command Spell / NP Charge")} → ${slotLabel(cmd[1])}`;
+      }
+      if (cmd.length === 2 && cmd[0] === "\u4ee4\u5492\u00b7\u7075\u57fa\u4fee\u590d") {
+        return `${t("Command Spell / Heal")} → ${slotLabel(cmd[1])}`;
+      }
       if (cmd.length === 3 && cmd[0] >= 10 && cmd[0] <= 12) {
         return `${t("Order Change")} ${slotLabel(cmd[1])}↔${slotLabel(cmd[2])}`;
       }
@@ -1752,17 +1874,19 @@ export function createPresetWizard({
       mPill.append(mTxt);
       teamStrip.append(mPill);
     }
-    const flatCes = normalizeAssistEquipArray(config.assistEquip, false);
-    for (const ceName of flatCes) {
-      const cePill = document.createElement("div");
-      cePill.className = "wizard-review-servant wizard-review-ce";
-      if ((state.equips || []).includes(ceName)) {
-        cePill.append(createAvatarImg(`/api/equip-templates/${encodeURIComponent(ceName)}/image?location=active`, ceName, "wizard-ce-thumb"));
+    if (!["不识别", "仅从者"].includes(config.assistMode || "从者礼装")) {
+      const flatCes = normalizeAssistEquipArray(config.assistEquip, false);
+      for (const ceName of flatCes) {
+        const cePill = document.createElement("div");
+        cePill.className = "wizard-review-servant wizard-review-ce";
+        if ((state.equips || []).includes(ceName)) {
+          cePill.append(createAvatarImg(`/api/equip-templates/${encodeURIComponent(ceName)}/image?location=active`, ceName, "wizard-ce-thumb"));
+        }
+        const ceTxt = document.createElement("span");
+        ceTxt.textContent = ceName;
+        cePill.append(ceTxt);
+        teamStrip.append(cePill);
       }
-      const ceTxt = document.createElement("span");
-      ceTxt.textContent = ceName;
-      cePill.append(ceTxt);
-      teamStrip.append(cePill);
     }
     if (!teamStrip.children.length) {
       teamStrip.innerHTML = `<span class="wizard-empty-hint">${t("No servants selected yet.")}</span>`;
@@ -1779,9 +1903,12 @@ export function createPresetWizard({
       const line = document.createElement("div");
       line.className = "wizard-review-wave-line";
       const reviewLineup = computeLineupBefore(config, w, 0);
+      let reviewCondDepth = 0;
       const skText = sks.map((c) => {
         const text = formatSkillChip(c, config, servants, reviewLineup);
-        applyOrderChange(reviewLineup, c);
+        if (Array.isArray(c) && c[0] === "Start") reviewCondDepth += 1;
+        else if (Array.isArray(c) && c[0] === "End") reviewCondDepth = Math.max(0, reviewCondDepth - 1);
+        else if (reviewCondDepth === 0) applyOrderChange(reviewLineup, c);
         return text;
       }).join(" → ") || t("No skills");
       const npText = nps.length ? `NP: ${nps.join(", ")}` : t("No NP");
@@ -1896,6 +2023,8 @@ export function createPresetWizard({
     state.activeWave = 1;
     state.pendingTargetSkill = null;
     state.autoNamedValue = "";
+    state.equips = null;
+    state.equipsError = false;
   }
 
   return { render, reset };
