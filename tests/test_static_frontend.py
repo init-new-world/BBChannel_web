@@ -384,10 +384,12 @@ def test_operator_console_references_api_controls():
     assert "apple: els.fullRunApple.value" in script
     assert "CONSOLE_PREFS_STORAGE_KEY" in script
     assert (STATIC_DIR / "preset-wizard.js").is_file()
+    assert (STATIC_DIR / "visual-select.js").is_file()
     assert 'id="new-setting-wizard"' in index
     assert 'id="preset-editor-mode-switch"' in index
     assert 'id="preset-mode-wizard"' in index
     assert 'id="preset-mode-pro"' in index
     assert 'id="preset-wizard-root"' in index
     assert "createPresetWizard" in script
+    assert "closeActiveVisualSelect" in script
 

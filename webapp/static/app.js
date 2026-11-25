@@ -6,6 +6,7 @@ import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnConditionsEditor } from "./preset-turn-conditions.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { createPresetWizard } from "./preset-wizard.js";
+import { closeActiveVisualSelect, createVisualSelect } from "./visual-select.js";
 import { attachScreenTouchController } from "./screen-touch.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
 import { changeReplaceSource, inspectReplaceSource } from "./turn-replace-source.js";
@@ -496,6 +497,92 @@ const presetTurnConditions = createPresetTurnConditionsEditor({
   onError: setPresetError,
 });
 
+function materialIconUrl(qualityName, materialName) {
+  if (!qualityName || !materialName) return "";
+  const qualityText = String(qualityName).trim();
+  if (!/素材$/.test(qualityText)) return "";
+  const tier = qualityText.replace(/素材$/, "").trim();
+  if (!tier) return "";
+  const path = `drop/素材掉落检测模板图/${tier}/${materialName}.png`;
+  return `/api/drop-templates/image?${new URLSearchParams({ path })}`;
+}
+
+const equipTemplateVisualSelect = createVisualSelect(els.equipTemplateList, {
+  kind: "ce",
+  showInlineThumb: false,
+  minPopoverWidth: 320,
+  getSearchPlaceholder: () => t("Filter CEs..."),
+  getEmptyText: () => t("No CE templates matched."),
+  getItems: () => state.equipTemplates.map((template) => {
+    const isActive = template.location === "active";
+    return {
+      value: equipTemplateKey(template),
+      label: template.name,
+      imageUrl: `/api/equip-templates/${encodeURIComponent(template.name)}/image?location=${template.location}`,
+      thumbKind: "ce",
+      badges: [
+        { text: isActive ? t("Active") : t("Archive"), className: isActive ? "swap-tag" : "" },
+        { text: template.precise ? t("precise") : t("simple") },
+      ],
+      searchText: `${template.location} ${template.precise ? "precise" : "simple"}`,
+    };
+  }),
+});
+
+const equipCandidateVisualSelect = createVisualSelect(els.equipCandidateList, {
+  kind: "ce",
+  showInlineThumb: false,
+  minPopoverWidth: 300,
+  getSearchPlaceholder: () => t("Search..."),
+  getEmptyText: () => t("No candidates"),
+  getItems: () => state.equipCandidates.map((candidate) => ({
+    value: candidate.id,
+    label: t("Row {row}", { row: candidate.row }),
+    subtitle: formatEquipCandidateKind(candidate.kind),
+    imageUrl: `data:image/png;base64,${candidate.image_base64}`,
+    thumbKind: "ce",
+  })),
+});
+
+const assistTagVisualSelect = createVisualSelect(els.assistTagList, {
+  kind: "ce",
+  showInlineThumb: false,
+  minPopoverWidth: 320,
+  getSearchPlaceholder: () => t("Search..."),
+  getEmptyText: () => t("No tags"),
+  getItems: () => {
+    const endpoint = `/api/${state.assistTagMode}-tags`;
+    return state.assistTags.map((tag) => ({
+      value: tag.name,
+      label: assistTagDisplayName(tag.name),
+      subtitle: `${tag.image_size[0]}×${tag.image_size[1]} · ${Number(tag.threshold)}`,
+      imageUrl: `${endpoint}/${encodeURIComponent(tag.name)}/image`,
+      thumbKind: "ce",
+      searchText: tag.name,
+    }));
+  },
+});
+
+const materialVisualSelect = createVisualSelect(els.materialName, {
+  kind: "drop",
+  showInlineThumb: true,
+  minPopoverWidth: 280,
+  getSearchPlaceholder: () => t("Search..."),
+  getEmptyText: () => t("No matching options."),
+  getInlineThumb: () => {
+    const mat = els.materialName?.value || "";
+    if (!mat) return { url: "", isNone: true };
+    return { url: materialIconUrl(els.materialQuality?.value, mat), isNone: false };
+  },
+  getItems: () => [...(els.materialName?.options || [])].map((opt) => ({
+    value: opt.value,
+    label: opt.textContent || opt.value,
+    disabled: opt.disabled,
+    imageUrl: materialIconUrl(els.materialQuality?.value, opt.value),
+    thumbKind: "drop",
+  })),
+});
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -582,6 +669,7 @@ function applySavedConsolePrefs() {
 }
 
 function setActiveJobTab(tabName, persist = true) {
+  closeActiveVisualSelect();
   const validTabs = new Set(["battle", "events", "tools"]);
   const next = validTabs.has(tabName) ? tabName : "battle";
   state.activeJobTab = next;
@@ -2074,10 +2162,12 @@ function updateMaterialNames() {
   if (materials.includes(preferredMaterial)) {
     els.materialName.value = preferredMaterial;
   }
+  materialVisualSelect.sync();
 }
 
 async function queryMaterialDrops(event) {
   event?.preventDefault();
+  materialVisualSelect.sync();
   const server = els.materialServer.value;
   const quality = els.materialQuality.value;
   const material = els.materialName.value;
@@ -2324,6 +2414,7 @@ const presetWizard = createPresetWizard({
 });
 
 function setPresetEditorUiMode(mode) {
+  closeActiveVisualSelect();
   const editor = state.presetEditor;
   const isSetting = editor?.kind === "settings";
   const resolved = isSetting && mode === "wizard" ? "wizard" : "pro";
@@ -2445,6 +2536,7 @@ async function exportSelectedSetting() {
 }
 
 function closePresetEditor() {
+  closeActiveVisualSelect();
   state.presetOpenSequence += 1;
   els.presetDialog.close();
   state.presetEditor = null;
@@ -6225,6 +6317,9 @@ function updateControls() {
   els.assistTagBindingStatus.textContent = binding ? `Bound as ${binding.code}`
     : els.settingSelect.value ? "Not bound" : "No script selected";
   els.deleteAssistTag.disabled = state.assistTagBusy || !assistTag;
+  equipTemplateVisualSelect.sync();
+  equipCandidateVisualSelect.sync();
+  assistTagVisualSelect.sync();
 }
 
 function mergeDevice(device) {

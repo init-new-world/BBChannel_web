@@ -1,5 +1,27 @@
 import { t } from "./i18n.js";
 import { editTeamSource, editUsedServantsSource, inspectTeamSource } from "./team-source.js";
+import { createVisualSelect } from "./visual-select.js";
+
+const STANDARD_CLASSES = new Set([
+  "Saber", "Archer", "Lancer", "Rider", "Caster", "Assassin", "Berserker",
+]);
+
+function servantPortraitUrl(name, server, faceIndex = null) {
+  const params = new URLSearchParams({ name, server: server || "CH" });
+  if (Number.isInteger(faceIndex) && faceIndex > 0) {
+    params.set("face", String(faceIndex));
+  }
+  return `/api/servants/image?${params.toString()}`;
+}
+
+function masterPortraitUrl(sn, sex = 0) {
+  const params = new URLSearchParams({ equip: String(sn), sex: String(sex === 1 ? 1 : 0) });
+  return `/api/masters/image?${params.toString()}`;
+}
+
+function skillIconUrl(iconName) {
+  return `/api/skills/icon?name=${encodeURIComponent(iconName)}`;
+}
 
 export function createPresetTeamEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-team");
@@ -19,6 +41,192 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
   const masterRetry = document.querySelector("#retry-master-catalog");
   const usedSlots = [...document.querySelectorAll("[data-team-used]")];
   const usedStatus = document.querySelector("#preset-used-status");
+
+  function findServantEntry(servants, rawName) {
+    if (!rawName || !Array.isArray(servants)) return null;
+    return servants.find((s) => s.name === rawName)
+      || servants.find((s) => Array.isArray(s.aliases) && s.aliases.includes(rawName))
+      || null;
+  }
+
+  function currentTeamServer() {
+    const editor = getEditor();
+    const catServer = editor?.teamCatalog?.server;
+    if (catServer) return catServer;
+    const raw = serverSelect?.value || "CH";
+    return ["CH", "CNTW", "JP"].includes(raw) ? raw : "CH";
+  }
+
+  const slotVisualSelects = slots.map((select) => createVisualSelect(select, {
+    kind: "servant",
+    showInlineThumb: true,
+    minPopoverWidth: 360,
+    getSearchPlaceholder: () => t("Search name or nickname (e.g. 光狐, 术呆, 摩根)..."),
+    getEmptyText: () => t("No servants match the current filters."),
+    getInlineThumb: () => {
+      const val = select.value;
+      if (!val) return { url: "", isNone: true };
+      const servants = getEditor()?.teamCatalog?.servants || [];
+      const info = findServantEntry(servants, val);
+      const server = currentTeamServer();
+      return {
+        url: servantPortraitUrl(info?.name || val, server, info?.face_index),
+        isNone: false,
+      };
+    },
+    getFilters: () => [
+      {
+        key: "star",
+        label: t("Rarity"),
+        defaultValue: "all",
+        options: [
+          { value: "all", label: t("All") },
+          { value: "5", label: "5★" },
+          { value: "4", label: "4★" },
+          { value: "3", label: "3★" },
+          { value: "low", label: "≤2★" },
+        ],
+        predicate: (item, val) => {
+          if (item.isNone) return true;
+          const star = item.filterMeta?.star;
+          if (typeof star !== "number") return false;
+          if (val === "low") return star >= 0 && star <= 2;
+          return star === Number(val);
+        },
+      },
+      {
+        key: "class",
+        label: t("Class"),
+        defaultValue: "all",
+        options: [
+          { value: "all", label: t("All") },
+          { value: "Saber", label: t("Saber") },
+          { value: "Archer", label: t("Archer") },
+          { value: "Lancer", label: t("Lancer") },
+          { value: "Rider", label: t("Rider") },
+          { value: "Caster", label: t("Caster") },
+          { value: "Assassin", label: t("Assassin") },
+          { value: "Berserker", label: t("Berserker") },
+          { value: "Extra", label: t("Extra") },
+        ],
+        predicate: (item, val) => {
+          if (item.isNone) return true;
+          const cls = item.filterMeta?.class;
+          if (!cls) return false;
+          if (val === "Extra") return !STANDARD_CLASSES.has(cls);
+          return cls === val;
+        },
+      },
+    ],
+    getItems: () => {
+      const servants = getEditor()?.teamCatalog?.servants || [];
+      const byName = new Map(servants.map((s) => [s.name, s]));
+      const server = currentTeamServer();
+      return [...select.options].map((opt) => {
+        if (opt.value === "" && !opt.disabled) {
+          return {
+            value: "",
+            label: opt.textContent || t("None"),
+            isNone: true,
+            thumbKind: "servant",
+          };
+        }
+        const info = byName.get(opt.value) || findServantEntry(servants, opt.value);
+        const badges = [];
+        if (typeof info?.star === "number") {
+          badges.push({ text: `${info.star}★`, className: `star-${info.star}` });
+        }
+        if (info?.np_color) {
+          badges.push({ text: info.np_color, className: `np-${String(info.np_color).toLowerCase()}` });
+        }
+        if (info?.class) {
+          badges.push({ text: t(info.class), className: "class-tag" });
+        }
+        const aliases = Array.isArray(info?.aliases) ? info.aliases.filter(Boolean) : [];
+        return {
+          value: opt.value,
+          label: opt.textContent || opt.value,
+          disabled: opt.disabled,
+          imageUrl: opt.value ? servantPortraitUrl(info?.name || opt.value, server, info?.face_index) : "",
+          thumbKind: "servant",
+          badges,
+          subtitle: aliases.slice(0, 4).join(" / "),
+          searchText: `${info?.class || ""} ${aliases.join(" ")}`,
+          filterMeta: { star: info?.star, class: info?.class },
+        };
+      });
+    },
+  }));
+
+  const masterVisualSelect = createVisualSelect(master, {
+    kind: "master",
+    showInlineThumb: false,
+    minPopoverWidth: 380,
+    getSearchPlaceholder: () => t("Search master outfits or skills (e.g. Order Change, NP)..."),
+    getEmptyText: () => t("No outfits match the current search."),
+    getItems: () => {
+      const masters = getEditor()?.masterCatalog?.masters || [];
+      const bySn = new Map(masters.map((m) => [String(m.sn), m]));
+      const sex = masterSex.value === "1" ? 1 : 0;
+      return [...master.options].map((opt) => {
+        if (opt.value === "" && !opt.disabled) {
+          return {
+            value: "",
+            label: opt.textContent || t("None"),
+            isNone: true,
+            thumbKind: "master",
+          };
+        }
+        const info = bySn.get(opt.value);
+        const badges = [];
+        if (Array.isArray(info?.skill_types) && info.skill_types.includes(3)) {
+          badges.push({ text: t("Order Change"), className: "swap-tag" });
+        }
+        const skillIcons = [];
+        const skillSearchParts = [];
+        for (let i = 0; i < 3; i += 1) {
+          const iconKey = typeof info?.skills?.[i] === "string" ? info.skills[i].trim() : "";
+          const detailObj = info?.skill_details?.[i];
+          const skName = typeof detailObj?.name === "string" ? detailObj.name.trim() : "";
+          const skDetail = typeof detailObj?.detail === "string" ? detailObj.detail.trim() : "";
+          const shortLabel = skName || iconKey;
+          if (iconKey || shortLabel) {
+            skillIcons.push({
+              url: iconKey ? skillIconUrl(iconKey) : "",
+              label: shortLabel,
+              tooltip: skDetail ? `${shortLabel}: ${skDetail}` : shortLabel,
+            });
+          }
+          if (iconKey) skillSearchParts.push(iconKey);
+          if (skName) skillSearchParts.push(skName);
+          if (skDetail) skillSearchParts.push(skDetail);
+        }
+        if (Array.isArray(info?.skill_types) && info.skill_types.includes(3)) {
+          skillSearchParts.push("换人 order change swap");
+        }
+        return {
+          value: opt.value,
+          label: opt.textContent || opt.value,
+          disabled: opt.disabled,
+          imageUrl: info ? masterPortraitUrl(info.sn, sex) : "",
+          thumbKind: "master",
+          badges,
+          skillIcons,
+          searchText: skillSearchParts.join(" "),
+        };
+      });
+    },
+  });
+
+  function syncVisualControls() {
+    slotVisualSelects.forEach((v) => v.sync());
+    masterVisualSelect.sync();
+  }
+
+  function closeVisualControls() {
+    slotVisualSelects.forEach((v) => v.close());
+    masterVisualSelect.close();
+  }
 
   function readConfig() {
     const config = JSON.parse(source.value);
@@ -219,7 +427,10 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
     const editor = getEditor();
     section.hidden = editor?.kind !== "settings";
     controls.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy);
-    if (editor?.kind !== "settings") return;
+    if (editor?.kind !== "settings") {
+      closeVisualControls();
+      return;
+    }
     if (!editor.teamInitialized) {
       section.open = false;
       editor.teamInitialized = true;
@@ -241,6 +452,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
       editor.masterPortrait = null;
       masterPreview.hidden = true;
       masterPortrait.replaceChildren();
+      syncVisualControls();
       return;
     }
     renderServer(config);
@@ -254,6 +466,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
       renderSlots(config, null);
       status.textContent = t("Unsupported server.");
       protectAmbiguous(editor, info.ambiguous);
+      syncVisualControls();
       return;
     }
     let catalog = editor.teamCatalog;
@@ -268,6 +481,7 @@ export function createPresetTeamEditor({ getEditor, source, request, onChange, o
       : catalog.state === "error" ? catalog.error
         : t("{count} servants ({server})", { count: catalog.servants.length, server });
     protectAmbiguous(editor, info.ambiguous);
+    syncVisualControls();
   }
 
   function update(event) {

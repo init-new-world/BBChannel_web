@@ -1,4 +1,19 @@
 import { t } from "./i18n.js";
+import { createVisualSelect } from "./visual-select.js";
+
+function dropImageUrl(path) {
+  return `/api/drop-templates/image?${new URLSearchParams({ path })}`;
+}
+
+function splitDropDisplay(relPath) {
+  const clean = String(relPath || "");
+  const slashIdx = clean.lastIndexOf("/");
+  if (slashIdx < 0) return { fileName: clean, folder: "" };
+  return {
+    fileName: clean.slice(slashIdx + 1),
+    folder: clean.slice(0, slashIdx),
+  };
+}
 
 export function createPresetDropEditor({ getEditor, source, request, onChange, onError }) {
   const section = document.querySelector("#preset-drop-options");
@@ -8,6 +23,43 @@ export function createPresetDropEditor({ getEditor, source, request, onChange, o
   const preview = document.querySelector("#preset-drop-preview");
   const status = document.querySelector("#preset-drop-status");
   const previewStatus = document.querySelector("#preset-drop-preview-status");
+
+  const visualPicker = createVisualSelect(picker, {
+    kind: "drop",
+    showInlineThumb: false,
+    minPopoverWidth: 360,
+    getSearchPlaceholder: () => t("Search drop templates..."),
+    getEmptyText: () => t("No drop templates matched."),
+    getItems: () => [...picker.options].map((opt) => {
+      if (opt.value === "") {
+        return {
+          value: "",
+          label: opt.textContent || t("None"),
+          isNone: true,
+          thumbKind: "drop",
+        };
+      }
+      if (opt.value === "__current__") {
+        return {
+          value: "__current__",
+          label: opt.textContent || "",
+          disabled: true,
+          thumbKind: "drop",
+        };
+      }
+      const rawRel = opt.value.startsWith("drop/") ? opt.value.slice(5) : opt.value;
+      const { fileName, folder } = splitDropDisplay(rawRel);
+      return {
+        value: opt.value,
+        label: fileName || opt.textContent || opt.value,
+        subtitle: folder,
+        disabled: opt.disabled,
+        imageUrl: dropImageUrl(opt.value),
+        thumbKind: "drop",
+        searchText: `${rawRel} ${opt.textContent || ""}`,
+      };
+    }),
+  });
 
   function readConfig() {
     const config = JSON.parse(source.value);
@@ -46,7 +98,7 @@ export function createPresetDropEditor({ getEditor, source, request, onChange, o
     image.width = 88;
     image.height = 96;
     image.dataset.path = path;
-    image.src = `/api/drop-templates/image?${new URLSearchParams({ path })}`;
+    image.src = dropImageUrl(path);
     image.addEventListener("error", () => {
       if (getEditor() === editor && preview.firstElementChild === image) {
         image.hidden = true;
@@ -60,7 +112,10 @@ export function createPresetDropEditor({ getEditor, source, request, onChange, o
     const editor = getEditor();
     section.hidden = editor?.kind !== "settings";
     controls.disabled = editor?.kind !== "settings" || Boolean(editor?.saving || editor?.strategyApplyBusy);
-    if (editor?.kind !== "settings") return;
+    if (editor?.kind !== "settings") {
+      visualPicker.close();
+      return;
+    }
     if (!editor.dropsInitialized) {
       section.open = false;
       editor.dropsInitialized = true;
@@ -71,6 +126,7 @@ export function createPresetDropEditor({ getEditor, source, request, onChange, o
     } catch {
       controls.disabled = true;
       status.textContent = t("Invalid script JSON.");
+      visualPicker.sync();
       return;
     }
     const configured = typeof config.dropImage === "string" ? config.dropImage : null;
@@ -101,6 +157,7 @@ export function createPresetDropEditor({ getEditor, source, request, onChange, o
         : Object.hasOwn(config, "dropImage") && !resolved ? t("Drop image unavailable or ambiguous.")
           : t("{count} drop templates", { count: paths.length });
     renderPreview(editor, resolved);
+    visualPicker.sync();
   }
 
   picker.addEventListener("change", () => {
