@@ -206,6 +206,7 @@ export function createPresetWizard({
   getStrategies,
   onChange,
   onSwitchToPro,
+  onEditStrategy = null,
 }) {
   const state = {
     step: 0,
@@ -1657,63 +1658,84 @@ export function createPresetWizard({
     }
     npBox.append(npChips);
 
-    // Optional strategy selector
+    // Optional strategy selector + direct New / Edit buttons
     const stratList = typeof getStrategies === "function" ? getStrategies() : [];
-    if (stratList.length) {
-      const stratRow = document.createElement("div");
-      stratRow.className = "wizard-strategy-inline";
-      const stratSel = document.createElement("select");
-      stratSel.className = "field";
-      const emptyOpt = document.createElement("option");
-      emptyOpt.value = "";
-      emptyOpt.textContent = t("Optional card strategy preset...");
-      stratSel.append(emptyOpt);
-      for (const st of stratList) {
-        const opt = document.createElement("option");
-        opt.value = st.name;
-        opt.textContent = st.name;
-        stratSel.append(opt);
-      }
-      const applyBtn = document.createElement("button");
-      applyBtn.type = "button";
-      applyBtn.className = "ghost-button";
-      applyBtn.textContent = t("Apply");
-      applyBtn.addEventListener("click", async () => {
-        if (!stratSel.value) return;
-        try {
-          const detail = await request(`/api/strategies/${encodeURIComponent(stratSel.value)}`);
-          if (detail?.validation?.ok === false) return;
-          const unwrapped = (Array.isArray(detail?.entries) ? detail.entries : [])
-            .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry) && entry.strategy && typeof entry.strategy === "object" ? entry.strategy : entry))
-            .filter((item) => item && typeof item === "object" && !Array.isArray(item) && item.card1 && item.card2 && item.card3);
-          if (!unwrapped.length) return;
-          writeConfig((draft) => {
-            draft[`round${wave}_turns`] = Math.max(1, Number(draft[`round${wave}_turns`] || 0));
-            draft[stratKey] = unwrapped;
-          });
-        } catch {
-          // Ignore failed strategy load.
-        }
-      });
-      const currentStrat = Array.isArray(config[stratKey]) && config[stratKey].length
-        ? t("{count} strategy entries applied", { count: config[stratKey].length })
-        : "";
-      stratRow.append(stratSel, applyBtn);
-      if (currentStrat) {
-        const badge = document.createElement("span");
-        badge.className = "wizard-picker-count";
-        badge.textContent = currentStrat;
-        const clearStratBtn = document.createElement("button");
-        clearStratBtn.type = "button";
-        clearStratBtn.className = "chip-button";
-        clearStratBtn.textContent = t("Clear");
-        clearStratBtn.addEventListener("click", () => {
-          writeConfig((draft) => { delete draft[stratKey]; });
-        });
-        stratRow.append(badge, clearStratBtn);
-      }
-      npBox.append(stratRow);
+    const stratRow = document.createElement("div");
+    stratRow.className = "wizard-strategy-inline";
+    const stratSel = document.createElement("select");
+    stratSel.className = "field";
+    const emptyOpt = document.createElement("option");
+    emptyOpt.value = "";
+    emptyOpt.textContent = stratList.length ? t("Optional card strategy preset...") : t("No presets available");
+    stratSel.append(emptyOpt);
+    for (const st of stratList) {
+      const opt = document.createElement("option");
+      opt.value = st.name;
+      opt.textContent = st.name;
+      stratSel.append(opt);
     }
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "ghost-button";
+    applyBtn.textContent = t("Apply");
+    applyBtn.disabled = !stratList.length;
+    applyBtn.addEventListener("click", async () => {
+      if (!stratSel.value) return;
+      try {
+        const detail = await request(`/api/strategies/${encodeURIComponent(stratSel.value)}`);
+        if (detail?.validation?.ok === false) return;
+        const unwrapped = (Array.isArray(detail?.entries) ? detail.entries : [])
+          .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry) && entry.strategy && typeof entry.strategy === "object" ? entry.strategy : entry))
+          .filter((item) => item && typeof item === "object" && !Array.isArray(item) && item.card1 && item.card2 && item.card3);
+        if (!unwrapped.length) return;
+        writeConfig((draft) => {
+          draft[`round${wave}_turns`] = Math.max(1, Number(draft[`round${wave}_turns`] || 0));
+          draft[stratKey] = unwrapped;
+        });
+      } catch {
+        // Ignore failed strategy load.
+      }
+    });
+    stratRow.append(stratSel, applyBtn);
+    if (typeof onEditStrategy === "function") {
+      const newStratBtn = document.createElement("button");
+      newStratBtn.type = "button";
+      newStratBtn.className = "chip-button";
+      newStratBtn.textContent = `+ ${t("New Strategy")}`;
+      newStratBtn.addEventListener("click", () => {
+        onEditStrategy({ mode: "new", name: "", wave, stratKey });
+      });
+      const editStratBtn = document.createElement("button");
+      editStratBtn.type = "button";
+      editStratBtn.className = "chip-button";
+      editStratBtn.textContent = t("Edit");
+      editStratBtn.disabled = !stratSel.value;
+      stratSel.addEventListener("change", () => {
+        editStratBtn.disabled = !stratSel.value;
+      });
+      editStratBtn.addEventListener("click", () => {
+        if (!stratSel.value) return;
+        onEditStrategy({ mode: "edit", name: stratSel.value, wave, stratKey });
+      });
+      stratRow.append(newStratBtn, editStratBtn);
+    }
+    const currentStrat = Array.isArray(config[stratKey]) && config[stratKey].length
+      ? t("{count} strategy entries applied", { count: config[stratKey].length })
+      : "";
+    if (currentStrat) {
+      const badge = document.createElement("span");
+      badge.className = "wizard-picker-count";
+      badge.textContent = currentStrat;
+      const clearStratBtn = document.createElement("button");
+      clearStratBtn.type = "button";
+      clearStratBtn.className = "chip-button";
+      clearStratBtn.textContent = t("Clear");
+      clearStratBtn.addEventListener("click", () => {
+        writeConfig((draft) => { delete draft[stratKey]; });
+      });
+      stratRow.append(badge, clearStratBtn);
+    }
+    npBox.append(stratRow);
     container.append(npBox);
 
     // Action Timeline
@@ -2040,5 +2062,12 @@ export function createPresetWizard({
     state.equipsError = false;
   }
 
-  return { render, reset };
+  function restoreWaveStep(step, wave) {
+    if (Number.isInteger(step) && step >= 0 && step <= 3) state.step = step;
+    if (Number.isInteger(wave) && wave >= 1) state.activeWave = wave;
+    state.pendingTargetSkill = null;
+    render();
+  }
+
+  return { render, reset, restoreWaveStep };
 }

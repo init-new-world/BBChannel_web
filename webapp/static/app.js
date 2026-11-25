@@ -6,6 +6,7 @@ import { createPresetDropEditor } from "./preset-drops.js";
 import { createPresetTurnConditionsEditor } from "./preset-turn-conditions.js";
 import { createPresetTurnSkillsEditor } from "./preset-turn-skills.js";
 import { createPresetWizard } from "./preset-wizard.js";
+import { createVisualStrategyEnhancer } from "./preset-strategy-visual.js";
 import { closeActiveVisualSelect, createVisualSelect } from "./visual-select.js";
 import { attachScreenTouchController } from "./screen-touch.js";
 import { changeNpSource, inspectNpSource } from "./turn-nps-source.js";
@@ -2762,7 +2763,87 @@ const presetWizard = createPresetWizard({
     setPresetError("");
   },
   onSwitchToPro: () => setPresetEditorUiMode("pro"),
+  onEditStrategy: (opts) => openStrategyFromWizard(opts),
 });
+
+const visualStrategyEnhancer = createVisualStrategyEnhancer({
+  fieldset: els.presetStrategyRules,
+  cardRows: els.presetStrategyCards,
+  translate: t,
+  getEntriesState: () => {
+    const editor = state.presetEditor;
+    if (editor?.kind !== "strategies") return { isStrategy: false };
+    try {
+      const entries = JSON.parse(els.presetJson.value);
+      if (!Array.isArray(entries) || !entries.length) return { isStrategy: true, strategy: null, disabled: true };
+      const idx = Math.max(0, Math.min(editor.strategyIndex || 0, entries.length - 1));
+      return {
+        isStrategy: true,
+        strategy: entries[idx]?.strategy || null,
+        disabled: Boolean(els.presetStrategyRules.disabled || editor.saving),
+      };
+    } catch {
+      return { isStrategy: true, strategy: null, disabled: true };
+    }
+  },
+  applyStrategyMutation: (mutator) => {
+    const editor = state.presetEditor;
+    if (editor?.kind !== "strategies" || els.presetStrategyRules.disabled || editor.saving) return;
+    try {
+      const entries = JSON.parse(els.presetJson.value);
+      if (!Array.isArray(entries) || !entries.length) return;
+      const idx = Math.max(0, Math.min(editor.strategyIndex || 0, entries.length - 1));
+      const entry = entries[idx];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+      mutator(entry, idx, entries);
+      if (editor.strategyDrafts) {
+        const prefix = `${idx}.card`;
+        Object.keys(editor.strategyDrafts).forEach((key) => {
+          if (key.startsWith(prefix)) delete editor.strategyDrafts[key];
+        });
+      }
+      els.presetJson.value = JSON.stringify(entries, null, 2);
+      renderPresetStrategyRules();
+      setPresetError(Object.values(editor.strategyDrafts || {})[0]?.error || "");
+    } catch (error) {
+      setPresetError(error.message);
+    }
+  },
+});
+
+els.presetName.addEventListener("input", () => {
+  const editor = state.presetEditor;
+  if (editor?.kind !== "strategies" || editor.originalName || els.presetStrategyRules.disabled) return;
+  const typed = els.presetName.value.trim();
+  if (!typed) return;
+  try {
+    const entries = JSON.parse(els.presetJson.value);
+    if (!Array.isArray(entries) || entries.length !== 1) return;
+    const currentTag = entries[0]?.tag;
+    if (currentTag === "Entry 1" || (editor.lastAutoTag && currentTag === editor.lastAutoTag)) {
+      entries[0].tag = typed;
+      editor.lastAutoTag = typed;
+      if (editor.strategyDrafts) delete editor.strategyDrafts["0.tag"];
+      els.presetJson.value = JSON.stringify(entries, null, 2);
+      renderPresetStrategyRules();
+    }
+  } catch {
+    // Ignore malformed JSON during manual typing.
+  }
+});
+
+function openStrategyFromWizard({ mode = "new", name = "", wave = 1, stratKey = "" } = {}) {
+  if (!state.presetEditor || state.presetEditor.kind !== "settings") return;
+  state.returnToWizard = {
+    editor: { ...state.presetEditor },
+    name: els.presetName.value,
+    json: els.presetJson.value,
+    wizardStep: 2,
+    wave,
+    stratKey,
+  };
+  void openPresetEditor("strategies", mode, { name });
+}
 
 function setPresetEditorUiMode(mode) {
   closeActiveVisualSelect();
@@ -2780,6 +2861,7 @@ function setPresetEditorUiMode(mode) {
   }
   els.presetForm.classList.toggle("wizard-mode", resolved === "wizard");
   els.presetDialog.classList.toggle("wizard-mode", resolved === "wizard");
+  els.presetForm.classList.toggle("strategy-mode", editor?.kind === "strategies");
   els.presetForm.noValidate = resolved === "wizard";
   if (resolved === "wizard") {
     presetWizard.render();
@@ -2793,7 +2875,9 @@ async function openPresetEditor(kind, mode, options = {}) {
   const isSetting = kind === "settings";
   const editing = mode === "edit";
   const usesSource = mode !== "new";
-  const selectedName = isSetting ? els.settingSelect.value : els.strategySelect.value;
+  const selectedName = typeof options?.name === "string" && options.name
+    ? options.name
+    : (isSetting ? els.settingSelect.value : els.strategySelect.value);
   if (usesSource && !selectedName) {
     return;
   }
@@ -2816,9 +2900,9 @@ async function openPresetEditor(kind, mode, options = {}) {
       titleKey: `${action} ${isSetting ? "Script" : "Strategy"}`,
       uiMode: initialUiMode,
     };
-    presetWizard.reset();
+    if (isSetting) presetWizard.reset();
     els.presetDialogTitle.textContent = t(state.presetEditor.titleKey);
-    els.presetDialog.showModal();
+    if (!els.presetDialog.open) els.presetDialog.showModal();
     els.presetName.value = editing ? selectedName : "";
     els.presetJson.value = source ?? JSON.stringify(value, null, 2);
     setPresetEditorUiMode(initialUiMode);
@@ -2887,12 +2971,48 @@ async function exportSelectedSetting() {
   }
 }
 
-function closePresetEditor() {
+async function closePresetEditor({ savedStrategyName = null } = {}) {
   closeActiveVisualSelect();
   state.presetOpenSequence += 1;
+  if (state.presetEditor?.kind === "strategies" && state.returnToWizard) {
+    const saved = state.returnToWizard;
+    state.returnToWizard = null;
+    state.presetEditor = saved.editor;
+    els.presetDialogTitle.textContent = t(saved.editor.titleKey || "Edit Script");
+    els.presetName.value = saved.name;
+    let nextJson = saved.json;
+    if (savedStrategyName && saved.stratKey) {
+      try {
+        const detail = await api(`/api/strategies/${encodeURIComponent(savedStrategyName)}`);
+        if (detail?.validation?.ok !== false && Array.isArray(detail?.entries)) {
+          const unwrapped = detail.entries
+            .map((entry) => (entry && typeof entry === "object" && !Array.isArray(entry) && entry.strategy && typeof entry.strategy === "object" ? entry.strategy : entry))
+            .filter((item) => item && typeof item === "object" && !Array.isArray(item) && item.card1 && item.card2 && item.card3);
+          if (unwrapped.length) {
+            const parsed = JSON.parse(nextJson);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              parsed[`round${saved.wave}_turns`] = Math.max(1, Number(parsed[`round${saved.wave}_turns`] || 0));
+              parsed[saved.stratKey] = unwrapped;
+              nextJson = JSON.stringify(parsed, null, 2);
+            }
+          }
+        }
+      } catch {
+        // Restore script without overwriting if strategy reload fails.
+      }
+    }
+    els.presetJson.value = nextJson;
+    if (!els.presetDialog.open) els.presetDialog.showModal();
+    setPresetEditorUiMode("wizard");
+    presetWizard.restoreWaveStep(saved.wizardStep, saved.wave);
+    renderPresetFields();
+    setPresetError("");
+    return;
+  }
+  state.returnToWizard = null;
   els.presetDialog.close();
   state.presetEditor = null;
-  els.presetForm.classList.remove("wizard-mode");
+  els.presetForm.classList.remove("wizard-mode", "strategy-mode");
   els.presetDialog.classList.remove("wizard-mode");
   if (els.presetWizardRoot) els.presetWizardRoot.hidden = true;
   if (els.presetModeSwitch) els.presetModeSwitch.hidden = true;
@@ -3603,6 +3723,7 @@ function renderPresetStrategyRules() {
   els.presetStrategyRules.hidden = !isStrategy;
   els.presetStrategyRules.disabled = true;
   if (!isStrategy) {
+    visualStrategyEnhancer.render();
     return;
   }
   els.presetStrategyEntry.replaceChildren();
@@ -3680,6 +3801,7 @@ function renderPresetStrategyRules() {
       }
     });
   });
+  visualStrategyEnhancer.render();
 }
 
 function updatePresetStrategyCard(event) {
@@ -3861,11 +3983,12 @@ async function savePreset(event) {
       method: "PUT",
       body: JSON.stringify(request),
     });
-    if (state.presetEditor === editor) closePresetEditor();
     if (isSetting) {
+      if (state.presetEditor === editor) await closePresetEditor();
       await loadSettings(name);
     } else {
       await loadStrategies(name);
+      if (state.presetEditor === editor) await closePresetEditor({ savedStrategyName: name });
     }
   } catch (error) {
     if (state.presetEditor === editor) setPresetError(error?.payload?.error?.message || error.message || "Save failed.");
