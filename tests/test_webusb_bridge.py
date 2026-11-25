@@ -449,3 +449,72 @@ def test_ws_webusb_end_to_end_with_real_adb_binary_snapshot_and_tap(tmp_path: Pa
 
         assert closed_signal.wait(timeout=5.0)
         assert service.state().connected is False
+
+
+def test_webusb_rejects_cross_site_origin_and_protects_active_tcp_from_probes(tmp_path: Path):
+    import socket
+    from starlette.websockets import WebSocketDisconnect
+
+    from webapp.devices.webusb import read_adb_packet_from_stream
+
+    def _make_app(root: Path):
+        assets = root / "assets"
+        data = root / "data"
+        assets.mkdir(parents=True)
+        data.mkdir(parents=True)
+        event_log = EventLog()
+        backend = _FakeBridgeAdbBackend(available=True, require_auth_prompt=False)
+        service = DeviceService([backend], event_log)
+        manager = JobManager(JobDatabase(root / "runtime.db"))
+        app = create_app(assets, data, event_log=event_log, device_service=service, job_manager=manager)
+        return app, event_log, backend, service, manager
+
+    # 1. Cross-site Origin check
+    app, _event_log, _backend, _service, manager = _make_app(tmp_path / "p1")
+    with manager, create_test_client(app) as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect("/api/ws/webusb", headers={"origin": "https://evil.example"}):
+                pass
+        assert exc_info.value.code == 1008
+
+    # 2. AUTH packet with zero checksum gets backfilled for legacy Android adbd
+    async def _check_auth_checksum():
+        reader = asyncio.StreamReader()
+        payload = b"signature-payload"
+        cmd = int.from_bytes(b"AUTH", "little")
+        hdr = struct.pack("<6I", cmd, 2, 0, len(payload), 0, cmd ^ 0xFFFFFFFF)
+        reader.feed_data(hdr + payload)
+        reader.feed_eof()
+        parsed, raw = await read_adb_packet_from_stream(reader)
+        assert parsed.data_check == (sum(payload) & 0xFFFFFFFF)
+        assert len(raw) == ADB_HEADER_SIZE + len(payload)
+
+    asyncio.run(_check_auth_checksum())
+
+    # 3. Once primary ADB TCP connection attaches, listening port closes so stray probes cannot kill bridge
+    app2, _event_log2, _backend2, service2, manager2 = _make_app(tmp_path / "p2")
+    with manager2, create_test_client(app2) as client:
+        with client.websocket_connect("/api/ws/webusb?device_name=Pixel") as ws:
+            ready = ws.receive_json()
+            assert ready["type"] == "ready"
+            host, port_s = ready["endpoint"].split(":")
+            port = int(port_s)
+
+            # Wait for simulated adb_backend to connect and send CNXN
+            cnxn_from_adb = ws.receive_bytes()
+            assert validate_adb_packet(cnxn_from_adb).command == int.from_bytes(b"CNXN", "little")
+
+            # Stray local TCP probe must fail to connect (server closed after primary bound)
+            # OR be rejected without killing the active WebUSB bridge!
+            try:
+                with socket.create_connection((host, port), timeout=0.5) as probe:
+                    probe.sendall(b"PROBE")
+            except OSError:
+                pass
+
+            # Bridge must STILL be alive and respond to ping!
+            ws.send_json({"type": "ping"})
+            assert ws.receive_json() == {"type": "pong"}
+            ws.send_json({"type": "close"})
+    assert service2.state().connected is False
+

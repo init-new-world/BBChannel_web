@@ -610,12 +610,13 @@ class DeviceService:
         device_id: str,
     ) -> tuple[DeviceEndpoint, DeviceInfo]:
         backend = self._backend_for(backend_name)
-        devices = backend.list_devices()
-        matching_device = next((device for device in devices if device.device_id == device_id), None)
+        matching_device = None
+        find_device = getattr(backend, "find_device", None)
+        if callable(find_device):
+            matching_device = find_device(device_id)
         if matching_device is None:
-            find_device = getattr(backend, "find_device", None)
-            if callable(find_device):
-                matching_device = find_device(device_id)
+            devices = backend.list_devices()
+            matching_device = next((device for device in devices if device.device_id == device_id), None)
         if matching_device is None:
             raise AppError(
                 ErrorCode.DEVICE_NOT_FOUND,

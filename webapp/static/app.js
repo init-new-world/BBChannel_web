@@ -107,6 +107,7 @@ const state = {
   touchRefreshTimer: null,
   touchRefreshInFlight: false,
   webUsbSession: null,
+  webUsbBusy: false,
 };
 
 const els = {
@@ -3716,31 +3717,60 @@ function renderWebUsbButton() {
   els.webUsbAdb.title = `${t("Disconnect active browser WebUSB bridge")}${detail}`;
 }
 
+const WEBUSB_MAX_PENDING_WRITE_BYTES = 16 * 1024 * 1024;
+const WEBUSB_MAX_RESYNC_DROPS = 8;
+
 async function readUsbAligned(session, requestedBytes) {
   const packetSize = session.adbInterface.inPacketSize || 512;
   const capped = Math.min(Math.max(requestedBytes, packetSize), WEBUSB_MAX_READ_CHUNK_BYTES);
   const aligned = Math.ceil(capped / packetSize) * packetSize;
-  const result = await session.usbDevice.transferIn(session.adbInterface.inEndpointNumber, aligned);
-  if (result.status === "stall") {
-    await session.usbDevice.clearHalt("in", session.adbInterface.inEndpointNumber);
-    return new Uint8Array(0);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await session.usbDevice.transferIn(session.adbInterface.inEndpointNumber, aligned);
+    if (result.status === "stall") {
+      await session.usbDevice.clearHalt("in", session.adbInterface.inEndpointNumber);
+      if (attempt === 0) continue;
+      throw new Error("USB transferIn stalled repeatedly.");
+    }
+    if (result.status !== "ok" || !result.data) {
+      throw new Error(`USB transferIn failed (${result.status}).`);
+    }
+    return new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
   }
-  if (result.status !== "ok" || !result.data) {
-    throw new Error(`USB transferIn failed (${result.status}).`);
+  return new Uint8Array(0);
+}
+
+async function readNextUsbChunk(session, requestedBytes) {
+  if (session.inLeftover && session.inLeftover.byteLength > 0) {
+    const buf = session.inLeftover;
+    session.inLeftover = null;
+    return buf;
   }
-  return new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
+  return readUsbAligned(session, requestedBytes);
+}
+
+function concatUint8(a, b) {
+  if (!a || !a.byteLength) return b;
+  if (!b || !b.byteLength) return a;
+  const merged = new Uint8Array(a.byteLength + b.byteLength);
+  merged.set(a, 0);
+  merged.set(b, a.byteLength);
+  return merged;
 }
 
 async function pumpWebUsbIn(session) {
+  let resyncDrops = 0;
   try {
     while (!session.closed) {
       let headerChunk = null;
       while (!session.closed) {
-        const chunk = await readUsbAligned(session, ADB_HEADER_BYTES);
-        if (chunk.byteLength > 0) {
+        const chunk = await readNextUsbChunk(session, ADB_HEADER_BYTES);
+        if (chunk.byteLength === 0) continue;
+        if (headerChunk) {
+          headerChunk = concatUint8(headerChunk, chunk);
+        } else {
           headerChunk = chunk;
-          break;
         }
+        if (headerChunk.byteLength >= ADB_HEADER_BYTES) break;
       }
       if (!headerChunk || session.closed) return;
       if (headerChunk.byteLength < ADB_HEADER_BYTES) {
@@ -3751,20 +3781,33 @@ async function pumpWebUsbIn(session) {
       const dataLength = view.getUint32(12, true);
       const magic = view.getUint32(20, true);
       if (((command ^ 0xffffffff) >>> 0) !== magic || dataLength > ADB_MAX_PAYLOAD_BYTES) {
+        // Drain stale USB IN FIFO residue left over from a previous interrupted session.
+        if (!session.handshakeSeen && resyncDrops < WEBUSB_MAX_RESYNC_DROPS) {
+          resyncDrops += 1;
+          continue;
+        }
         throw new Error("Invalid ADB USB packet header.");
       }
+      session.handshakeSeen = true;
 
       const packet = new Uint8Array(ADB_HEADER_BYTES + dataLength);
       const initialCopy = Math.min(headerChunk.byteLength, packet.byteLength);
       packet.set(headerChunk.subarray(0, initialCopy), 0);
+      if (headerChunk.byteLength > packet.byteLength) {
+        session.inLeftover = headerChunk.slice(packet.byteLength);
+      }
       let offset = Math.max(0, initialCopy - ADB_HEADER_BYTES);
       while (offset < dataLength && !session.closed) {
-        const chunk = await readUsbAligned(session, dataLength - offset);
+        const chunk = await readNextUsbChunk(session, dataLength - offset);
         if (chunk.byteLength === 0) {
           break;
         }
-        const copyLen = Math.min(chunk.byteLength, dataLength - offset);
+        const remaining = dataLength - offset;
+        const copyLen = Math.min(chunk.byteLength, remaining);
         packet.set(chunk.subarray(0, copyLen), ADB_HEADER_BYTES + offset);
+        if (chunk.byteLength > copyLen) {
+          session.inLeftover = concatUint8(chunk.slice(copyLen), session.inLeftover);
+        }
         offset += copyLen;
       }
       if (session.closed) return;
@@ -3785,6 +3828,25 @@ async function pumpWebUsbIn(session) {
   }
 }
 
+async function transferOutStrict(session, data) {
+  const { outEndpointNumber } = session.adbInterface;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const res = await session.usbDevice.transferOut(outEndpointNumber, data);
+    if (res.status === "stall") {
+      await session.usbDevice.clearHalt("out", outEndpointNumber);
+      if (attempt === 0) continue;
+      throw new Error("USB transferOut stalled repeatedly.");
+    }
+    if (res.status !== "ok") {
+      throw new Error(`USB transferOut failed (${res.status}).`);
+    }
+    if (typeof res.bytesWritten === "number" && res.bytesWritten !== data.byteLength) {
+      throw new Error(`Short USB transferOut (${res.bytesWritten}/${data.byteLength} bytes).`);
+    }
+    return;
+  }
+}
+
 async function writeAdbPacketToUsb(session, arrayBuffer) {
   if (session.closed) return;
   const bytes = new Uint8Array(arrayBuffer);
@@ -3799,21 +3861,13 @@ async function writeAdbPacketToUsb(session, arrayBuffer) {
     throw new Error("Malformed ADB packet received from bridge.");
   }
 
-  const { outEndpointNumber, outPacketSize } = session.adbInterface;
-  const headerRes = await session.usbDevice.transferOut(
-    outEndpointNumber,
-    bytes.subarray(0, ADB_HEADER_BYTES),
-  );
-  if (headerRes.status === "stall") {
-    await session.usbDevice.clearHalt("out", outEndpointNumber);
-  }
+  const { outPacketSize } = session.adbInterface;
+  await transferOutStrict(session, bytes.subarray(0, ADB_HEADER_BYTES));
   if (dataLength > 0) {
     const payload = bytes.subarray(ADB_HEADER_BYTES);
-    const payloadRes = await session.usbDevice.transferOut(outEndpointNumber, payload);
-    if (payloadRes.status === "stall") {
-      await session.usbDevice.clearHalt("out", outEndpointNumber);
-    } else if (outPacketSize > 0 && dataLength % outPacketSize === 0) {
-      await session.usbDevice.transferOut(outEndpointNumber, new Uint8Array(0));
+    await transferOutStrict(session, payload);
+    if (outPacketSize > 0 && dataLength % outPacketSize === 0) {
+      await transferOutStrict(session, new Uint8Array(0));
     }
   }
 }
@@ -3825,6 +3879,7 @@ async function closeWebUsbSession({
 } = {}) {
   const session = targetSession || state.webUsbSession;
   if (!session || session.closed) return;
+  const wasConnected = session.status === "connected";
   session.closed = true;
   if (state.webUsbSession === session) {
     state.webUsbSession = null;
@@ -3847,12 +3902,20 @@ async function closeWebUsbSession({
     showNotice(t("WebUSB device disconnected."));
   }
   if (refreshBackend) {
+    if (wasConnected && state.connected) {
+      try {
+        await api("/api/disconnect", { method: "POST" });
+      } catch {
+        // Backend bridge cleanup may already have disconnected.
+      }
+    }
     await Promise.allSettled([loadConnectionState(), loadDevices(), loadEvents()]);
   }
   updateControls();
 }
 
 async function toggleWebUsbDevice() {
+  if (state.webUsbBusy) return;
   if (state.webUsbSession && !state.webUsbSession.closed) {
     if (state.connected && state.webUsbSession.status === "connected") {
       await disconnect();
@@ -3871,44 +3934,59 @@ async function toggleWebUsbDevice() {
     return;
   }
 
+  state.webUsbBusy = true;
   let usbDevice;
-  try {
-    usbDevice = await navigator.usb.requestDevice({ filters: [WEBUSB_ADB_FILTER] });
-  } catch (error) {
-    if (error?.name === "NotFoundError" || error?.name === "AbortError") {
-      return;
-    }
-    showError(error);
-    return;
-  }
-
   let adbInterface = null;
   try {
-    await usbDevice.open();
-    adbInterface = findAdbUsbInterface(usbDevice);
-    if (!adbInterface) {
-      await safeCloseUsbDevice(usbDevice, null);
-      showError(new Error(t("Selected USB device does not expose an ADB debugging interface. Enable USB debugging on the phone.")));
-      return;
-    }
-    if (!usbDevice.configuration || usbDevice.configuration.configurationValue !== adbInterface.configurationValue) {
-      await usbDevice.selectConfiguration(adbInterface.configurationValue);
-      adbInterface = findAdbUsbInterface(usbDevice) || adbInterface;
-    }
     try {
-      await usbDevice.claimInterface(adbInterface.interfaceNumber);
-      if (adbInterface.alternateSetting !== 0) {
-        await usbDevice.selectAlternateInterface(adbInterface.interfaceNumber, adbInterface.alternateSetting);
+      usbDevice = await navigator.usb.requestDevice({ filters: [WEBUSB_ADB_FILTER] });
+    } catch (error) {
+      if (error?.name === "NotFoundError" || error?.name === "AbortError") {
+        return;
       }
-    } catch {
-      await safeCloseUsbDevice(usbDevice, null);
-      showError(new Error(t("Unable to claim USB ADB interface. Run 'adb kill-server' on this computer to release the driver (Windows requires WinUSB driver).")));
+      showError(error);
       return;
     }
-  } catch (error) {
-    await safeCloseUsbDevice(usbDevice, adbInterface?.interfaceNumber ?? null);
-    showError(error);
-    return;
+
+    try {
+      await usbDevice.open();
+      adbInterface = findAdbUsbInterface(usbDevice);
+      if (!adbInterface) {
+        await safeCloseUsbDevice(usbDevice, null);
+        showError(new Error(t("Selected USB device does not expose an ADB debugging interface. Enable USB debugging on the phone.")));
+        return;
+      }
+      if (!usbDevice.configuration || usbDevice.configuration.configurationValue !== adbInterface.configurationValue) {
+        await usbDevice.selectConfiguration(adbInterface.configurationValue);
+        adbInterface = findAdbUsbInterface(usbDevice) || adbInterface;
+      }
+      try {
+        await usbDevice.claimInterface(adbInterface.interfaceNumber);
+        if (adbInterface.alternateSetting !== 0) {
+          await usbDevice.selectAlternateInterface(adbInterface.interfaceNumber, adbInterface.alternateSetting);
+        }
+        try {
+          await usbDevice.clearHalt("in", adbInterface.inEndpointNumber);
+        } catch {
+          // Best-effort endpoint reset on reconnect.
+        }
+        try {
+          await usbDevice.clearHalt("out", adbInterface.outEndpointNumber);
+        } catch {
+          // Best-effort endpoint reset on reconnect.
+        }
+      } catch {
+        await safeCloseUsbDevice(usbDevice, null);
+        showError(new Error(t("Unable to claim USB ADB interface. Run 'adb kill-server' on this computer to release the driver (Windows requires WinUSB driver).")));
+        return;
+      }
+    } catch (error) {
+      await safeCloseUsbDevice(usbDevice, adbInterface?.interfaceNumber ?? null);
+      showError(error);
+      return;
+    }
+  } finally {
+    state.webUsbBusy = false;
   }
 
   const deviceLabel = [usbDevice.manufacturerName, usbDevice.productName]
@@ -3931,6 +4009,9 @@ async function toggleWebUsbDevice() {
     endpoint: "",
     deviceLabel,
     writeChain: Promise.resolve(),
+    pendingWriteBytes: 0,
+    inLeftover: null,
+    handshakeSeen: false,
     closed: false,
   };
   state.webUsbSession = session;
@@ -3941,8 +4022,17 @@ async function toggleWebUsbDevice() {
     if (session.closed) return;
     if (event.data instanceof ArrayBuffer) {
       const buf = event.data;
+      session.pendingWriteBytes += buf.byteLength;
+      if (session.pendingWriteBytes > WEBUSB_MAX_PENDING_WRITE_BYTES) {
+        void closeWebUsbSession({ notify: true, refreshBackend: true, targetSession: session });
+        showError(new Error("WebUSB write queue overflowed."));
+        return;
+      }
       session.writeChain = session.writeChain
         .then(() => writeAdbPacketToUsb(session, buf))
+        .finally(() => {
+          session.pendingWriteBytes = Math.max(0, session.pendingWriteBytes - buf.byteLength);
+        })
         .catch(async (err) => {
           if (!session.closed) {
             await closeWebUsbSession({ notify: true, refreshBackend: true, targetSession: session });

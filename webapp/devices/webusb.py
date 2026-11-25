@@ -4,7 +4,9 @@ import asyncio
 from dataclasses import dataclass
 import json
 import struct
+import threading
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -19,6 +21,9 @@ ADB_MAX_PAYLOAD = 4 * 1024 * 1024
 CMD_CNXN = int.from_bytes(b"CNXN", "little")
 CMD_AUTH = int.from_bytes(b"AUTH", "little")
 AUTH_RSAPUBLICKEY = 3
+MAX_CONCURRENT_WEBUSB_BRIDGES = 4
+_ACTIVE_WEBUSB_BRIDGES_LOCK = threading.Lock()
+_ACTIVE_WEBUSB_BRIDGES = 0
 
 
 @dataclass(frozen=True)
@@ -65,7 +70,7 @@ async def read_adb_packet_from_stream(reader: asyncio.StreamReader) -> tuple[Adb
     header_bytes = await reader.readexactly(ADB_HEADER_SIZE)
     header = parse_adb_header(header_bytes)
     payload = await reader.readexactly(header.data_length) if header.data_length > 0 else b""
-    if header.command == CMD_CNXN and payload and header.data_check == 0:
+    if header.command in (CMD_CNXN, CMD_AUTH) and payload and header.data_check == 0:
         checksum = sum(payload) & 0xFFFFFFFF
         header_bytes = struct.pack(
             "<6I",
@@ -81,10 +86,35 @@ async def read_adb_packet_from_stream(reader: asyncio.StreamReader) -> tuple[Adb
 
 
 def _lookup_connected_device(device_service: DeviceService, endpoint: str) -> DeviceInfo | None:
+    try:
+        adb_backend = device_service._backend_for("adb")  # noqa: SLF001
+        find_device = getattr(adb_backend, "find_device", None)
+        if callable(find_device):
+            found = find_device(endpoint)
+            if found is not None:
+                return found
+    except Exception:
+        pass
     for item in device_service.list_devices():
         if item.backend == "adb" and item.device_id == endpoint:
             return item
     return None
+
+
+def _is_allowed_ws_origin(websocket: WebSocket) -> bool:
+    origin = (websocket.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    parsed_origin = urlparse(origin)
+    origin_host = (parsed_origin.hostname or "").lower()
+    if not origin_host:
+        return False
+    req_host_header = (websocket.headers.get("host") or "").strip()
+    req_host = (urlparse(f"//{req_host_header}").hostname or "").lower() if req_host_header else ""
+    if req_host and origin_host == req_host:
+        return True
+    loopback = {"localhost", "127.0.0.1", "::1"}
+    return origin_host in loopback and req_host in loopback
 
 
 async def run_webusb_adb_bridge(
@@ -97,6 +127,10 @@ async def run_webusb_adb_bridge(
     auth_timeout_seconds: float = 60.0,
     ready_poll_timeout_seconds: float = 5.0,
 ) -> None:
+    global _ACTIVE_WEBUSB_BRIDGES
+    if not _is_allowed_ws_origin(websocket):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     send_lock = asyncio.Lock()
     stop_event = asyncio.Event()
@@ -105,15 +139,15 @@ async def run_webusb_adb_bridge(
     writer_holder: list[asyncio.StreamWriter] = []
 
     async def send_json_locked(payload: dict[str, Any]) -> None:
-        if stop_event.is_set():
-            return
         async with send_lock:
+            if stop_event.is_set():
+                return
             await websocket.send_json(payload)
 
     async def send_bytes_locked(data: bytes) -> None:
-        if stop_event.is_set():
-            return
         async with send_lock:
+            if stop_event.is_set():
+                return
             await websocket.send_bytes(data)
 
     async def close_ws_locked() -> None:
@@ -123,16 +157,18 @@ async def run_webusb_adb_bridge(
             except Exception:
                 pass
 
-    adb_available = any(
-        cap.name == "adb" and cap.available for cap in device_service.capabilities()
-    )
-    if not adb_available:
+    acquired_slot = False
+    with _ACTIVE_WEBUSB_BRIDGES_LOCK:
+        if _ACTIVE_WEBUSB_BRIDGES < MAX_CONCURRENT_WEBUSB_BRIDGES:
+            _ACTIVE_WEBUSB_BRIDGES += 1
+            acquired_slot = True
+    if not acquired_slot:
         await send_json_locked(
             {
                 "type": "error",
                 "error": {
-                    "code": ErrorCode.ADB_NOT_FOUND.value,
-                    "message": "ADB executable was not found on the server.",
+                    "code": "webusb_limit_reached",
+                    "message": "Too many active WebUSB bridge sessions.",
                 },
             }
         )
@@ -140,308 +176,354 @@ async def run_webusb_adb_bridge(
         await close_ws_locked()
         return
 
-    endpoint = ""
-    authorizing_notified = False
-    tcp_handler_tasks: set[asyncio.Task[Any]] = set()
+    try:
+        adb_available = any(
+            cap.name == "adb" and cap.available for cap in device_service.capabilities()
+        )
+        if not adb_available:
+            await send_json_locked(
+                {
+                    "type": "error",
+                    "error": {
+                        "code": ErrorCode.ADB_NOT_FOUND.value,
+                        "message": "ADB executable was not found on the server.",
+                    },
+                }
+            )
+            stop_event.set()
+            await close_ws_locked()
+            return
 
-    async def handle_adb_tcp(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        nonlocal authorizing_notified
-        current = asyncio.current_task()
-        if current is not None:
-            tcp_handler_tasks.add(current)
-        if writer_holder:
-            prev = writer_holder.pop()
+        endpoint = ""
+        clean_name = (usb_device_name or "").strip()[:128] or None
+        clean_serial = (usb_serial or "").strip()[:128] or None
+        authorizing_notified = False
+        tcp_handler_tasks: set[asyncio.Task[Any]] = set()
+        tcp_server_ref: list[asyncio.AbstractServer] = []
+
+        async def handle_adb_tcp(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            nonlocal authorizing_notified
+            # Reject stray local port probes once the single ADB connection is bound.
+            if writer_holder or stop_event.is_set():
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+                return
+            current = asyncio.current_task()
+            if current is not None:
+                tcp_handler_tasks.add(current)
+            writer_holder.append(writer)
+            tcp_connected.set()
+            if tcp_server_ref:
+                try:
+                    tcp_server_ref[0].close()
+                except Exception:
+                    pass
             try:
-                prev.close()
-            except Exception:
-                pass
-        writer_holder.append(writer)
-        tcp_connected.set()
-        try:
-            while not stop_event.is_set():
-                header, packet = await read_adb_packet_from_stream(reader)
-                if header.command == CMD_AUTH and header.arg0 == AUTH_RSAPUBLICKEY and not authorizing_notified:
-                    authorizing_notified = True
-                    event_log.info(
-                        "webusb_auth_prompt",
-                        "Waiting for USB debugging authorization on device.",
-                        {"endpoint": endpoint, "usb_device_name": usb_device_name},
+                while not stop_event.is_set():
+                    header, packet = await read_adb_packet_from_stream(reader)
+                    if header.command == CMD_AUTH and header.arg0 == AUTH_RSAPUBLICKEY and not authorizing_notified:
+                        authorizing_notified = True
+                        event_log.info(
+                            "webusb_auth_prompt",
+                            "Waiting for USB debugging authorization on device.",
+                            {"endpoint": endpoint, "usb_device_name": clean_name},
+                        )
+                        await send_json_locked({"type": "authorizing", "endpoint": endpoint})
+                    await send_bytes_locked(packet)
+            except asyncio.IncompleteReadError as exc:
+                if exc.partial:
+                    event_log.error(
+                        "webusb_protocol_error",
+                        "Truncated ADB packet from local ADB server.",
+                        {"endpoint": endpoint, "partial_bytes": len(exc.partial)},
                     )
-                    await send_json_locked({"type": "authorizing", "endpoint": endpoint})
-                await send_bytes_locked(packet)
-        except asyncio.IncompleteReadError as exc:
-            if exc.partial:
+            except ValueError as exc:
                 event_log.error(
                     "webusb_protocol_error",
-                    "Truncated ADB packet from local ADB server.",
-                    {"endpoint": endpoint, "partial_bytes": len(exc.partial)},
+                    str(exc),
+                    {"endpoint": endpoint},
                 )
-        except ValueError as exc:
-            event_log.error(
-                "webusb_protocol_error",
-                str(exc),
-                {"endpoint": endpoint},
-            )
-        except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
-            pass
-        finally:
-            if current is not None:
-                tcp_handler_tasks.discard(current)
-            stop_event.set()
-            try:
-                writer.close()
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
                 pass
-
-    tcp_server = await asyncio.start_server(handle_adb_tcp, host="127.0.0.1", port=0)
-    sockets = tcp_server.sockets or ()
-    if not sockets:
-        tcp_server.close()
-        await tcp_server.wait_closed()
-        await send_json_locked(
-            {
-                "type": "error",
-                "error": {
-                    "code": "webusb_bind_failed",
-                    "message": "Failed to bind local loopback bridge port.",
-                },
-            }
-        )
-        stop_event.set()
-        await close_ws_locked()
-        return
-
-    port = int(sockets[0].getsockname()[1])
-    endpoint = f"127.0.0.1:{port}"
-    clean_name = (usb_device_name or "").strip() or None
-    clean_serial = (usb_serial or "").strip() or None
-    event_log.info(
-        "webusb_bridge_open",
-        "WebUSB ADB bridge opened.",
-        {
-            "endpoint": endpoint,
-            "usb_device_name": clean_name,
-            "usb_serial": clean_serial,
-        },
-    )
-
-    client_disconnected = False
-
-    async def ws_receiver() -> None:
-        nonlocal client_disconnected
-        try:
-            while not stop_event.is_set():
-                message = await websocket.receive()
-                msg_type = message.get("type")
-                if msg_type == "websocket.disconnect":
-                    client_disconnected = True
+            finally:
+                if current is not None:
+                    tcp_handler_tasks.discard(current)
+                if writer_holder and writer_holder[0] is writer:
+                    writer_holder.clear()
                     stop_event.set()
-                    return
-                text_data = message.get("text")
-                if text_data is not None:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+
+        tcp_server = await asyncio.start_server(handle_adb_tcp, host="127.0.0.1", port=0)
+        tcp_server_ref.append(tcp_server)
+        sockets = tcp_server.sockets or ()
+        if not sockets:
+            tcp_server.close()
+            await tcp_server.wait_closed()
+            await send_json_locked(
+                {
+                    "type": "error",
+                    "error": {
+                        "code": "webusb_bind_failed",
+                        "message": "Failed to bind local loopback bridge port.",
+                    },
+                }
+            )
+            stop_event.set()
+            await close_ws_locked()
+            return
+
+        port = int(sockets[0].getsockname()[1])
+        endpoint = f"127.0.0.1:{port}"
+        event_log.info(
+            "webusb_bridge_open",
+            "WebUSB ADB bridge opened.",
+            {
+                "endpoint": endpoint,
+                "usb_device_name": clean_name,
+                "usb_serial": clean_serial,
+            },
+        )
+
+        client_disconnected = False
+
+        async def ws_receiver() -> None:
+            nonlocal client_disconnected
+            try:
+                while not stop_event.is_set():
+                    message = await websocket.receive()
+                    msg_type = message.get("type")
+                    if msg_type == "websocket.disconnect":
+                        client_disconnected = True
+                        stop_event.set()
+                        return
+                    text_data = message.get("text")
+                    if text_data is not None:
+                        try:
+                            payload = json.loads(text_data)
+                        except ValueError:
+                            await send_json_locked(
+                                {
+                                    "type": "error",
+                                    "error": {"code": "invalid_json", "message": "Invalid JSON message."},
+                                }
+                            )
+                            continue
+                        if not isinstance(payload, dict):
+                            continue
+                        kind = payload.get("type")
+                        if kind == "ping":
+                            await send_json_locked({"type": "pong"})
+                        elif kind == "close":
+                            stop_event.set()
+                            return
+                        continue
+
+                    raw_bytes = message.get("bytes")
+                    if raw_bytes is None:
+                        continue
                     try:
-                        payload = json.loads(text_data)
-                    except ValueError:
+                        header = validate_adb_packet(raw_bytes)
+                    except ValueError as exc:
                         await send_json_locked(
                             {
                                 "type": "error",
-                                "error": {"code": "invalid_json", "message": "Invalid JSON message."},
+                                "error": {"code": "invalid_adb_packet", "message": str(exc)},
                             }
                         )
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    kind = payload.get("type")
-                    if kind == "ping":
-                        await send_json_locked({"type": "pong"})
-                    elif kind == "close":
                         stop_event.set()
                         return
-                    continue
 
-                raw_bytes = message.get("bytes")
-                if raw_bytes is None:
-                    continue
-                try:
-                    header = validate_adb_packet(raw_bytes)
-                except ValueError as exc:
-                    await send_json_locked(
-                        {
-                            "type": "error",
-                            "error": {"code": "invalid_adb_packet", "message": str(exc)},
-                        }
+                    try:
+                        await asyncio.wait_for(tcp_connected.wait(), timeout=10.0)
+                    except TimeoutError:
+                        await send_json_locked(
+                            {
+                                "type": "error",
+                                "error": {
+                                    "code": ErrorCode.ADB_CONNECT_FAILED.value,
+                                    "message": "Timed out waiting for local ADB server connection.",
+                                },
+                            }
+                        )
+                        stop_event.set()
+                        return
+
+                    if not writer_holder or stop_event.is_set():
+                        return
+                    writer = writer_holder[0]
+                    writer.write(raw_bytes)
+                    await writer.drain()
+                    if header.command == CMD_CNXN:
+                        cnxn_received.set()
+            except WebSocketDisconnect:
+                client_disconnected = True
+                stop_event.set()
+            except (RuntimeError, ConnectionError, asyncio.CancelledError):
+                stop_event.set()
+
+        in_flight_connect_thread: list[asyncio.Future[Any]] = []
+
+        async def attach_session() -> None:
+            loop = asyncio.get_running_loop()
+            auth_deadline = loop.time() + max(auth_timeout_seconds, 0.5)
+            connect_future = asyncio.create_task(
+                asyncio.to_thread(device_service.connect_adb_endpoint, endpoint)
+            )
+            stop_wait = asyncio.create_task(stop_event.wait())
+            cnxn_wait = asyncio.create_task(cnxn_received.wait())
+            try:
+                active_waits: set[asyncio.Task[Any]] = {connect_future, cnxn_wait, stop_wait}
+                while not cnxn_wait.done() and not stop_event.is_set():
+                    remaining = auth_deadline - loop.time()
+                    if remaining <= 0:
+                        break
+                    done, _ = await asyncio.wait(
+                        active_waits,
+                        timeout=remaining,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                    stop_event.set()
-                    return
+                    if not done:
+                        break
+                    if connect_future in done:
+                        active_waits.discard(connect_future)
+                        exc = connect_future.exception()
+                        if exc is not None:
+                            raise exc
 
-                try:
-                    await asyncio.wait_for(tcp_connected.wait(), timeout=10.0)
-                except TimeoutError:
+                if stop_event.is_set():
+                    return
+                if not cnxn_wait.done():
                     await send_json_locked(
                         {
                             "type": "error",
                             "error": {
-                                "code": ErrorCode.ADB_CONNECT_FAILED.value,
-                                "message": "Timed out waiting for local ADB server connection.",
+                                "code": "adb_auth_timeout",
+                                "message": "Timed out waiting for USB debugging authorization on the device.",
                             },
                         }
                     )
                     stop_event.set()
                     return
 
-                if not writer_holder or stop_event.is_set():
+                initial_device = await connect_future
+                deadline = loop.time() + max(ready_poll_timeout_seconds, 0.2)
+                last_error: AppError | None = None
+                conn_state = None
+                while not stop_event.is_set():
+                    fut = asyncio.ensure_future(asyncio.to_thread(device_service.connect, "adb", endpoint))
+                    in_flight_connect_thread.append(fut)
+                    try:
+                        conn_state = await asyncio.shield(fut)
+                        break
+                    except AppError as exc:
+                        last_error = exc
+                        if (
+                            exc.code not in {ErrorCode.DEVICE_OFFLINE, ErrorCode.DEVICE_NOT_FOUND}
+                            or loop.time() >= deadline
+                        ):
+                            await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
+                            stop_event.set()
+                            return
+                        await asyncio.sleep(0.1)
+                    finally:
+                        if fut in in_flight_connect_thread:
+                            in_flight_connect_thread.remove(fut)
+
+                if conn_state is None or stop_event.is_set():
+                    if last_error is not None and not stop_event.is_set():
+                        await send_json_locked({"type": "error", "error": last_error.to_response()["error"]})
                     return
-                writer = writer_holder[0]
-                writer.write(raw_bytes)
-                await writer.drain()
-                if header.command == CMD_CNXN:
-                    cnxn_received.set()
-        except WebSocketDisconnect:
-            client_disconnected = True
-            stop_event.set()
-        except (RuntimeError, ConnectionError, asyncio.CancelledError):
-            stop_event.set()
 
-    async def attach_session() -> None:
-        loop = asyncio.get_running_loop()
-        auth_deadline = loop.time() + max(auth_timeout_seconds, 0.5)
-        connect_future = asyncio.create_task(
-            asyncio.to_thread(device_service.connect_adb_endpoint, endpoint)
-        )
-        stop_wait = asyncio.create_task(stop_event.wait())
-        cnxn_wait = asyncio.create_task(cnxn_received.wait())
-        try:
-            active_waits: set[asyncio.Task[Any]] = {connect_future, cnxn_wait, stop_wait}
-            while not cnxn_wait.done() and not stop_event.is_set():
-                remaining = auth_deadline - loop.time()
-                if remaining <= 0:
-                    break
-                done, _ = await asyncio.wait(
-                    active_waits,
-                    timeout=remaining,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if not done:
-                    break
-                if connect_future in done:
-                    active_waits.discard(connect_future)
-                    exc = connect_future.exception()
-                    if exc is not None:
-                        raise exc
-
-            if stop_event.is_set():
-                return
-            if not cnxn_wait.done():
+                ready_device = await asyncio.to_thread(_lookup_connected_device, device_service, endpoint)
+                device_dict = (ready_device or initial_device).to_dict()
                 await send_json_locked(
                     {
-                        "type": "error",
-                        "error": {
-                            "code": "adb_auth_timeout",
-                            "message": "Timed out waiting for USB debugging authorization on the device.",
-                        },
+                        "type": "connected",
+                        "endpoint": endpoint,
+                        "device": device_dict,
+                        "connection": conn_state.to_dict(),
                     }
                 )
-                stop_event.set()
+            except AppError as exc:
+                if not stop_event.is_set():
+                    await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
+                    stop_event.set()
+            except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
                 return
+            finally:
+                for helper in (stop_wait, cnxn_wait):
+                    if not helper.done():
+                        helper.cancel()
+                if not connect_future.done():
+                    connect_future.cancel()
+                await asyncio.gather(stop_wait, cnxn_wait, connect_future, return_exceptions=True)
 
-            initial_device = await connect_future
-            deadline = loop.time() + max(ready_poll_timeout_seconds, 0.2)
-            last_error: AppError | None = None
-            conn_state = None
-            while not stop_event.is_set():
-                try:
-                    conn_state = await asyncio.to_thread(device_service.connect, "adb", endpoint)
-                    break
-                except AppError as exc:
-                    last_error = exc
-                    if (
-                        exc.code not in {ErrorCode.DEVICE_OFFLINE, ErrorCode.DEVICE_NOT_FOUND}
-                        or loop.time() >= deadline
-                    ):
-                        await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
-                        stop_event.set()
-                        return
-                    await asyncio.sleep(0.1)
-
-            if conn_state is None or stop_event.is_set():
-                if last_error is not None and not stop_event.is_set():
-                    await send_json_locked({"type": "error", "error": last_error.to_response()["error"]})
-                return
-
-            ready_device = await asyncio.to_thread(_lookup_connected_device, device_service, endpoint)
-            device_dict = (ready_device or initial_device).to_dict()
-            await send_json_locked(
-                {
-                    "type": "connected",
-                    "endpoint": endpoint,
-                    "device": device_dict,
-                    "connection": conn_state.to_dict(),
-                }
-            )
-        except AppError as exc:
-            if not stop_event.is_set():
-                await send_json_locked({"type": "error", "error": exc.to_response()["error"]})
-                stop_event.set()
-        except (WebSocketDisconnect, RuntimeError, asyncio.CancelledError):
-            return
-        finally:
-            for helper in (stop_wait, cnxn_wait):
-                if not helper.done():
-                    helper.cancel()
-            if not connect_future.done():
-                connect_future.cancel()
-            await asyncio.gather(stop_wait, cnxn_wait, connect_future, return_exceptions=True)
-
-    recv_task: asyncio.Task[None] | None = None
-    attach_task: asyncio.Task[None] | None = None
-    stop_task: asyncio.Task[bool] | None = None
-    try:
-        await send_json_locked({"type": "ready", "endpoint": endpoint})
-        recv_task = asyncio.create_task(ws_receiver())
-        attach_task = asyncio.create_task(attach_session())
-        stop_task = asyncio.create_task(stop_event.wait())
-        await asyncio.wait(
-            {recv_task, stop_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if stop_event.is_set() and not client_disconnected:
-            await close_ws_locked()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        stop_event.set()
-        helper_tasks = [
-            task
-            for task in (attach_task, recv_task, stop_task, *tcp_handler_tasks)
-            if task is not None
-        ]
-        for task in helper_tasks:
-            if not task.done():
-                task.cancel()
-        tcp_server.close()
-        for writer in list(writer_holder):
-            try:
-                writer.close()
-            except Exception:
-                pass
-        writer_holder.clear()
-
-        if helper_tasks:
-            try:
-                await asyncio.gather(*helper_tasks, return_exceptions=True)
-            except BaseException:
-                pass
-
-        disconnected_cleanly = False
+        recv_task: asyncio.Task[None] | None = None
+        attach_task: asyncio.Task[None] | None = None
+        stop_task: asyncio.Task[bool] | None = None
         try:
-            await asyncio.to_thread(
-                device_service.disconnect_adb_endpoint,
-                endpoint,
-                clear_session_if_active=True,
+            await send_json_locked({"type": "ready", "endpoint": endpoint})
+            recv_task = asyncio.create_task(ws_receiver())
+            attach_task = asyncio.create_task(attach_session())
+            stop_task = asyncio.create_task(stop_event.wait())
+            await asyncio.wait(
+                {recv_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
             )
-            disconnected_cleanly = True
-        except BaseException:
-            if not disconnected_cleanly:
+            if stop_event.is_set() and not client_disconnected:
+                await close_ws_locked()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            stop_event.set()
+            helper_tasks = [
+                task
+                for task in (attach_task, recv_task, stop_task, *tcp_handler_tasks)
+                if task is not None
+            ]
+            for task in helper_tasks:
+                if not task.done():
+                    task.cancel()
+            tcp_server.close()
+            for writer in list(writer_holder):
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+            writer_holder.clear()
+
+            if helper_tasks:
+                try:
+                    await asyncio.gather(*helper_tasks, return_exceptions=True)
+                except BaseException:
+                    pass
+
+            # Wait briefly for any in-flight connect() thread to settle before disconnecting,
+            # preventing TOCTOU where connect() commits a dead endpoint after cleanup ran.
+            pending_connects = [fut for fut in list(in_flight_connect_thread) if not fut.done()]
+            if pending_connects:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending_connects, return_exceptions=True),
+                        timeout=1.5,
+                    )
+                except BaseException:
+                    pass
+
+            cleanup_lock = threading.Lock()
+            cleanup_started = False
+
+            def _cleanup_endpoint() -> None:
+                nonlocal cleanup_started
+                with cleanup_lock:
+                    if cleanup_started:
+                        return
+                    cleanup_started = True
                 try:
                     device_service.disconnect_adb_endpoint(
                         endpoint,
@@ -450,13 +532,28 @@ async def run_webusb_adb_bridge(
                 except Exception:
                     pass
 
-        try:
-            await asyncio.wait_for(tcp_server.wait_closed(), timeout=1.0)
-        except BaseException:
-            pass
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(asyncio.to_thread(_cleanup_endpoint)),
+                    timeout=3.0,
+                )
+            except BaseException:
+                # Never block the asyncio event loop with synchronous subprocess calls.
+                with cleanup_lock:
+                    already_started = cleanup_started
+                if not already_started:
+                    threading.Thread(target=_cleanup_endpoint, daemon=True, name="webusb-cleanup").start()
 
-        event_log.info(
-            "webusb_bridge_closed",
-            "WebUSB ADB bridge closed.",
-            {"endpoint": endpoint},
-        )
+            try:
+                await asyncio.wait_for(tcp_server.wait_closed(), timeout=1.0)
+            except BaseException:
+                pass
+
+            event_log.info(
+                "webusb_bridge_closed",
+                "WebUSB ADB bridge closed.",
+                {"endpoint": endpoint},
+            )
+    finally:
+        with _ACTIVE_WEBUSB_BRIDGES_LOCK:
+            _ACTIVE_WEBUSB_BRIDGES = max(0, _ACTIVE_WEBUSB_BRIDGES - 1)
