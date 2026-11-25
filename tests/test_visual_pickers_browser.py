@@ -303,3 +303,45 @@ def test_visual_pickers_mobile_320px_no_horizontal_overflow(tag_console):
     page.close()
 
 
+def test_visual_picker_clears_legacy_sentinel_and_preserves_filter_chip_enter(tag_console):
+    browser, url, directory = tag_console
+    _seed_visual_assets(directory)
+    page = browser.new_page(viewport={"width": 1280, "height": 900}, locale="zh-CN")
+    page.set_default_timeout(10000)
+    errors = []
+    page.on("pageerror", lambda err: errors.append(str(err)))
+
+    _entries, original = _seed(page, url)
+    original.update({"master_equip": 999, "servant_0_name": "光之高扬斯卡娅"})
+    assert page.request.put(f"{url}/api/settings/demo", data={"config": original, "overwrite": True}).ok
+
+    page.goto(url)
+    page.locator("#edit-setting").click()
+    page.locator("#preset-team summary").click()
+
+    # 1. Legacy unknown master_equip=999 must NOT mark None as selected, and clicking None clears it
+    page.locator("#preset-master-equip").click()
+    master_popover = page.locator(".visual-popover-master")
+    playwright.expect(master_popover).to_be_visible()
+    none_opt = master_popover.locator('[data-visual-option-value=""]')
+    playwright.expect(none_opt).not_to_have_class(re.compile(r"is-selected"))
+    none_opt.click()
+    playwright.expect(master_popover).not_to_be_visible()
+    assert "master_equip" not in _config(page)
+
+    # 2. Pressing Enter on a focused filter chip toggles filter without closing/selecting
+    page.locator('[data-team-slot="0"]').click()
+    servant_popover = page.locator(".visual-popover-servant")
+    playwright.expect(servant_popover).to_be_visible()
+    caster_chip = servant_popover.locator(".visual-select-filters .chip-button", has_text="术")
+    caster_chip.focus()
+    page.keyboard.press("Enter")
+    playwright.expect(servant_popover).to_be_visible()
+    playwright.expect(caster_chip).to_have_class(re.compile(r"\bactive\b"))
+    assert _config(page)["servant_0_name"] == "光之高扬斯卡娅"
+
+    assert errors == []
+    page.close()
+
+
+

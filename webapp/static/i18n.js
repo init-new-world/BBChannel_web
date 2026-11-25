@@ -838,6 +838,11 @@ const zh = {
   "Pretender": "诈",
   "Beast": "兽",
   "Shielder": "盾",
+  "Showing first {shown} of {total} items — narrow with filters or search.": "当前显示前 {shown} / {total} 项，可继续筛选或搜索缩小范围。",
+  "Active": "启用",
+  "precise": "精确满破",
+  "simple": "普通",
+  "Row {row}": "第 {row} 行",
 };
 
 let locale = preferredLocale();

@@ -281,8 +281,8 @@ export function createPresetWizard({
           }),
       );
     }
-    if (state.masters === null) {
-      state.masters = [];
+    if (state.masters === null && !state.mastersLoading) {
+      state.mastersLoading = true;
       promises.push(
         request("/api/masters")
           .then((payload) => {
@@ -290,6 +290,9 @@ export function createPresetWizard({
           })
           .catch(() => {
             state.masters = [];
+          })
+          .finally(() => {
+            state.mastersLoading = false;
           }),
       );
     }
@@ -643,7 +646,7 @@ export function createPresetWizard({
     masterCountLabel.className = "wizard-picker-count";
     masterSearchInput.addEventListener("input", () => {
       state.masterSearchQuery = masterSearchInput.value;
-      renderMasterOutfitGrid(masterGridWrap, masterCountLabel, state.masters || [], selectedMasterSn, masterSexVal);
+      renderMasterOutfitGrid(masterGridWrap, masterCountLabel, state.masters, selectedMasterSn, masterSexVal);
     });
     masterPickerTop.append(masterPickLabel, masterFilterRow, masterSearchInput, masterCountLabel);
 

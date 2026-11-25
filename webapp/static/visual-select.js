@@ -48,7 +48,7 @@ export function createVisualSelect(selectEl, {
     return { sync() {}, close() {} };
   }
 
-  const wrapper = document.createElement("div");
+  const wrapper = document.createElement("span");
   wrapper.className = `visual-select-control visual-select-${kind}${showInlineThumb ? " has-inline-thumb" : ""}`;
   selectEl.parentNode?.insertBefore(wrapper, selectEl);
 
@@ -62,6 +62,9 @@ export function createVisualSelect(selectEl, {
   }
   wrapper.append(selectEl);
 
+  const listboxId = `visual-select-listbox-${Math.random().toString(36).slice(2, 9)}`;
+  selectEl.setAttribute("aria-expanded", "false");
+
   let popover = null;
   let searchInput = null;
   let countBadge = null;
@@ -71,6 +74,21 @@ export function createVisualSelect(selectEl, {
   let highlightedIndex = 0;
   let visibleOptionButtons = [];
   let cleanupListeners = null;
+  let lastSyncFingerprint = "";
+
+  function isCurrentOptionDisabled() {
+    return Boolean(selectEl.selectedOptions?.[0]?.disabled);
+  }
+
+  function computeSyncFingerprint(items, definitions) {
+    const filterKey = Array.isArray(definitions)
+      ? definitions.map((g) => `${g.key}:${g.label || ""}:${(g.options || []).map((o) => `${o.value}=${o.label}`).join(",")}`).join("|")
+      : "";
+    const itemKey = items
+      .map((it) => `${it.value}\x1f${it.label}\x1f${it.disabled ? 1 : 0}\x1f${it.imageUrl || ""}\x1f${it.subtitle || ""}`)
+      .join("\x1e");
+    return `${selectEl.value}|${isCurrentOptionDisabled() ? 1 : 0}|${getSearchPlaceholder()}|${filterKey}|${itemKey}`;
+  }
 
   function renderInlineThumb() {
     if (!inlineThumbHost || typeof getInlineThumb !== "function") return;
@@ -92,6 +110,17 @@ export function createVisualSelect(selectEl, {
     const anchor = wrapper.getBoundingClientRect();
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
+    const scrollHost = wrapper.closest(".preset-form");
+    if (scrollHost) {
+      const hostRect = scrollHost.getBoundingClientRect();
+      if (anchor.bottom < hostRect.top + 4 || anchor.top > hostRect.bottom - 4) {
+        close({ restoreFocus: false });
+        return;
+      }
+    } else if (anchor.bottom < 0 || anchor.top > viewportH) {
+      close({ restoreFocus: false });
+      return;
+    }
     const margin = 8;
     const desiredWidth = Math.min(
       Math.max(anchor.width, minPopoverWidth),
@@ -121,8 +150,16 @@ export function createVisualSelect(selectEl, {
   function selectValue(value) {
     close({ restoreFocus: true });
     if (isSelectDisabled(selectEl)) return;
-    if (selectEl.value !== value) {
-      selectEl.value = value;
+    const wasDisabled = isCurrentOptionDisabled();
+    if (selectEl.value !== value || wasDisabled) {
+      const matchingIndex = [...selectEl.options].findIndex(
+        (opt) => !opt.disabled && opt.value === value,
+      );
+      if (matchingIndex >= 0) {
+        selectEl.selectedIndex = matchingIndex;
+      } else {
+        selectEl.value = value;
+      }
       selectEl.dispatchEvent(new Event("change", { bubbles: true }));
     }
     renderInlineThumb();
@@ -192,10 +229,10 @@ export function createVisualSelect(selectEl, {
     return haystack.includes(query);
   }
 
-  function buildOptionRow(item, currentVal) {
+  function buildOptionRow(item, currentVal, currentDisabled) {
     const btn = document.createElement("button");
     btn.type = "button";
-    const isSelected = item.value === currentVal && !item.disabled;
+    const isSelected = !currentDisabled && item.value === currentVal && !item.disabled;
     btn.className = `visual-select-option is-${kind}${isSelected ? " is-selected" : ""}`;
     btn.dataset.visualOptionValue = item.value;
     btn.disabled = Boolean(item.disabled);
@@ -285,6 +322,7 @@ export function createVisualSelect(selectEl, {
     const query = (searchInput?.value || "").trim().toLowerCase();
     const matched = allItems.filter((item) => itemMatches(item, query, definitions));
     const currentVal = selectEl.value;
+    const currentDisabled = isCurrentOptionDisabled();
 
     if (countBadge) {
       const selectableCount = matched.filter((item) => !item.isNone && !item.disabled).length;
@@ -292,11 +330,20 @@ export function createVisualSelect(selectEl, {
     }
 
     const shown = matched.slice(0, maxRenderedItems);
+    if (!currentDisabled) {
+      const selectedMatchIdx = matched.findIndex((item) => !item.disabled && item.value === currentVal);
+      if (selectedMatchIdx >= maxRenderedItems) {
+        const selectedItem = matched[selectedMatchIdx];
+        const insertAt = shown[0]?.isNone ? 1 : 0;
+        shown.splice(insertAt, 0, selectedItem);
+        if (shown.length > maxRenderedItems) shown.pop();
+      }
+    }
     const frag = document.createDocumentFragment();
     visibleOptionButtons = [];
 
     for (const item of shown) {
-      const btn = buildOptionRow(item, currentVal);
+      const btn = buildOptionRow(item, currentVal, currentDisabled);
       if (!btn.disabled) {
         const btnIndex = visibleOptionButtons.length;
         btn.addEventListener("pointerenter", () => {
@@ -311,7 +358,7 @@ export function createVisualSelect(selectEl, {
     if (matched.length > shown.length) {
       const more = document.createElement("div");
       more.className = "visual-select-hint";
-      more.textContent = t("Showing first {shown} of {total} — narrow with filters or search.", {
+      more.textContent = t("Showing first {shown} of {total} items — narrow with filters or search.", {
         shown: shown.length,
         total: matched.length,
       });
@@ -325,7 +372,9 @@ export function createVisualSelect(selectEl, {
 
     listHost.replaceChildren(frag);
 
-    const selectedIdx = visibleOptionButtons.findIndex((btn) => btn.dataset.visualOptionValue === currentVal);
+    const selectedIdx = currentDisabled
+      ? -1
+      : visibleOptionButtons.findIndex((btn) => btn.dataset.visualOptionValue === currentVal);
     highlightedIndex = selectedIdx >= 0 ? selectedIdx : 0;
     syncHighlight(scrollSelected);
     positionPopover();
@@ -340,7 +389,10 @@ export function createVisualSelect(selectEl, {
     filterHost = null;
     listHost = null;
     visibleOptionButtons = [];
+    lastSyncFingerprint = "";
     wrapper.classList.remove("is-open");
+    selectEl.setAttribute("aria-expanded", "false");
+    selectEl.removeAttribute("aria-controls");
     if (cleanupListeners) {
       cleanupListeners();
       cleanupListeners = null;
@@ -375,6 +427,10 @@ export function createVisualSelect(selectEl, {
     searchInput.type = "search";
     searchInput.className = "field visual-select-search";
     searchInput.placeholder = getSearchPlaceholder();
+    searchInput.setAttribute("role", "combobox");
+    searchInput.setAttribute("aria-autocomplete", "list");
+    searchInput.setAttribute("aria-controls", listboxId);
+    searchInput.setAttribute("aria-label", getSearchPlaceholder());
     searchInput.autocomplete = "off";
     searchInput.spellcheck = false;
     searchInput.addEventListener("input", () => renderOptions({ scrollSelected: false }));
@@ -388,15 +444,22 @@ export function createVisualSelect(selectEl, {
     filterHost.hidden = true;
 
     listHost = document.createElement("div");
+    listHost.id = listboxId;
     listHost.className = "visual-select-list";
     listHost.setAttribute("role", "listbox");
 
     popover.append(header, filterHost, listHost);
     hostRoot.append(popover);
     wrapper.classList.add("is-open");
+    selectEl.setAttribute("aria-expanded", "true");
+    selectEl.setAttribute("aria-controls", listboxId);
 
     renderFilterControls();
     renderOptions({ scrollSelected: true });
+    lastSyncFingerprint = computeSyncFingerprint(
+      getItems(),
+      typeof getFilters === "function" ? getFilters() : [],
+    );
 
     const onPointerDown = (event) => {
       if (!popover) return;
@@ -426,6 +489,11 @@ export function createVisualSelect(selectEl, {
           syncHighlight(true);
         }
       } else if (event.key === "Enter") {
+        // Only confirm the highlighted option when focus is on searchInput or selectEl;
+        // let focused filter chips and Tab-focused option buttons handle Enter natively.
+        if (document.activeElement !== searchInput && document.activeElement !== selectEl) {
+          return;
+        }
         const targetBtn = visibleOptionButtons[highlightedIndex];
         if (targetBtn && !targetBtn.disabled) {
           event.preventDefault();
@@ -467,11 +535,33 @@ export function createVisualSelect(selectEl, {
     });
   }
 
+  let handledByPointer = false;
   wrapper.addEventListener("mousedown", (event) => {
     if (event.button !== 0 || isSelectDisabled(selectEl)) return;
     event.preventDefault();
+    handledByPointer = true;
     open();
   });
+  wrapper.addEventListener("touchstart", (event) => {
+    if (isSelectDisabled(selectEl)) return;
+    event.preventDefault();
+    handledByPointer = true;
+    open();
+  }, { passive: false });
+  wrapper.addEventListener("click", (event) => {
+    if (handledByPointer) {
+      handledByPointer = false;
+      event.preventDefault();
+      return;
+    }
+    // Handles clicks on an enclosing <label> that synthesize click on selectEl.
+    if (event.detail > 0 && !isSelectDisabled(selectEl)) {
+      event.preventDefault();
+      open();
+    }
+  });
+
+  selectEl.addEventListener("change", renderInlineThumb);
 
   selectEl.addEventListener("keydown", (event) => {
     if (isSelectDisabled(selectEl)) return;
@@ -486,11 +576,22 @@ export function createVisualSelect(selectEl, {
     if (popover) {
       if (isSelectDisabled(selectEl)) {
         close({ restoreFocus: false });
-      } else {
-        if (searchInput) searchInput.placeholder = getSearchPlaceholder();
-        renderFilterControls();
-        renderOptions({ scrollSelected: false });
+        return;
       }
+      const items = getItems();
+      const definitions = typeof getFilters === "function" ? getFilters() : [];
+      const fingerprint = computeSyncFingerprint(items, definitions);
+      if (fingerprint === lastSyncFingerprint) {
+        return;
+      }
+      lastSyncFingerprint = fingerprint;
+      if (searchInput) {
+        const placeholder = getSearchPlaceholder();
+        searchInput.placeholder = placeholder;
+        searchInput.setAttribute("aria-label", placeholder);
+      }
+      renderFilterControls();
+      renderOptions({ scrollSelected: false });
     }
   }
 

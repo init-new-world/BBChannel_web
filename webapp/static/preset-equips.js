@@ -353,6 +353,8 @@ export function createPresetEquipEditor({ getEditor, source, request, onChange, 
   document.addEventListener("bbchannel:localechange", () => {
     galleryTitle.textContent = t("Click CE card to toggle");
     gallerySearch.placeholder = t("Filter CEs...");
+    const emptyEl = galleryGrid.querySelector(".preset-equip-gallery-empty");
+    if (emptyEl) emptyEl.textContent = t("No CE templates matched.");
     visualPicker.sync();
   });
   return { render };

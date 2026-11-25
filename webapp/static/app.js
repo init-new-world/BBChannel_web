@@ -499,7 +499,9 @@ const presetTurnConditions = createPresetTurnConditionsEditor({
 
 function materialIconUrl(qualityName, materialName) {
   if (!qualityName || !materialName) return "";
-  const tier = String(qualityName).replace(/素材$/, "").trim();
+  const qualityText = String(qualityName).trim();
+  if (!/素材$/.test(qualityText)) return "";
+  const tier = qualityText.replace(/素材$/, "").trim();
   if (!tier) return "";
   const path = `drop/素材掉落检测模板图/${tier}/${materialName}.png`;
   return `/api/drop-templates/image?${new URLSearchParams({ path })}`;
@@ -519,8 +521,8 @@ const equipTemplateVisualSelect = createVisualSelect(els.equipTemplateList, {
       imageUrl: `/api/equip-templates/${encodeURIComponent(template.name)}/image?location=${template.location}`,
       thumbKind: "ce",
       badges: [
-        { text: isActive ? "Active" : "Archive", className: isActive ? "swap-tag" : "" },
-        { text: template.precise ? "precise" : "simple" },
+        { text: isActive ? t("Active") : t("Archive"), className: isActive ? "swap-tag" : "" },
+        { text: template.precise ? t("precise") : t("simple") },
       ],
       searchText: `${template.location} ${template.precise ? "precise" : "simple"}`,
     };
@@ -535,7 +537,7 @@ const equipCandidateVisualSelect = createVisualSelect(els.equipCandidateList, {
   getEmptyText: () => t("No candidates"),
   getItems: () => state.equipCandidates.map((candidate) => ({
     value: candidate.id,
-    label: `Row ${candidate.row}`,
+    label: t("Row {row}", { row: candidate.row }),
     subtitle: formatEquipCandidateKind(candidate.kind),
     imageUrl: `data:image/png;base64,${candidate.image_base64}`,
     thumbKind: "ce",
