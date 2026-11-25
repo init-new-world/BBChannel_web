@@ -10,6 +10,7 @@ from PIL import Image
 
 from webapp.core.errors import AppError
 from webapp.devices.coordinates import get_cached_bgr_frame
+from webapp.devices.webusb import run_webusb_adb_bridge
 from webapp.runtime import JobManager
 from webapp.runtime.models import JobEvent, JobRecord
 from webapp.services.devices import DeviceService
@@ -550,5 +551,19 @@ def create_ws_router(
                     await asyncio.to_thread(device_service.touch_cancel, live_touch_pos[0], live_touch_pos[1])
                 except Exception:
                     pass
+
+    @router.websocket("/webusb")
+    async def ws_webusb(
+        websocket: WebSocket,
+        device_name: str | None = Query(default=None),
+        serial: str | None = Query(default=None),
+    ) -> None:
+        await run_webusb_adb_bridge(
+            websocket,
+            device_service=device_service,
+            event_log=event_log,
+            usb_device_name=device_name,
+            usb_serial=serial,
+        )
 
     return router

@@ -749,6 +749,15 @@ class AdbBackend:
         enriched_devices = self._enrich_devices(_dedupe_devices(devices))
         return _dedupe_device_aliases(enriched_devices)
 
+    def find_device(self, device_id: str, *, enrich: bool = True) -> DeviceInfo | None:
+        devices = _dedupe_devices(self._list_devices_once())
+        device = next((candidate for candidate in devices if candidate.device_id == device_id), None)
+        if device is None:
+            return None
+        if enrich and self.discovery_config.enrich_details:
+            return self._enrich_device(device)
+        return device
+
     def connect_endpoint(self, endpoint: str) -> DeviceInfo:
         serial = normalize_adb_endpoint(endpoint)
         try:
@@ -762,8 +771,7 @@ class AdbBackend:
                 {"endpoint": serial, "reason": exc.message},
             ) from exc
 
-        devices = self._enrich_devices(_dedupe_devices(self._list_devices_once()))
-        device = next((candidate for candidate in devices if candidate.device_id == serial), None)
+        device = self.find_device(serial, enrich=True)
         if device is None:
             raise AppError(
                 ErrorCode.ADB_NO_DEVICES,
@@ -771,6 +779,20 @@ class AdbBackend:
                 {"endpoint": serial},
             )
         return device
+
+    def disconnect_endpoint(self, endpoint: str) -> None:
+        serial = normalize_adb_endpoint(endpoint)
+        with self._shells_lock:
+            shell = self._shells.pop(serial, None)
+            dc_session = self._droidcast_sessions.pop(serial, None)
+        if shell is not None:
+            shell.close()
+        if dc_session is not None:
+            dc_session.close()
+        try:
+            self._run(["disconnect", serial], text=True, timeout_seconds=3.0)
+        except AppError:
+            pass
 
     def snapshot(self, device_id: str) -> bytes:
         result, _attempts = self._run_with_retry(

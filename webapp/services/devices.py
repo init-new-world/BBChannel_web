@@ -242,6 +242,32 @@ class DeviceService:
         )
         return device
 
+    def disconnect_adb_endpoint(
+        self,
+        endpoint: str,
+        *,
+        clear_session_if_active: bool = True,
+    ) -> ConnectionState:
+        serial = endpoint.strip()
+        if clear_session_if_active:
+            current = self.state()
+            uses_endpoint = any(
+                ep is not None and ep.backend == "adb" and ep.device_id == serial
+                for ep in (current.capture, current.control)
+            )
+            if uses_endpoint:
+                self.disconnect()
+        backend = self._backends.get("adb")
+        disconnect_fn = getattr(backend, "disconnect_endpoint", None) if backend is not None else None
+        if callable(disconnect_fn):
+            disconnect_fn(serial)
+            self._event_log.info(
+                "adb_disconnect_endpoint",
+                "ADB endpoint disconnected.",
+                {"endpoint": serial},
+            )
+        return self.state()
+
     def disconnect(self) -> ConnectionState:
         previous_state = self.state()
         with self._state_lock:
@@ -584,8 +610,13 @@ class DeviceService:
         device_id: str,
     ) -> tuple[DeviceEndpoint, DeviceInfo]:
         backend = self._backend_for(backend_name)
-        devices = backend.list_devices()
-        matching_device = next((device for device in devices if device.device_id == device_id), None)
+        matching_device = None
+        find_device = getattr(backend, "find_device", None)
+        if callable(find_device):
+            matching_device = find_device(device_id)
+        if matching_device is None:
+            devices = backend.list_devices()
+            matching_device = next((device for device in devices if device.device_id == device_id), None)
         if matching_device is None:
             raise AppError(
                 ErrorCode.DEVICE_NOT_FOUND,
