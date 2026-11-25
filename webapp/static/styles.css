@@ -542,6 +542,8 @@ select:disabled {
 
 .equip-template-preview-status {
   grid-area: 1 / 1;
+  position: relative;
+  z-index: 1;
   align-self: end;
   justify-self: end;
   padding: 2px 5px;
@@ -555,6 +557,62 @@ select:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.wiki-equip-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.wiki-equip-preview-stage {
+  grid-area: 1 / 1;
+  position: relative;
+  width: min(100%, 237px);
+  aspect-ratio: 237 / 68;
+}
+
+.wiki-equip-preview-stage img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.wiki-ce-match-box {
+  position: absolute;
+  left: 16.46%;
+  top: 0;
+  width: 65.40%;
+  height: 82.35%;
+  border: 1px dashed rgba(94, 219, 146, 0.92);
+  box-shadow: 0 0 0 1px rgba(15, 22, 28, 0.55);
+  pointer-events: none;
+}
+
+.wiki-offset-control {
+  display: grid;
+  gap: 4px;
+}
+
+.wiki-offset-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.wiki-reset-button {
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.wiki-offset-range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent, #4da3ff);
 }
 
 .equip-input-state {

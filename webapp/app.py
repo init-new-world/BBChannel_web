@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Response
+from fastapi import FastAPI, Path as PathParam, Query, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
@@ -91,6 +91,7 @@ from webapp.services.quest import QuestRecognizer
 from webapp.services.resources import ResourceService
 from webapp.services.script_data import ScriptDataService
 from webapp.services.team import TeamRecognizer
+from webapp.services.wiki_sync import WikiSyncService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -284,6 +285,14 @@ class BindCommandTagRequest(BaseModel):
     bound: StrictBool
 
 
+class ImportWikiEquipRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=100)
+    y_offset: StrictInt = Field(default=0, ge=-300, le=500)
+    activate: StrictBool = True
+    save_drop: StrictBool = False
+    overwrite: StrictBool = False
+
+
 def create_app(
     assets_dir: Path | str | None = None,
     data_dir: Path | str | None = None,
@@ -291,6 +300,7 @@ def create_app(
     event_log: EventLog | None = None,
     job_manager: JobManager | None = None,
     runtime_db_path: Path | str | None = None,
+    wiki_sync: WikiSyncService | None = None,
 ) -> FastAPI:
     event_log = event_log or EventLog()
     resources = ResourceService(
@@ -324,6 +334,11 @@ def create_app(
     notebook = NotebookService(resources.data_dir)
     script_data = ScriptDataService(resources.data_dir, resources=resources)
     master_portraits = MasterPortraitService(resources, script_data)
+    wiki_sync = wiki_sync or WikiSyncService(
+        resources,
+        equip_templates,
+        script_data=script_data,
+    )
     owns_job_manager = job_manager is None
     if job_manager is None:
         default_db_path = os.environ.get(
@@ -663,6 +678,7 @@ def create_app(
     app.state.material_drops = material_drops
     app.state.notebook = notebook
     app.state.script_data = script_data
+    app.state.wiki_sync = wiki_sync
     app.state.job_manager = job_manager
 
     @app.exception_handler(AppError)
@@ -992,6 +1008,50 @@ def create_app(
     def archive_equip_template(name: str, request: MoveEquipTemplateRequest) -> dict[str, object]:
         return equip_templates.archive(name, overwrite=request.overwrite)
 
+    @app.get("/api/wiki/events")
+    def wiki_events(
+        server: str = "CH",
+        limit: int = Query(default=8, ge=1, le=20),
+    ) -> dict[str, object]:
+        return app.state.wiki_sync.list_events(server=server, limit=limit)
+
+    @app.get("/api/wiki/craft-essences")
+    def wiki_craft_essences(
+        query: str = "",
+        server: str = "CH",
+        event_title: str | None = None,
+        event_only: bool = False,
+        limit: int = Query(default=30, ge=1, le=100),
+    ) -> dict[str, object]:
+        return app.state.wiki_sync.search_craft_essences(
+            query=query,
+            server=server,
+            event_title=event_title,
+            event_only=event_only,
+            limit=limit,
+        )
+
+    @app.get("/api/wiki/craft-essences/{ce_id}/preview")
+    def preview_wiki_craft_essence(
+        ce_id: int = PathParam(ge=1),
+        y_offset: int = Query(default=0, ge=-300, le=500),
+    ) -> dict[str, object]:
+        return app.state.wiki_sync.preview_craft_essence(ce_id, y_offset=y_offset)
+
+    @app.post("/api/wiki/craft-essences/{ce_id}/import")
+    def import_wiki_craft_essence(
+        request: ImportWikiEquipRequest,
+        ce_id: int = PathParam(ge=1),
+    ) -> dict[str, object]:
+        return app.state.wiki_sync.import_craft_essence(
+            ce_id,
+            name=request.name,
+            y_offset=request.y_offset,
+            activate=request.activate,
+            save_drop=request.save_drop,
+            overwrite=request.overwrite,
+        )
+
     @app.get("/api/template-index")
     def template_index(
         prefix: str | None = None,
@@ -1243,6 +1303,8 @@ def _status_code_for(code: ErrorCode) -> int:
         return 409
     if code == ErrorCode.OPENCV_UNAVAILABLE:
         return 503
+    if code == ErrorCode.WIKI_UPSTREAM_FAILED:
+        return 502
     if code in {
         ErrorCode.ADB_TIMEOUT,
         ErrorCode.ADB_COMMAND_FAILED,

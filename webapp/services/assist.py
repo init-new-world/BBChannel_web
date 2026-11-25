@@ -4,7 +4,7 @@ import hashlib
 from io import BytesIO
 from typing import Any
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from webapp.core.errors import AppError
 from webapp.services.recognition import RecognitionService
@@ -16,6 +16,7 @@ ASSIST_EQUIP_SCALES = (1.0, 0.75, 2 / 3, 0.5)
 ASSIST_LEVEL_DIGIT_SCALES = (1.0, 0.8, 0.78, 0.75, 2 / 3, 0.5)
 ASSIST_LIMIT_BREAK_SCALES = (1.25, 1.1, 1.0, 0.9, 0.75, 2 / 3, 0.5)
 ASSIST_FACE_MASK_PATH = "assist/servant_face_mask.png"
+ASSIST_EQUIP_MASK_PATH = "assist/equip_main_mask.png"
 FIRST_ASSIST_SELECTION_POINT = (387, 285)
 GRAND_LAYOUT_SCALE = 2 / 3
 NORMALIZED_FRAME_SCALE = 2 / 3
@@ -45,6 +46,40 @@ class AssistRecognizer:
     ) -> None:
         self._resources = resources
         self._recognition = recognition
+        self._image_size_cache: dict[str, tuple[int, int, tuple[int, int] | None]] = {}
+
+    def _cached_image_size(self, rel_path: str) -> tuple[int, int] | None:
+        full_path = self._resources.assets_dir / rel_path
+        try:
+            st = full_path.stat()
+        except OSError:
+            return None
+        cached = self._image_size_cache.get(rel_path)
+        if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
+            return cached[2]
+        size: tuple[int, int] | None = None
+        try:
+            with Image.open(full_path) as image:
+                size = (int(image.width), int(image.height))
+        except (OSError, UnidentifiedImageError):
+            size = None
+        self._image_size_cache[rel_path] = (st.st_mtime_ns, st.st_size, size)
+        return size
+
+    def _load_equip_mask_info(self) -> tuple[str | None, tuple[int, int] | None]:
+        mask_size = self._cached_image_size(ASSIST_EQUIP_MASK_PATH)
+        if mask_size is None:
+            return None, None
+        return ASSIST_EQUIP_MASK_PATH, mask_size
+
+    def _template_matches_size(
+        self,
+        template_path: str,
+        expected_size: tuple[int, int] | None,
+    ) -> bool:
+        if expected_size is None:
+            return False
+        return self._cached_image_size(template_path) == expected_size
 
     def recognize(
         self,
@@ -164,6 +199,7 @@ class AssistRecognizer:
                 else None
             )
         )
+        equip_mask_path, equip_mask_size = self._load_equip_mask_info()
         equip_matches = {
             equip_name: [
                 match
@@ -174,6 +210,12 @@ class AssistRecognizer:
                     threshold=threshold,
                     roi=equip_roi,
                     scales=ASSIST_EQUIP_SCALES,
+                    mask_path=(
+                        equip_mask_path
+                        if equip_mask_path is not None
+                        and self._template_matches_size(template_path, equip_mask_size)
+                        else None
+                    ),
                     max_results=20,
                 )
             ]
