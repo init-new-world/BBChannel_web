@@ -1647,7 +1647,10 @@ async function searchWikiCraftEssences() {
   if (!els.wikiEquipServer || state.wikiEquipBusy) return;
   const server = els.wikiEquipServer.value || "CH";
   const query = els.wikiCeQuery.value.trim();
-  const eventTitle = els.wikiEventSelect.value;
+  const eventTitle = query ? "" : els.wikiEventSelect.value;
+  if (query && els.wikiEventSelect && els.wikiEventSelect.value) {
+    els.wikiEventSelect.value = "";
+  }
   const params = new URLSearchParams({ server, limit: "40" });
   if (query) params.set("query", query);
   if (eventTitle) params.set("event_title", eventTitle);
@@ -1798,10 +1801,11 @@ async function importWikiCeTemplate() {
     const matchedItem = state.wikiCraftEssences.find((item) => item.ce_id === selected.ce_id);
     if (matchedItem && tpl?.location) {
       matchedItem.local_status = tpl.location;
-    }
-    if (state.presetEditor) {
-      state.presetEditor.equipCatalog = null;
-      state.presetEditor.dropCatalog = null;
+      const opt = [...(els.wikiCeList?.options || [])].find((o) => Number(o.value) === selected.ce_id);
+      if (opt) {
+        const eventTag = matchedItem.event ? " ★" : "";
+        opt.textContent = `#${matchedItem.ce_id} ${matchedItem.name}${eventTag} [${tpl.location}]`;
+      }
     }
     await Promise.all([
       loadEquipTemplates(tpl.name, tpl.location),

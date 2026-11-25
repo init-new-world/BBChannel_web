@@ -39,6 +39,10 @@ from webapp.services.script_data import VALID_SERVERS, ScriptDataService
 
 MOONCELL_API_URL = "https://fgo.wiki/api.php"
 ATLAS_API_BASE_URL = "https://api.atlasacademy.io"
+ALLOWED_UPSTREAM_HOST_SUFFIXES = (
+    "fgo.wiki",
+    "atlasacademy.io",
+)
 DEFAULT_USER_AGENT = "BBChannelWebWikiSync/0.1 (+https://github.com/init-new-world/BBChannel_web)"
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 DEFAULT_CE_FOCUS_Y = 220
@@ -161,8 +165,8 @@ class WikiClient:
         if not cleaned:
             return {}
         contents: dict[str, str] = {}
-        for start in range(0, len(cleaned), 40):
-            chunk = cleaned[start : start + 40]
+        for start in range(0, len(cleaned), 20):
+            chunk = cleaned[start : start + 20]
             data = self.mw_api(
                 {
                     "action": "query",
@@ -222,14 +226,15 @@ class WikiClient:
         if not cleaned:
             return {}
         resolved: dict[str, str] = {}
-        for start in range(0, len(cleaned), 40):
-            chunk = cleaned[start : start + 40]
+        for start in range(0, len(cleaned), 20):
+            chunk = cleaned[start : start + 20]
             data = self.mw_api(
                 {
                     "action": "query",
                     "titles": "|".join(chunk),
                     "prop": "imageinfo",
                     "iiprop": "url",
+                    "redirects": "1",
                 },
                 use_cache=use_cache,
             )
@@ -306,6 +311,21 @@ class WikiClient:
         return parsed
 
     def _request(self, url: str) -> tuple[int, dict[str, str], bytes]:
+        if self._http_get is _default_http_get:
+            extra_hosts = {
+                (urllib.parse.urlparse(base).hostname or "").lower()
+                for base in (self.mooncell_api_url, self.atlas_api_base_url)
+                if base
+            }
+            _validate_upstream_url(url, extra_hosts=extra_hosts)
+        else:
+            parsed = urllib.parse.urlparse(str(url or "").strip())
+            if parsed.scheme.lower() not in {"https", "http"} or not parsed.hostname:
+                raise AppError(
+                    ErrorCode.DATA_FILE_INVALID,
+                    "Upstream URL must use http(s) with a valid hostname.",
+                    {"url": url},
+                )
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json, image/*;q=0.9, */*;q=0.8",
@@ -338,10 +358,40 @@ class WikiClient:
         return stat.st_size > 0 and (time.time() - stat.st_mtime) <= ttl
 
 
+def _validate_upstream_url(url: str, *, extra_hosts: set[str] | None = None) -> str:
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise AppError(
+            ErrorCode.DATA_FILE_INVALID,
+            "Upstream URL must use https with a valid hostname.",
+            {"url": url},
+        )
+    host = parsed.hostname.lower().rstrip(".")
+    allowed_exact = {h.lower().rstrip(".") for h in (extra_hosts or set()) if h}
+    if host not in allowed_exact and not any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in ALLOWED_UPSTREAM_HOST_SUFFIXES
+    ):
+        raise AppError(
+            ErrorCode.DATA_FILE_INVALID,
+            f"Upstream URL host is not allowed: {host}",
+            {"url": url, "host": host},
+        )
+    return url
+
+
+class _SafeHttpsRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_upstream_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _default_http_get(url: str, headers: dict[str, str], timeout: float) -> tuple[int, dict[str, str], bytes]:
+    _validate_upstream_url(url)
     request = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(_SafeHttpsRedirectHandler())
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             status = getattr(response, "status", 200)
             resp_headers = dict(response.headers.items())
             data = response.read(MAX_DOWNLOAD_BYTES + 1)
@@ -354,6 +404,10 @@ def _default_http_get(url: str, headers: dict[str, str], timeout: float) -> tupl
             return int(status), resp_headers, data
     except urllib.error.HTTPError as exc:
         resp_headers = dict(exc.headers.items()) if exc.headers else {}
+        try:
+            exc.close()
+        except Exception:
+            pass
         return int(exc.code), resp_headers, b""
 
 
@@ -533,7 +587,8 @@ def parse_ce_wikitext(
         if raw_id.isdigit()
         else (fallback.ce_id if fallback is not None else 0)
     )
-    equip_sn = named.get("礼装内部id", "").strip() or None
+    raw_equip_sn = named.get("礼装内部id", "").strip()
+    equip_sn = raw_equip_sn if raw_equip_sn.isdigit() else None
     raw_star = named.get("稀有度", "").strip()
     star = int(raw_star) if raw_star.isdigit() else 5
     cn_name = named.get("名称", "").strip() or (fallback.name if fallback else "")
@@ -911,31 +966,49 @@ class WikiSyncService:
             target_name = validate_equip_name(
                 name.strip() if isinstance(name, str) and name.strip() else sanitize_template_name(detail["name"])
             )
-            if activate and not overwrite:
-                active_path = self._resources.assets_dir / "assist" / "assist_equip" / f"{target_name}.png"
-                if active_path.exists():
+            target_location = "active" if activate else "archive"
+            if not overwrite:
+                target_dir = (
+                    self._resources.assets_dir / "assist" / "assist_equip"
+                    if activate
+                    else self._resources.assets_dir / "equipmaker" / "assist_equip_store"
+                )
+                if (target_dir / f"{target_name}.png").exists():
                     raise AppError(
                         ErrorCode.DATA_FILE_CONFLICT,
-                        f"Equip template already exists in active: {target_name}",
-                        {"name": target_name, "location": "active"},
+                        f"Equip template already exists in {target_location}: {target_name}",
+                        {"name": target_name, "location": target_location},
                     )
+                if save_drop and (self._resources.assets_dir / "drop" / f"{target_name}.png").exists():
+                    raise AppError(
+                        ErrorCode.DATA_FILE_CONFLICT,
+                        f"Drop template already exists: drop/{target_name}.png",
+                        {"name": target_name, "path": f"drop/{target_name}.png"},
+                    )
+
             cropped_png, crop_meta = crop_ce_banner(
                 card_bytes,
                 focus_y=detail["focus_y"],
                 y_offset=y_offset,
             )
+            prepared_drop_png: bytes | None = None
+            if save_drop:
+                prepared_drop_png = self._prepare_ce_drop_icon_png(detail["ce_id"], card_bytes)
+
             template_desc = self._equip_templates.build(
                 target_name,
                 full_image=cropped_png,
                 non_full_image=None,
-                overwrite=True if activate else overwrite,
+                overwrite=overwrite,
+                location=target_location,
             )
-            if activate:
-                template_desc = self._equip_templates.activate(target_name, overwrite=overwrite)
 
             drop_path_rel: str | None = None
-            if save_drop:
-                drop_path_rel = self._save_ce_drop_icon(detail["ce_id"], target_name, card_bytes, overwrite=overwrite)
+            if save_drop and prepared_drop_png is not None:
+                drop_dir = self._resources.assets_dir / "drop"
+                drop_dir.mkdir(parents=True, exist_ok=True)
+                _write_bytes_atomic(drop_dir / f"{target_name}.png", prepared_drop_png)
+                drop_path_rel = f"drop/{target_name}.png"
 
             self._resources.refresh_template_index()
             return {
@@ -967,9 +1040,15 @@ class WikiSyncService:
                 existing_names.update(str(a) for a in info["other_name"] if isinstance(a, str))
 
         # Check recent entries + any entry whose name/link isn't already known locally
-        suspects = [
+        # Skip unobtainable enemy bosses (e.g. method="无法获得").
+        obtainable_entries = [
             entry
             for entry in index_entries
+            if "无法获得" not in (entry.method or "")
+        ]
+        suspects = [
+            entry
+            for entry in obtainable_entries
             if entry.collection_no > max(0, len(existing_sns) - 10)
             or (
                 entry.name_link not in existing_names
@@ -1031,7 +1110,11 @@ class WikiSyncService:
             if ids:
                 targets = [by_no[cid] for cid in ids if cid in by_no]
             elif since_id is not None:
-                targets = [entry for entry in index_entries if entry.collection_no > int(since_id)]
+                targets = [
+                    entry
+                    for entry in index_entries
+                    if entry.collection_no > int(since_id) and "无法获得" not in (entry.method or "")
+                ]
             else:
                 check_report = self.check_servants()
                 missing_nos = {item["collection_no"] for item in check_report["missing_servants"]}
@@ -1054,7 +1137,11 @@ class WikiSyncService:
                 if not wikitext:
                     warnings.append(f"Skipped #{entry.collection_no} ({entry.name_link}): Mooncell page missing.")
                     continue
-                parsed = parse_servant_wikitext(wikitext, entry)
+                try:
+                    parsed = parse_servant_wikitext(wikitext, entry)
+                except AppError as exc:
+                    warnings.append(f"Skipped #{entry.collection_no} ({entry.name_link}): {exc.message}")
+                    continue
                 if parsed["sn"] in sn_to_canonical and not update_existing:
                     continue
                 parsed_targets.append((entry, parsed))
@@ -1084,17 +1171,30 @@ class WikiSyncService:
                         "verify if special skill variant handling is needed."
                     )
 
-                atlas_data = None if dry_run else self._fetch_atlas_servant(sn, entry.collection_no)
+                try:
+                    atlas_data = None if dry_run else self._fetch_atlas_servant(sn, entry.collection_no)
+                except AppError as exc:
+                    warnings.append(f"Skipped #{entry.collection_no} ({canonical}): {exc.message}")
+                    continue
                 face_urls, cmd_urls, status_urls, charagraph_urls = _extract_atlas_asset_urls(atlas_data)
 
                 face_count = max(len(face_urls), 4)
                 cmd_count = max(len([k for k in cmd_urls if k.startswith("card_servant_")]), 3)
                 graph_count = max(len(charagraph_urls), 4)
 
+                existing_jp_record = catalogs["JP"].get(canonical) if isinstance(catalogs["JP"].get(canonical), dict) else {}
+                existing_aliases = [
+                    str(a)
+                    for a in (existing_jp_record.get("other_name") or [])
+                    if isinstance(a, str) and a and a != canonical
+                ]
                 other_names = [
-                    alias
-                    for alias in [parsed["name_cn"], parsed["name_link"], *parsed["aliases"]]
-                    if alias and alias != canonical
+                    *existing_aliases,
+                    *[
+                        alias
+                        for alias in [parsed["name_cn"], parsed["name_link"], *parsed["aliases"]]
+                        if alias and alias != canonical
+                    ],
                 ]
                 dedup_aliases: list[str] = []
                 for alias in other_names:
@@ -1111,12 +1211,11 @@ class WikiSyncService:
                     "graph_types": graph_count,
                     "servant_face_types": face_count,
                     "other_name": dedup_aliases,
-                    "graph": 1,
-                    "command_card": 1,
-                    "servant_face": 1,
+                    "graph": existing_jp_record.get("graph", 1),
+                    "command_card": existing_jp_record.get("command_card", 1),
+                    "servant_face": existing_jp_record.get("servant_face", 1),
                     "NPcolor": parsed["np_color"],
                 }
-                working_jp_catalog[canonical] = dict(record)
 
                 assets_written: dict[str, int] = {
                     "skill_icons": 0,
@@ -1127,60 +1226,91 @@ class WikiSyncService:
                 }
 
                 if not dry_run:
-                    # 1. Skill icons
-                    skill_dir = self._resources.assets_dir / "servant_skill"
-                    skill_dir.mkdir(parents=True, exist_ok=True)
-                    for raw_icon in parsed["skill_name"]:
-                        safe_icon = sanitize_filename_component(raw_icon)
-                        icon_path = skill_dir / f"{safe_icon}.png"
-                        icon_url = skill_icon_urls.get(f"{raw_icon}.png") or skill_icon_urls.get(f"{raw_icon}.png".replace(" ", "_"))
-                        if not icon_path.is_file() and icon_url:
-                            raw_bytes = self._client.fetch_bytes(icon_url)
-                            _write_bytes_atomic(icon_path, _resize_rgba_png(raw_bytes, SKILL_ICON_SIZE))
-                            assets_written["skill_icons"] += 1
+                    staged_files: list[tuple[Path, bytes]] = []
+                    staged_status_tiles: list[tuple[str, Image.Image]] = []
+                    try:
+                        # 1. Skill icons
+                        skill_dir = self._resources.assets_dir / "servant_skill"
+                        for raw_icon in parsed["skill_name"]:
+                            safe_icon = sanitize_filename_component(raw_icon)
+                            icon_path = skill_dir / f"{safe_icon}.png"
+                            icon_url = skill_icon_urls.get(f"{raw_icon}.png") or skill_icon_urls.get(f"{raw_icon}.png".replace(" ", "_"))
+                            if not icon_path.is_file() and icon_url:
+                                raw_bytes = self._client.fetch_bytes(icon_url)
+                                staged_files.append((icon_path, _resize_rgba_png(raw_bytes, SKILL_ICON_SIZE)))
+                                assets_written["skill_icons"] += 1
 
-                    # 2. Servant faces (130x130)
-                    face_dir = self._resources.assets_dir / "servantface"
-                    face_dir.mkdir(parents=True, exist_ok=True)
-                    for idx, (_, url) in enumerate(face_urls, start=1):
-                        raw_bytes = self._client.fetch_bytes(url)
-                        face_path = face_dir / f"{canonical}_{idx}.png"
-                        _write_bytes_atomic(face_path, _resize_rgba_png(raw_bytes, SERVANT_FACE_SIZE))
-                        assets_written["servant_faces"] += 1
-
-                    # 3. Command cards (256x256 in commands_JP/{SN}/)
-                    cmd_dir = self._resources.assets_dir / "commands_JP" / sn
-                    cmd_dir.mkdir(parents=True, exist_ok=True)
-                    for filename, url in cmd_urls.items():
-                        raw_bytes = self._client.fetch_bytes(url)
-                        _write_bytes_atomic(cmd_dir / filename, _resize_rgba_png(raw_bytes, COMMAND_CARD_SIZE))
-                        assets_written["command_cards"] += 1
-
-                    # 4. Battle frontline status tiles (50x55)
-                    servant_class = parsed["class"]
-                    existing_class_entries = set(status_info.get(servant_class) or [])
-                    for idx, (_, url) in enumerate(status_urls, start=1):
-                        entry_name = f"{canonical}_{idx}.png"
-                        if entry_name in existing_class_entries:
-                            continue
-                        raw_bytes = self._client.fetch_bytes(url)
-                        tile_img = _status_tile_from_256(raw_bytes)
-                        status_tiles_to_append.setdefault(servant_class, []).append((entry_name, tile_img))
-                        existing_class_entries.add(entry_name)
-                        assets_written["status_tiles"] += 1
-
-                    # 5. Optional CharaGraph (512x724)
-                    if include_charagraph and charagraph_urls:
-                        cg_dir = self._resources.assets_dir / "charagraph"
-                        cg_dir.mkdir(parents=True, exist_ok=True)
-                        for idx, (_, url) in enumerate(charagraph_urls, start=1):
+                        # 2. Servant faces (130x130)
+                        face_dir = self._resources.assets_dir / "servantface"
+                        for idx, (_, url) in enumerate(face_urls, start=1):
                             raw_bytes = self._client.fetch_bytes(url)
-                            _write_bytes_atomic(cg_dir / f"{sn}_{idx}.png", raw_bytes)
-                            assets_written["charagraphs"] += 1
+                            face_path = face_dir / f"{canonical}_{idx}.png"
+                            staged_files.append((face_path, _resize_rgba_png(raw_bytes, SERVANT_FACE_SIZE)))
+                            assets_written["servant_faces"] += 1
+
+                        # 3. Command cards (256x256 in commands_JP/{SN}/)
+                        cmd_dir = (self._resources.assets_dir / "commands_JP" / sn).resolve()
+                        for filename, url in cmd_urls.items():
+                            safe_cmd_name = f"{sanitize_filename_component(Path(filename).stem)}.png"
+                            cmd_path = (cmd_dir / safe_cmd_name).resolve()
+                            if not cmd_path.is_relative_to(cmd_dir):
+                                continue
+                            raw_bytes = self._client.fetch_bytes(url)
+                            staged_files.append((cmd_path, _resize_rgba_png(raw_bytes, COMMAND_CARD_SIZE)))
+                            assets_written["command_cards"] += 1
+
+                        # 4. Battle frontline status tiles (50x55)
+                        servant_class = parsed["class"]
+                        existing_class_entries = set(status_info.get(servant_class) or [])
+                        for idx, (_, url) in enumerate(status_urls, start=1):
+                            entry_name = f"{canonical}_{idx}.png"
+                            if entry_name in existing_class_entries:
+                                continue
+                            raw_bytes = self._client.fetch_bytes(url)
+                            tile_img = _status_tile_from_256(raw_bytes)
+                            staged_status_tiles.append((entry_name, tile_img))
+                            existing_class_entries.add(entry_name)
+                            assets_written["status_tiles"] += 1
+
+                        # 5. Optional CharaGraph (512x724)
+                        if include_charagraph and charagraph_urls:
+                            cg_dir = self._resources.assets_dir / "charagraph"
+                            for idx, (_, url) in enumerate(charagraph_urls, start=1):
+                                raw_bytes = self._client.fetch_bytes(url)
+                                with Image.open(BytesIO(raw_bytes)) as im:
+                                    im.load()
+                                    out = BytesIO()
+                                    im.convert("RGBA").save(out, format="PNG")
+                                staged_files.append((cg_dir / f"{sn}_{idx}.png", out.getvalue()))
+                                assets_written["charagraphs"] += 1
+                    except (AppError, OSError, UnidentifiedImageError) as exc:
+                        reason = exc.message if isinstance(exc, AppError) else str(exc)
+                        warnings.append(f"Skipped #{entry.collection_no} ({canonical}): asset sync failed ({reason}).")
+                        continue
+
+                    for dest_path, payload_bytes in staged_files:
+                        _write_bytes_atomic(dest_path, payload_bytes)
+                    if staged_status_tiles:
+                        status_tiles_to_append.setdefault(parsed["class"], []).extend(staged_status_tiles)
 
                     for srv in sorted(VALID_SERVERS):
-                        catalogs[srv][canonical] = dict(record)
+                        srv_existing = catalogs[srv].get(canonical) if isinstance(catalogs[srv].get(canonical), dict) else {}
+                        srv_record = dict(record)
+                        if srv_existing:
+                            srv_aliases = [
+                                str(a)
+                                for a in (srv_existing.get("other_name") or [])
+                                if isinstance(a, str) and a and a != canonical
+                            ]
+                            merged_aliases = list(dict.fromkeys([*srv_aliases, *record["other_name"]]))
+                            srv_record["other_name"] = merged_aliases
+                            for pref_key in ("graph", "command_card", "servant_face"):
+                                if pref_key in srv_existing:
+                                    srv_record[pref_key] = srv_existing[pref_key]
+                        catalogs[srv][canonical] = srv_record
                     servants_skill_map[sn] = parsed["skill_details"]
+
+                working_jp_catalog[canonical] = dict(record)
 
                 synced_summaries.append(
                     {
@@ -1294,41 +1424,34 @@ class WikiSyncService:
             )
         return detail, card_bytes
 
-    def _save_ce_drop_icon(
+    def _prepare_ce_drop_icon_png(
         self,
         ce_id: int,
-        target_name: str,
         fallback_card_bytes: bytes,
-        *,
-        overwrite: bool,
-    ) -> str:
-        drop_dir = self._resources.assets_dir / "drop"
-        drop_dir.mkdir(parents=True, exist_ok=True)
-        dest_path = drop_dir / f"{target_name}.png"
-        if dest_path.exists() and not overwrite:
-            raise AppError(
-                ErrorCode.DATA_FILE_CONFLICT,
-                f"Drop template already exists: drop/{target_name}.png",
-                {"name": target_name, "path": f"drop/{target_name}.png"},
-            )
+    ) -> bytes:
         candidates = [f"礼装{ce_id:03d}.jpg", f"礼装{ce_id}.jpg", f"礼装{ce_id:04d}.jpg"]
         urls = self._client.mw_image_urls(candidates)
         icon_url = next((urls[c] for c in candidates if c in urls), None)
-        if icon_url:
-            raw_icon = self._client.fetch_bytes(icon_url)
-            with Image.open(BytesIO(raw_icon)) as im:
-                im.load()
-                out = BytesIO()
-                im.convert("RGB").save(out, format="PNG")
-                _write_bytes_atomic(dest_path, out.getvalue())
-        else:
+        try:
+            if icon_url:
+                raw_icon = self._client.fetch_bytes(icon_url)
+                with Image.open(BytesIO(raw_icon)) as im:
+                    im.load()
+                    out = BytesIO()
+                    im.convert("RGB").save(out, format="PNG")
+                    return out.getvalue()
             with Image.open(BytesIO(fallback_card_bytes)) as im:
                 im.load()
                 rgb = im.convert("RGB").resize((132, 144), Image.Resampling.LANCZOS)
                 out = BytesIO()
                 rgb.save(out, format="PNG")
-                _write_bytes_atomic(dest_path, out.getvalue())
-        return f"drop/{target_name}.png"
+                return out.getvalue()
+        except (OSError, UnidentifiedImageError) as exc:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                f"Failed to decode craft essence drop icon for CE #{ce_id}.",
+                {"ce_id": ce_id},
+            ) from exc
 
     def _local_equip_status_map(self) -> dict[str, str]:
         status: dict[str, str] = {}
@@ -1467,7 +1590,7 @@ class WikiSyncService:
                 stderr=subprocess.DEVNULL,
                 timeout=30,
             )
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             return
 
 
@@ -1511,7 +1634,7 @@ def sanitize_filename_component(value: str) -> str:
 
 def sanitize_template_name(value: str) -> str:
     sanitized = sanitize_filename_component(value)
-    return sanitized[:100]
+    return sanitized[:100].rstrip(". ") or "unnamed"
 
 
 def _normalize_server_code(server: str) -> str:
@@ -1858,13 +1981,15 @@ def _extract_atlas_asset_urls(
         for k in sorted(asc_cmds.keys(), key=lambda x: (len(str(x)), str(x))):
             url = asc_cmds[k]
             if isinstance(url, str) and url:
-                commands[f"card_servant_{k}.png"] = url
+                safe_k = sanitize_filename_component(str(k))
+                commands[f"card_servant_{safe_k}.png"] = url
     costume_cmds = cmd_section.get("costume") or {}
     if isinstance(costume_cmds, dict):
         for k in sorted(costume_cmds.keys(), key=lambda x: (len(str(x)), str(x))):
             url = costume_cmds[k]
             if isinstance(url, str) and url:
-                commands[f"{k}.png"] = url
+                safe_k = sanitize_filename_component(str(k))
+                commands[f"{safe_k}.png"] = url
 
     return faces, commands, statuses, charagraphs
 

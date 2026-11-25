@@ -70,8 +70,15 @@ class EquipTemplateService:
         full_image: bytes | None,
         non_full_image: bytes | None,
         overwrite: bool = False,
+        location: str = "archive",
     ) -> dict[str, object]:
         normalized_name = _validate_name(name)
+        if location not in self._locations:
+            raise AppError(
+                ErrorCode.DATA_FILE_INVALID,
+                f"Invalid equip template location: {location}",
+                {"name": normalized_name, "location": location},
+            )
         if full_image is None and non_full_image is None:
             raise AppError(
                 ErrorCode.DATA_FILE_INVALID,
@@ -92,7 +99,7 @@ class EquipTemplateService:
         )
 
         with self._lock:
-            image_dir, check_dir = self._locations["archive"]
+            image_dir, check_dir = self._locations[location]
             image_dir.mkdir(parents=True, exist_ok=True)
             check_dir.mkdir(parents=True, exist_ok=True)
             image_path = image_dir / f"{normalized_name}.png"
@@ -104,7 +111,7 @@ class EquipTemplateService:
                 raise AppError(
                     ErrorCode.DATA_FILE_CONFLICT,
                     f"Equip template already exists: {normalized_name}",
-                    {"name": normalized_name, "location": "archive"},
+                    {"name": normalized_name, "location": location},
                 )
 
             _save_png_atomic(full or non_full, image_path)
@@ -115,7 +122,7 @@ class EquipTemplateService:
                 for path in check_paths:
                     path.unlink(missing_ok=True)
             self._resources.refresh_template_index()
-            return self._describe(normalized_name, "archive", check_dir)
+            return self._describe(normalized_name, location, check_dir)
 
     def activate(self, name: str, *, overwrite: bool = False) -> dict[str, object]:
         return self._move(name, source="archive", destination="active", overwrite=overwrite)

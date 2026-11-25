@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from webapp.core.errors import AppError
+from webapp.core.errors import AppError, ErrorCode
 from webapp.services.battle_servants import FrontlineServantRecognizer
 from webapp.services.equip_templates import EquipTemplateService
 from webapp.services.resources import ResourceService
@@ -201,22 +201,29 @@ def _run_sync_event_ces(svc: WikiSyncService, args: argparse.Namespace) -> int:
             ] or [int(ce["ce_id"]) for ce in ev_report["patch_craft_essences"][:6]]
 
     imported: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     for cid in target_ids:
         if args.dry_run:
             preview = svc.preview_craft_essence(cid, y_offset=args.y_offset)
             preview_summary = {k: v for k, v in preview.items() if k != "preview_base64"}
             imported.append(preview_summary)
         else:
-            res = svc.import_craft_essence(
-                cid,
-                y_offset=args.y_offset,
-                activate=args.activate,
-                save_drop=args.save_drop,
-                overwrite=args.overwrite,
-            )
-            imported.append(res)
+            try:
+                res = svc.import_craft_essence(
+                    cid,
+                    y_offset=args.y_offset,
+                    activate=args.activate,
+                    save_drop=args.save_drop,
+                    overwrite=args.overwrite,
+                )
+                imported.append(res)
+            except AppError as exc:
+                if exc.code == ErrorCode.DATA_FILE_CONFLICT and not args.overwrite:
+                    skipped.append({"ce_id": cid, "reason": exc.message})
+                    continue
+                raise
 
-    payload = {"dry_run": args.dry_run, "count": len(imported), "items": imported}
+    payload = {"dry_run": args.dry_run, "count": len(imported), "items": imported, "skipped": skipped}
     if args.as_json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

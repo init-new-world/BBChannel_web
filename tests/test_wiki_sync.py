@@ -444,3 +444,104 @@ def test_assist_recognizer_with_equip_main_mask_ignores_event_drop_and_mlb_corne
     assert cand["checks"]["equip_name"] == "川中岛"
     assert cand["confidence"] >= 0.98
     assert cand["bounds"] == [120, 260, round(237 * scale), round(68 * scale)]
+
+
+def test_assist_recognizer_handles_nonstandard_ce_size_and_lfs_pointer_mask(tmp_path: Path):
+    pytest.importorskip("cv2")
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "assist" / "assist_equip").mkdir(parents=True)
+    data.mkdir(parents=True)
+
+    # 1. Valid 237x68 mask + legacy 236x68 CE template (like real 未满破_Dec23_0.png) must NOT crash
+    mask = Image.new("L", TEMPLATE_SIZE, 0)
+    left, top, right, bottom = MAIN_MATCH_BOX
+    ImageDraw.Draw(mask).rectangle((left, top, right - 1, bottom - 1), fill=255)
+    mask.save(assets / "assist" / "equip_main_mask.png")
+
+    legacy_ce = _make_patterned_png((236, 68), seed=19)
+    (assets / "assist" / "assist_equip" / "legacy236.png").write_bytes(legacy_ce)
+
+    screen = Image.new("RGB", (1280, 720), (24, 30, 42))
+    buf = BytesIO()
+    screen.save(buf, format="PNG")
+
+    resources = ResourceService(assets, data)
+    recognizer = AssistRecognizer(resources, RecognitionService(resources))
+    res1 = recognizer.recognize(buf.getvalue(), {"mode": "仅礼装", "equip_names": ["legacy236"]}, threshold=0.95)
+    assert res1["candidate_count"] == 0
+
+    # 2. Un-pulled Git LFS text pointer as equip_main_mask.png must safely fall back without crashing
+    (assets / "assist" / "equip_main_mask.png").write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:0000\nsize 160\n",
+        encoding="utf-8",
+    )
+    recognizer2 = AssistRecognizer(resources, RecognitionService(resources))
+    res2 = recognizer2.recognize(buf.getvalue(), {"mode": "仅礼装", "equip_names": ["legacy236"]}, threshold=0.95)
+    assert res2["candidate_count"] == 0
+
+
+def test_wiki_client_rejects_disallowed_schemes_and_hosts():
+    from webapp.services.wiki_sync import _validate_upstream_url
+
+    assert _validate_upstream_url("https://fgo.wiki/api.php")
+    assert _validate_upstream_url("https://static.atlasacademy.io/JP/Faces/f_1001000.png")
+
+    with pytest.raises(AppError):
+        _validate_upstream_url("file:///etc/passwd")
+    with pytest.raises(AppError):
+        _validate_upstream_url("http://fgo.wiki/api.php")
+    with pytest.raises(AppError):
+        _validate_upstream_url("https://169.254.169.254/latest/meta-data/")
+
+
+def test_import_ce_preserves_archive_and_checks_drop_conflict_before_writing(tmp_path: Path):
+    assets = tmp_path / "assets"
+    data = tmp_path / "data"
+    (assets / "equipmaker" / "assist_equip_store").mkdir(parents=True)
+    (assets / "equipmaker" / "equip_check_store").mkdir(parents=True)
+    (assets / "drop").mkdir(parents=True)
+    data.mkdir(parents=True)
+
+    # Existing archive template + precise _0/_1 crops must remain untouched when activating new CE
+    orig_archive = _make_patterned_png(TEMPLATE_SIZE, seed=3)
+    (assets / "equipmaker" / "assist_equip_store" / "活动礼装A.png").write_bytes(orig_archive)
+    (assets / "equipmaker" / "equip_check_store" / "活动礼装A_0.png").write_bytes(_make_patterned_png((34, 34), seed=4))
+
+    ce_index_text = "id=2500\nname=活动礼装A\nname_link=活动礼装A\n"
+    ce_page_text = "{{概念礼装|礼装id=2500|名称=活动礼装A|图片名=礼装2500|出场角色坐标=256,220}}"
+    card_art = _make_patterned_png((512, 875), seed=55)
+
+    def fake_http(url: str, _headers: dict[str, str], _timeout: float):
+        if "fgo.wiki/api.php" in url and "imageinfo" in url:
+            return 200, {"content-type": "application/json"}, json.dumps({
+                "query": {"pages": {"1": {"title": "File:礼装2500.png", "imageinfo": [{"url": "https://fgo.wiki/images/ce2500.png"}]}}}
+            }).encode()
+        if "fgo.wiki/api.php" in url:
+            if "%E7%A4%BC%E8%A3%85%E5%9B%BE%E9%89%B4" in url:
+                pages = {"1": {"title": "礼装图鉴/数据", "revisions": [{"slots": {"main": {"*": ce_index_text}}}]}}
+            else:
+                pages = {"2": {"title": "活动礼装A", "revisions": [{"slots": {"main": {"*": ce_page_text}}}]}}
+            return 200, {"content-type": "application/json"}, json.dumps({"query": {"pages": pages}}).encode()
+        if url == "https://fgo.wiki/images/ce2500.png":
+            return 200, {"content-type": "image/png"}, card_art
+        return 404, {}, b""
+
+    resources = ResourceService(assets, data)
+    equip_templates = EquipTemplateService(resources, RecognitionService(resources))
+    svc = WikiSyncService(resources, equip_templates, client=WikiClient(http_get=fake_http, cache_dir=None))
+
+    # Pre-create conflicting drop file -> must fail BEFORE writing active assist_equip template!
+    (assets / "drop" / "活动礼装A.png").write_bytes(b"existing-drop")
+    with pytest.raises(AppError) as exc_info:
+        svc.import_craft_essence(2500, activate=True, save_drop=True, overwrite=False)
+    assert exc_info.value.code == ErrorCode.DATA_FILE_CONFLICT
+    assert not (assets / "assist" / "assist_equip" / "活动礼装A.png").exists()
+
+    # Now import with save_drop=False, activate=True -> archive & its _0 crop remain completely intact!
+    result = svc.import_craft_essence(2500, activate=True, save_drop=False, overwrite=False)
+    assert result["template"]["location"] == "active"
+    assert (assets / "assist" / "assist_equip" / "活动礼装A.png").is_file()
+    assert (assets / "equipmaker" / "assist_equip_store" / "活动礼装A.png").read_bytes() == orig_archive
+    assert (assets / "equipmaker" / "equip_check_store" / "活动礼装A_0.png").is_file()
+

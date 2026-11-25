@@ -542,6 +542,8 @@ select:disabled {
 
 .equip-template-preview-status {
   grid-area: 1 / 1;
+  position: relative;
+  z-index: 1;
   align-self: end;
   justify-self: end;
   padding: 2px 5px;
